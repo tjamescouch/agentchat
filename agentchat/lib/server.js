@@ -24,11 +24,15 @@ export class AgentChatServer {
     this.host = options.host || '0.0.0.0';
     this.serverName = options.name || 'agentchat';
     this.logMessages = options.logMessages || false;
-    
+
+    // Rate limiting: 1 message per second per agent
+    this.rateLimitMs = options.rateLimitMs || 1000;
+
     // State
     this.agents = new Map();      // ws -> agent info
     this.agentById = new Map();   // id -> ws
     this.channels = new Map();    // channel name -> channel info
+    this.lastMessageTime = new Map(); // ws -> timestamp of last message
     
     // Create default channels
     this._createChannel('#general', false);
@@ -265,7 +269,16 @@ export class AgentChatServer {
       this._send(ws, createError(ErrorCode.AUTH_REQUIRED, 'Must IDENTIFY first'));
       return;
     }
-    
+
+    // Rate limiting: 1 message per second per agent
+    const now = Date.now();
+    const lastTime = this.lastMessageTime.get(ws) || 0;
+    if (now - lastTime < this.rateLimitMs) {
+      this._send(ws, createError(ErrorCode.RATE_LIMITED, 'Rate limit exceeded (max 1 message per second)'));
+      return;
+    }
+    this.lastMessageTime.set(ws, now);
+
     const outMsg = createMessage(ServerMessageType.MSG, {
       from: `@${agent.id}`,
       to: msg.to,
@@ -407,9 +420,9 @@ export class AgentChatServer {
   _handleDisconnect(ws) {
     const agent = this.agents.get(ws);
     if (!agent) return;
-    
+
     this._log('disconnect', { agent: agent.id });
-    
+
     // Leave all channels
     for (const channelName of agent.channels) {
       const channel = this.channels.get(channelName);
@@ -421,10 +434,11 @@ export class AgentChatServer {
         }));
       }
     }
-    
+
     // Remove from state
     this.agentById.delete(agent.id);
     this.agents.delete(ws);
+    this.lastMessageTime.delete(ws);
   }
 }
 

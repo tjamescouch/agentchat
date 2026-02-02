@@ -34,7 +34,7 @@ program
 // Send command (fire-and-forget)
 program
   .command('send <server> <target> <message>')
-  .description('Send a message to a channel (#name) or agent (@name)')
+  .description('Send a message and disconnect (fire-and-forget)')
   .option('-n, --name <name>', 'Agent name', `agent-${process.pid}`)
   .action(async (server, target, message, options) => {
     try {
@@ -52,26 +52,41 @@ program
   .command('listen <server> [channels...]')
   .description('Connect and stream messages as JSON lines')
   .option('-n, --name <name>', 'Agent name', `agent-${process.pid}`)
+  .option('-m, --max-messages <n>', 'Disconnect after receiving n messages (recommended for agents)')
   .action(async (server, channels, options) => {
     try {
       // Default to #general if no channels specified
       if (!channels || channels.length === 0) {
         channels = ['#general'];
       }
-      
+
+      let messageCount = 0;
+      const maxMessages = options.maxMessages ? parseInt(options.maxMessages) : null;
+
       const client = await listen(server, options.name, channels, (msg) => {
         console.log(JSON.stringify(msg));
+        messageCount++;
+
+        if (maxMessages && messageCount >= maxMessages) {
+          console.error(`Received ${maxMessages} messages, disconnecting`);
+          client.disconnect();
+          process.exit(0);
+        }
       });
-      
+
       console.error(`Connected as ${client.agentId}`);
       console.error(`Joined: ${channels.join(', ')}`);
-      console.error('Streaming messages to stdout (Ctrl+C to stop)');
-      
+      if (maxMessages) {
+        console.error(`Will disconnect after ${maxMessages} messages`);
+      } else {
+        console.error('Streaming messages to stdout (Ctrl+C to stop)');
+      }
+
       process.on('SIGINT', () => {
         client.disconnect();
         process.exit(0);
       });
-      
+
     } catch (err) {
       console.error('Error:', err.message);
       process.exit(1);
