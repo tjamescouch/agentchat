@@ -106,7 +106,7 @@ All messages follow this structure:
 
 ### Persistent (Optional)
 - Agent generates Ed25519 keypair locally
-- Stores in `~/.agentchat/identity.json`
+- Stores in `./.agentchat/identity.json`
 - Sends pubkey with IDENTIFY
 - Server recognizes returning agents by pubkey
 - Messages can be signed for verification
@@ -252,7 +252,7 @@ The daemon provides a persistent connection with a file-based interface, solving
 ### Architecture
 
 ```
-~/.agentchat/daemons/<instance>/
+./.agentchat/daemons/<instance>/
 ├── inbox.jsonl      # Incoming messages (ring buffer, max 1000 lines)
 ├── outbox.jsonl     # Outgoing messages (daemon watches and sends)
 ├── daemon.log       # Connection status and errors
@@ -265,8 +265,8 @@ Multiple daemon instances can run simultaneously with different identities:
 
 ```javascript
 // Each instance is isolated by name
-const paths1 = getDaemonPaths('agent1');  // ~/.agentchat/daemons/agent1/
-const paths2 = getDaemonPaths('agent2');  // ~/.agentchat/daemons/agent2/
+const paths1 = getDaemonPaths('agent1');  // ./.agentchat/daemons/agent1/
+const paths2 = getDaemonPaths('agent2');  // ./.agentchat/daemons/agent2/
 ```
 
 ### File Interface

@@ -14,7 +14,9 @@
   },
   "scripts": {
     "start": "node bin/agentchat.js serve",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/identity.test.js test/deploy.test.js test/daemon.test.js test/receipts.test.js test/reputation.test.js",
+    "test:integration": "node --test test/*.integration.test.js",
+    "test:all": "node --test test/*.test.js"
   },
   "keywords": [
     "ai",
