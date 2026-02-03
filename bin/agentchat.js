@@ -43,6 +43,7 @@ program
   .option('--log-messages', 'Log all messages (for debugging)')
   .option('--cert <file>', 'TLS certificate file (PEM format)')
   .option('--key <file>', 'TLS private key file (PEM format)')
+  .option('--buffer-size <n>', 'Message buffer size per channel for replay on join', '20')
   .action((options) => {
     // Validate TLS options (both or neither)
     if ((options.cert && !options.key) || (!options.cert && options.key)) {
@@ -56,7 +57,8 @@ program
       name: options.name,
       logMessages: options.logMessages,
       cert: options.cert,
-      key: options.key
+      key: options.key,
+      messageBufferSize: parseInt(options.bufferSize)
     });
   });
 
