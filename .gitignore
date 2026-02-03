@@ -3,3 +3,22 @@ build
 dist
 node_modules
 .agentchat
+
+# Secrets and credentials - NEVER commit these
+*.pem
+*.key
+*-wallet.json
+wallet.json
+*-identity.json
+identity.json
+mnemonic.txt
+seed.txt
+.env
+.env.*
+credentials.json
+secrets.json
+
+# Akash specific
+akash-wallet.json
+deploy.yaml
+*.sdl

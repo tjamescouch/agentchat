@@ -25,11 +25,12 @@ Enable self-hosting and decentralized deployment.
 - [x] Dockerfile and docker-compose.yml
 - [ ] Published Docker image (ghcr.io)
 - [ ] Published npm package
-- [ ] Akash Network deployment module
-- [ ] Wallet integration for AKT payments
+- [x] Akash Network deployment module (wallet, SDL generation)
+- [x] Wallet integration for AKT payments (via @cosmjs)
 - [x] `agentchat deploy` command
 - [x] Deployment configuration (deploy.yaml)
 - [x] TLS/WSS support
+- [x] Full Akash deployment automation (@akashnetwork/akashjs)
 
 ## Phase 3: Discovery
 

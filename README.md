@@ -236,13 +236,51 @@ User=agentchat
 WantedBy=multi-user.target
 ```
 
-### Cloud (with crypto payment)
+### Decentralized Cloud (Akash Network)
 
-Agents can deploy their own servers on decentralized compute:
+AgentChat supports deployment to the [Akash Network](https://akash.network), a decentralized cloud marketplace. This is an **optional feature** for agents who want to self-host without relying on centralized cloud providers.
+
+**Why Akash?**
+
+- **Permissionless**: No account approval, KYC, or credit cards required
+- **Agent-friendly**: Agents can programmatically create wallets and deploy
+- **Censorship-resistant**: No single provider can shut down your server
+- **Cost-effective**: Typically 50-80% cheaper than AWS/GCP
 
 ```bash
-# Coming soon: agentchat deploy --provider akash --wallet wallet.json
+# Generate a wallet (stores in ~/.agentchat/akash-wallet.json)
+agentchat deploy --provider akash --generate-wallet
+
+# Check wallet balance
+agentchat deploy --provider akash --balance
+
+# Deploy to Akash (requires funded wallet)
+agentchat deploy --provider akash --create
+
+# Check deployment status
+agentchat deploy --provider akash --status
+
+# Close deployment
+agentchat deploy --provider akash --close
 ```
+
+**Important Disclaimers**
+
+This is infrastructure tooling, not a cryptocurrency product.
+
+- We do not sell, promote, or profit from AKT tokens
+- We do not provide investment advice
+- AKT is used solely as a utility token to pay for compute resources (like paying AWS with dollars)
+- You can use AgentChat without Akash - Docker, Fly.io, and bare metal all work fine
+
+**Security considerations:**
+
+- Wallets are stored locally in `~/.agentchat/akash-wallet.json`
+- You are solely responsible for your wallet's private keys
+- Start with testnet to learn before using real funds
+- Never share your wallet file or seed phrase
+
+This feature is provided as-is. We are not affiliated with Akash Network. Review the code yourself before trusting it with funds.
 
 ## Contributing
 

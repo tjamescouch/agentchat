@@ -11,7 +11,21 @@ import path from 'path';
 import { AgentChatClient, quickSend, listen } from '../lib/client.js';
 import { startServer } from '../lib/server.js';
 import { Identity, DEFAULT_IDENTITY_PATH } from '../lib/identity.js';
-import { deployToDocker, generateDockerfile } from '../lib/deploy/index.js';
+import {
+  deployToDocker,
+  generateDockerfile,
+  generateWallet,
+  checkBalance,
+  generateAkashSDL,
+  createDeployment,
+  listDeployments,
+  closeDeployment,
+  queryBids,
+  acceptBid,
+  getDeploymentStatus,
+  AkashWallet,
+  AKASH_WALLET_PATH
+} from '../lib/deploy/index.js';
 import { loadConfig, DEFAULT_CONFIG, generateExampleConfig } from '../lib/deploy/config.js';
 
 program
@@ -385,7 +399,7 @@ program
 program
   .command('deploy')
   .description('Generate deployment files for agentchat server')
-  .option('--provider <provider>', 'Deployment target (docker)', 'docker')
+  .option('--provider <provider>', 'Deployment target (docker, akash)', 'docker')
   .option('--config <file>', 'Deploy configuration file (deploy.yaml)')
   .option('--output <dir>', 'Output directory for generated files', '.')
   .option('-p, --port <port>', 'Server port')
@@ -397,8 +411,225 @@ program
   .option('--network <name>', 'Docker network name')
   .option('--dockerfile', 'Also generate Dockerfile')
   .option('--init-config', 'Generate example deploy.yaml config file')
+  // Akash-specific options
+  .option('--generate-wallet', 'Generate a new Akash wallet')
+  .option('--wallet <file>', 'Path to wallet file', AKASH_WALLET_PATH)
+  .option('--balance', 'Check wallet balance')
+  .option('--testnet', 'Use Akash testnet (default)')
+  .option('--mainnet', 'Use Akash mainnet (real funds!)')
+  .option('--create', 'Create deployment on Akash')
+  .option('--status', 'Show deployment status')
+  .option('--close <dseq>', 'Close a deployment by dseq')
+  .option('--generate-sdl', 'Generate SDL file without deploying')
+  .option('--force', 'Overwrite existing wallet')
+  .option('--bids <dseq>', 'Query bids for a deployment')
+  .option('--accept-bid <dseq>', 'Accept a bid (use with --provider-address)')
+  .option('--provider-address <address>', 'Provider address for --accept-bid')
+  .option('--dseq-status <dseq>', 'Get detailed status for a specific deployment')
   .action(async (options) => {
     try {
+      const isAkash = options.provider === 'akash';
+      const akashNetwork = options.mainnet ? 'mainnet' : 'testnet';
+
+      // Akash: Generate wallet
+      if (isAkash && options.generateWallet) {
+        try {
+          const wallet = await generateWallet(akashNetwork, options.wallet);
+          console.log('Generated new Akash wallet:');
+          console.log(`  Network:  ${wallet.network}`);
+          console.log(`  Address:  ${wallet.address}`);
+          console.log(`  Saved to: ${options.wallet}`);
+          console.log('');
+          console.log('IMPORTANT: Back up your wallet file!');
+          console.log('The mnemonic inside is the only way to recover your funds.');
+          console.log('');
+          if (akashNetwork === 'testnet') {
+            console.log('To get testnet tokens, visit: https://faucet.sandbox-01.aksh.pw/');
+          } else {
+            console.log('To fund your wallet, send AKT to the address above.');
+          }
+          process.exit(0);
+        } catch (err) {
+          if (err.message.includes('already exists') && !options.force) {
+            console.error(err.message);
+            process.exit(1);
+          }
+          throw err;
+        }
+      }
+
+      // Akash: Check balance
+      if (isAkash && options.balance) {
+        const result = await checkBalance(options.wallet);
+        console.log('Wallet Balance:');
+        console.log(`  Network: ${result.wallet.network}`);
+        console.log(`  Address: ${result.wallet.address}`);
+        console.log(`  Balance: ${result.balance.akt} AKT (${result.balance.uakt} uakt)`);
+        console.log(`  Status:  ${result.balance.sufficient ? 'Sufficient for deployment' : 'Insufficient - need at least 5 AKT'}`);
+        process.exit(0);
+      }
+
+      // Akash: Generate SDL only
+      if (isAkash && options.generateSdl) {
+        const sdl = generateAkashSDL({
+          name: options.name,
+          port: options.port ? parseInt(options.port) : undefined
+        });
+        const outputDir = path.resolve(options.output);
+        await fs.mkdir(outputDir, { recursive: true });
+        const sdlPath = path.join(outputDir, 'deploy.yaml');
+        await fs.writeFile(sdlPath, sdl);
+        console.log(`Generated: ${sdlPath}`);
+        console.log('\nThis SDL can be used with the Akash CLI or Console.');
+        process.exit(0);
+      }
+
+      // Akash: Create deployment
+      if (isAkash && options.create) {
+        console.log('Creating Akash deployment...');
+        try {
+          const result = await createDeployment({
+            walletPath: options.wallet,
+            name: options.name,
+            port: options.port ? parseInt(options.port) : undefined
+          });
+          console.log('Deployment created:');
+          console.log(`  DSEQ: ${result.dseq}`);
+          console.log(`  Status: ${result.status}`);
+          if (result.endpoint) {
+            console.log(`  Endpoint: ${result.endpoint}`);
+          }
+        } catch (err) {
+          console.error('Deployment failed:', err.message);
+          process.exit(1);
+        }
+        process.exit(0);
+      }
+
+      // Akash: Show status
+      if (isAkash && options.status) {
+        const deployments = await listDeployments(options.wallet);
+        if (deployments.length === 0) {
+          console.log('No active deployments.');
+        } else {
+          console.log('Active deployments:');
+          for (const d of deployments) {
+            console.log(`  DSEQ ${d.dseq}: ${d.status} - ${d.endpoint || 'pending'}`);
+          }
+        }
+        process.exit(0);
+      }
+
+      // Akash: Close deployment
+      if (isAkash && options.close) {
+        console.log(`Closing deployment ${options.close}...`);
+        await closeDeployment(options.close, options.wallet);
+        console.log('Deployment closed.');
+        process.exit(0);
+      }
+
+      // Akash: Query bids
+      if (isAkash && options.bids) {
+        console.log(`Querying bids for deployment ${options.bids}...`);
+        const bids = await queryBids(options.bids, options.wallet);
+        if (bids.length === 0) {
+          console.log('No bids received yet.');
+        } else {
+          console.log('Available bids:');
+          for (const b of bids) {
+            const bid = b.bid || {};
+            const price = bid.price?.amount || 'unknown';
+            const state = bid.state || 'unknown';
+            const provider = bid.bidId?.provider || 'unknown';
+            console.log(`  Provider: ${provider}`);
+            console.log(`    Price: ${price} uakt/block`);
+            console.log(`    State: ${state}`);
+            console.log('');
+          }
+        }
+        process.exit(0);
+      }
+
+      // Akash: Accept bid
+      if (isAkash && options.acceptBid) {
+        if (!options.providerAddress) {
+          console.error('Error: --provider-address is required with --accept-bid');
+          process.exit(1);
+        }
+        console.log(`Accepting bid from ${options.providerAddress}...`);
+        const lease = await acceptBid(options.acceptBid, options.providerAddress, options.wallet);
+        console.log('Lease created:');
+        console.log(`  DSEQ: ${lease.dseq}`);
+        console.log(`  Provider: ${lease.provider}`);
+        console.log(`  TX: ${lease.txHash}`);
+        process.exit(0);
+      }
+
+      // Akash: Get detailed deployment status
+      if (isAkash && options.dseqStatus) {
+        console.log(`Getting status for deployment ${options.dseqStatus}...`);
+        const status = await getDeploymentStatus(options.dseqStatus, options.wallet);
+        console.log('Deployment status:');
+        console.log(`  DSEQ: ${status.dseq}`);
+        console.log(`  Status: ${status.status}`);
+        console.log(`  Created: ${status.createdAt}`);
+        if (status.provider) {
+          console.log(`  Provider: ${status.provider}`);
+        }
+        if (status.bids) {
+          console.log(`  Bids: ${status.bids.length}`);
+          for (const bid of status.bids) {
+            console.log(`    - ${bid.provider}: ${bid.price} uakt (${bid.state})`);
+          }
+        }
+        if (status.leaseStatus) {
+          console.log('  Lease Status:', JSON.stringify(status.leaseStatus, null, 2));
+        }
+        if (status.leaseStatusError) {
+          console.log(`  Lease Status Error: ${status.leaseStatusError}`);
+        }
+        process.exit(0);
+      }
+
+      // Akash: Default action - show help
+      if (isAkash) {
+        console.log('Akash Deployment Options:');
+        console.log('');
+        console.log('  Setup:');
+        console.log('    --generate-wallet  Generate a new wallet');
+        console.log('    --balance          Check wallet balance');
+        console.log('');
+        console.log('  Deployment:');
+        console.log('    --generate-sdl     Generate SDL file');
+        console.log('    --create           Create deployment (auto-accepts best bid)');
+        console.log('    --status           Show all deployments');
+        console.log('    --dseq-status <n>  Get detailed status for deployment');
+        console.log('    --close <dseq>     Close a deployment');
+        console.log('');
+        console.log('  Manual bid selection:');
+        console.log('    --bids <dseq>      Query bids for a deployment');
+        console.log('    --accept-bid <dseq> --provider-address <addr>');
+        console.log('                       Accept a specific bid');
+        console.log('');
+        console.log('  Options:');
+        console.log('    --testnet          Use testnet (default)');
+        console.log('    --mainnet          Use mainnet (real AKT)');
+        console.log('    --wallet <file>    Custom wallet path');
+        console.log('');
+        console.log('Example workflow:');
+        console.log('  1. agentchat deploy --provider akash --generate-wallet');
+        console.log('  2. Fund wallet with AKT tokens');
+        console.log('  3. agentchat deploy --provider akash --balance');
+        console.log('  4. agentchat deploy --provider akash --create');
+        console.log('');
+        console.log('Manual workflow (select your own provider):');
+        console.log('  1. agentchat deploy --provider akash --generate-sdl');
+        console.log('  2. agentchat deploy --provider akash --create');
+        console.log('  3. agentchat deploy --provider akash --bids <dseq>');
+        console.log('  4. agentchat deploy --provider akash --accept-bid <dseq> --provider-address <addr>');
+        process.exit(0);
+      }
+
       // Generate example config
       if (options.initConfig) {
         const configPath = path.resolve(options.output, 'deploy.yaml');
@@ -436,7 +667,7 @@ program
       const outputDir = path.resolve(options.output);
       await fs.mkdir(outputDir, { recursive: true });
 
-      // Generate based on provider
+      // Generate based on provider (Docker)
       if (options.provider === 'docker' || config.provider === 'docker') {
         // Generate docker-compose.yml
         const compose = await deployToDocker(config);
@@ -456,9 +687,6 @@ program
         console.log(`  cd ${outputDir}`);
         console.log('  docker-compose up -d');
 
-      } else if (options.provider === 'akash' || config.provider === 'akash') {
-        console.error('Akash deployment not yet implemented. Coming soon.');
-        process.exit(1);
       } else {
         console.error(`Unknown provider: ${options.provider}`);
         process.exit(1);
