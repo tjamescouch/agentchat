@@ -1,0 +1,72 @@
+# System files
+.DS_Store
+build
+dist
+node_modules
+.agentchat
+
+# Secrets and credentials - NEVER publish these
+*.pem
+*.key
+*-wallet.json
+wallet.json
+*-identity.json
+identity.json
+mnemonic.txt
+seed.txt
+.env
+.env.*
+credentials.json
+secrets.json
+**/secrets/**
+**/credentials/**
+**/*secret*
+**/*credential*
+**/*wallet*
+**/*mnemonic*
+**/*seed*
+**/*private*key*
+
+# Akash specific
+akash-wallet.json
+akash-cert.json
+akash-deployments.json
+deploy.yaml
+*.sdl
+
+# Test files
+test/
+*.test.js
+
+# Development files
+.git/
+.gitignore
+.npmignore
+
+# Deployment configs (users generate their own)
+fly.toml
+docker-compose.yml
+Dockerfile.generated
+
+# Documentation source (README is included)
+ROADMAP.md
+SPEC.md
+
+# Editor files
+*.swp
+*.swo
+.vscode/
+.idea/
+*.sublime-*
+
+# Temp and log files
+*.log
+*.tmp
+tmp/
+temp/
+*.bak
+
+# Coverage and debugging
+coverage/
+.nyc_output/
+*.lcov
