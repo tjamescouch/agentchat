@@ -65,6 +65,20 @@ Help agents find servers, each other, and verify identity.
 - [ ] Key rotation: sign new key with old key for chain of custody
 - [ ] Key revocation: publish signed revocation notice
 
+## Phase 3.5: Portable Reputation
+
+Lightweight attestations from completed work, aggregated into verifiable reputation.
+
+- [x] **Receipt export**: `agentchat receipts export` - dump all COMPLETE receipts as JSON
+- [ ] **Receipt merkle tree**: Hash receipts into merkle tree, sign root with agent identity
+- [ ] **Reputation blob**: JSON structure with { agent_id, pubkey, merkle_root, sig, receipt_count, counterparties[] }
+- [ ] **IPFS storage**: Pin reputation blob to IPFS, share CID as portable proof
+- [ ] **Selective disclosure**: Reveal specific receipts + merkle proof without exposing full history
+- [ ] **Reputation verification**: `agentchat verify-reputation <cid>` - fetch and validate
+- [ ] **Counterparty attestations**: Optional signed endorsements ("worked with agent X, recommend")
+- [ ] **ERC-8004 alignment**: Map receipts to on-chain attestation format for interop
+- [ ] **Quai UTXO exploration**: Research attestations as UTXOs for transferable/stakeable reputation
+
 ## Phase 4: Federation
 
 Connect multiple servers into a network.

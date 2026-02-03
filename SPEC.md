@@ -20,6 +20,7 @@ agentchat/
 │   ├── protocol.js            # Message format and validation
 │   ├── identity.js            # Key generation and verification
 │   ├── daemon.js              # Persistent connection daemon with file-based inbox/outbox
+│   ├── receipts.js            # COMPLETE receipt storage for portable reputation
 │   └── deploy/
 │       ├── index.js           # Deployment orchestrator
 │       ├── akash.js           # Akash Network deployment
@@ -28,7 +29,8 @@ agentchat/
 ├── Dockerfile
 └── test/
     ├── integration.test.js    # Multi-agent test scenarios
-    └── daemon.test.js         # Daemon unit tests
+    ├── daemon.test.js         # Daemon unit tests
+    └── receipts.test.js       # Receipts module tests
 ```
 
 ## Protocol Specification

@@ -38,6 +38,10 @@ import {
   AKASH_WALLET_PATH
 } from '../lib/deploy/index.js';
 import { loadConfig, DEFAULT_CONFIG, generateExampleConfig } from '../lib/deploy/config.js';
+import {
+  ReceiptStore,
+  DEFAULT_RECEIPTS_PATH
+} from '../lib/receipts.js';
 
 program
   .name('agentchat')
@@ -683,6 +687,114 @@ program
       // Keep process alive
       process.stdin.resume();
 
+    } catch (err) {
+      console.error('Error:', err.message);
+      process.exit(1);
+    }
+  });
+
+// Receipts command
+program
+  .command('receipts [action]')
+  .description('Manage completion receipts for portable reputation')
+  .option('-f, --format <format>', 'Export format (json, yaml)', 'json')
+  .option('-i, --identity <file>', 'Path to identity file', DEFAULT_IDENTITY_PATH)
+  .option('--file <path>', 'Receipts file path', DEFAULT_RECEIPTS_PATH)
+  .action(async (action, options) => {
+    try {
+      const store = new ReceiptStore(options.file);
+      const receipts = await store.getAll();
+
+      // Load identity to get agent ID for filtering
+      let agentId = null;
+      try {
+        const identity = await Identity.load(options.identity);
+        agentId = identity.getAgentId();
+      } catch {
+        // Identity not available, show all receipts
+      }
+
+      switch (action) {
+        case 'list':
+          if (receipts.length === 0) {
+            console.log('No receipts found.');
+            console.log(`\nReceipts are stored in: ${options.file}`);
+            console.log('Receipts are automatically saved when COMPLETE messages are received via daemon.');
+          } else {
+            console.log(`Found ${receipts.length} receipt(s):\n`);
+            for (const r of receipts) {
+              console.log(`  Proposal: ${r.proposal_id || 'unknown'}`);
+              console.log(`    Completed: ${r.completed_at ? new Date(r.completed_at).toISOString() : 'unknown'}`);
+              console.log(`    By: ${r.completed_by || 'unknown'}`);
+              if (r.proof) console.log(`    Proof: ${r.proof}`);
+              if (r.proposal?.task) console.log(`    Task: ${r.proposal.task}`);
+              if (r.proposal?.amount) console.log(`    Amount: ${r.proposal.amount} ${r.proposal.currency || ''}`);
+              console.log('');
+            }
+          }
+          break;
+
+        case 'export':
+          const output = await store.export(options.format, agentId);
+          console.log(output);
+          break;
+
+        case 'summary':
+          const stats = await store.getStats(agentId);
+          console.log('Receipt Summary:');
+          console.log(`  Total receipts: ${stats.count}`);
+
+          if (stats.count > 0) {
+            if (stats.dateRange) {
+              console.log(`  Date range: ${stats.dateRange.oldest} to ${stats.dateRange.newest}`);
+            }
+
+            if (stats.counterparties.length > 0) {
+              console.log(`  Counterparties (${stats.counterparties.length}):`);
+              for (const cp of stats.counterparties) {
+                console.log(`    - ${cp}`);
+              }
+            }
+
+            const currencies = Object.entries(stats.currencies);
+            if (currencies.length > 0) {
+              console.log('  By currency:');
+              for (const [currency, data] of currencies) {
+                if (currency !== 'unknown') {
+                  console.log(`    ${currency}: ${data.count} receipts, ${data.totalAmount} total`);
+                } else {
+                  console.log(`    (no currency): ${data.count} receipts`);
+                }
+              }
+            }
+          }
+
+          console.log(`\nReceipts file: ${options.file}`);
+          if (agentId) {
+            console.log(`Filtered for agent: @${agentId}`);
+          }
+          break;
+
+        default:
+          // Default: show help
+          console.log('Receipt Management Commands:');
+          console.log('');
+          console.log('  agentchat receipts list      List all stored receipts');
+          console.log('  agentchat receipts export    Export receipts (--format json|yaml)');
+          console.log('  agentchat receipts summary   Show receipt statistics');
+          console.log('');
+          console.log('Options:');
+          console.log('  --format <format>   Export format: json (default) or yaml');
+          console.log('  --identity <file>   Identity file for filtering by agent');
+          console.log('  --file <path>       Custom receipts file path');
+          console.log('');
+          console.log(`Receipts are stored in: ${DEFAULT_RECEIPTS_PATH}`);
+          console.log('');
+          console.log('Receipts are automatically saved by the daemon when');
+          console.log('COMPLETE messages are received for proposals you are party to.');
+      }
+
+      process.exit(0);
     } catch (err) {
       console.error('Error:', err.message);
       process.exit(1);
