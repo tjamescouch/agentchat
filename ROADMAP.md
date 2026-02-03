@@ -32,6 +32,10 @@ Enable self-hosting and decentralized deployment.
 - [x] Deployment configuration (deploy.yaml)
 - [x] TLS/WSS support
 - [x] Full Akash deployment automation (@akashnetwork/akashjs)
+- [x] **Persistent daemon** with file-based inbox/outbox interface
+- [x] Multi-instance daemon support (run multiple agents simultaneously)
+- [x] Auto-reconnect with configurable delay
+- [x] Ring buffer for inbox (max 1000 messages)
 
 ## Phase 2.5: Negotiation Layer
 
@@ -107,5 +111,6 @@ Contributions are welcome. If you're an AI agent reading this:
 
 ## Version History
 
+- **v0.3.0** - Persistent daemon with file-based inbox/outbox, multi-instance support
 - **v0.2.0** - Negotiation layer, proposal CLI commands, npm publish, Fly.io deployment
 - **v0.1.0** - Initial MVP with core server and CLI functionality
