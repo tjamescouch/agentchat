@@ -12,6 +12,16 @@ import { AgentChatClient, quickSend, listen } from '../lib/client.js';
 import { startServer } from '../lib/server.js';
 import { Identity, DEFAULT_IDENTITY_PATH } from '../lib/identity.js';
 import {
+  AgentChatDaemon,
+  isDaemonRunning,
+  stopDaemon,
+  getDaemonStatus,
+  INBOX_PATH,
+  OUTBOX_PATH,
+  LOG_PATH,
+  DEFAULT_CHANNELS
+} from '../lib/daemon.js';
+import {
   deployToDocker,
   generateDockerfile,
   generateWallet,
@@ -531,6 +541,111 @@ program
       }
 
       process.exit(0);
+    } catch (err) {
+      console.error('Error:', err.message);
+      process.exit(1);
+    }
+  });
+
+// Daemon command
+program
+  .command('daemon [server]')
+  .description('Run persistent listener daemon with file-based inbox/outbox')
+  .option('-i, --identity <file>', 'Path to identity file', DEFAULT_IDENTITY_PATH)
+  .option('-c, --channels <channels...>', 'Channels to join', DEFAULT_CHANNELS)
+  .option('-b, --background', 'Run in background (daemonize)')
+  .option('-s, --status', 'Show daemon status')
+  .option('--stop', 'Stop the daemon')
+  .action(async (server, options) => {
+    try {
+      // Status check
+      if (options.status) {
+        const status = await getDaemonStatus();
+        if (!status.running) {
+          console.log('Daemon is not running');
+        } else {
+          console.log('Daemon is running:');
+          console.log(`  PID: ${status.pid}`);
+          console.log(`  Inbox: ${status.inboxPath} (${status.inboxLines} messages)`);
+          console.log(`  Outbox: ${status.outboxPath}`);
+          console.log(`  Log: ${status.logPath}`);
+          if (status.lastMessage) {
+            console.log(`  Last message: ${JSON.stringify(status.lastMessage).substring(0, 80)}...`);
+          }
+        }
+        process.exit(0);
+      }
+
+      // Stop daemon
+      if (options.stop) {
+        const result = await stopDaemon();
+        if (result.stopped) {
+          console.log(`Daemon stopped (PID: ${result.pid})`);
+        } else {
+          console.log(result.reason);
+        }
+        process.exit(0);
+      }
+
+      // Start daemon requires server
+      if (!server) {
+        console.error('Error: server URL required to start daemon');
+        console.error('Usage: agentchat daemon wss://agentchat-server.fly.dev');
+        process.exit(1);
+      }
+
+      // Check if already running
+      const status = await isDaemonRunning();
+      if (status.running) {
+        console.error(`Daemon already running (PID: ${status.pid})`);
+        console.error('Use --stop to stop it first');
+        process.exit(1);
+      }
+
+      // Background mode
+      if (options.background) {
+        const { spawn } = await import('child_process');
+
+        // Re-run ourselves without --background
+        const args = process.argv.slice(2).filter(a => a !== '-b' && a !== '--background');
+
+        const child = spawn(process.execPath, [process.argv[1], ...args], {
+          detached: true,
+          stdio: 'ignore'
+        });
+
+        child.unref();
+        console.log(`Daemon started in background (PID: ${child.pid})`);
+        console.log(`  Inbox: ${INBOX_PATH}`);
+        console.log(`  Outbox: ${OUTBOX_PATH}`);
+        console.log(`  Log: ${LOG_PATH}`);
+        console.log('');
+        console.log('To send messages, append to outbox:');
+        console.log(`  echo '{"to":"#general","content":"Hello!"}' >> ${OUTBOX_PATH}`);
+        console.log('');
+        console.log('To read messages:');
+        console.log(`  tail -f ${INBOX_PATH}`);
+        process.exit(0);
+      }
+
+      // Foreground mode
+      console.log('Starting daemon in foreground (Ctrl+C to stop)...');
+      console.log(`  Server: ${server}`);
+      console.log(`  Identity: ${options.identity}`);
+      console.log(`  Channels: ${options.channels.join(', ')}`);
+      console.log('');
+
+      const daemon = new AgentChatDaemon({
+        server,
+        identity: options.identity,
+        channels: options.channels
+      });
+
+      await daemon.start();
+
+      // Keep process alive
+      process.stdin.resume();
+
     } catch (err) {
       console.error('Error:', err.message);
       process.exit(1);
