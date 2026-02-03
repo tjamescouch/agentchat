@@ -325,6 +325,146 @@ program
     }
   });
 
+// Propose command
+program
+  .command('propose <server> <agent> <task>')
+  .description('Send a work proposal to another agent')
+  .option('-i, --identity <file>', 'Path to identity file (required)', DEFAULT_IDENTITY_PATH)
+  .option('-a, --amount <n>', 'Payment amount')
+  .option('-c, --currency <code>', 'Currency (SOL, USDC, AKT, etc)')
+  .option('-p, --payment-code <code>', 'Your payment code (BIP47, address)')
+  .option('-e, --expires <seconds>', 'Expiration time in seconds', '300')
+  .option('-t, --terms <terms>', 'Additional terms')
+  .action(async (server, agent, task, options) => {
+    try {
+      const client = new AgentChatClient({ server, identity: options.identity });
+      await client.connect();
+
+      const proposal = await client.propose(agent, {
+        task,
+        amount: options.amount ? parseFloat(options.amount) : undefined,
+        currency: options.currency,
+        payment_code: options.paymentCode,
+        terms: options.terms,
+        expires: parseInt(options.expires)
+      });
+
+      console.log('Proposal sent:');
+      console.log(`  ID: ${proposal.id}`);
+      console.log(`  To: ${proposal.to}`);
+      console.log(`  Task: ${proposal.task}`);
+      if (proposal.amount) console.log(`  Amount: ${proposal.amount} ${proposal.currency || ''}`);
+      if (proposal.expires) console.log(`  Expires: ${new Date(proposal.expires).toISOString()}`);
+      console.log(`\nUse this ID to track responses.`);
+
+      client.disconnect();
+      process.exit(0);
+    } catch (err) {
+      console.error('Error:', err.message);
+      process.exit(1);
+    }
+  });
+
+// Accept proposal command
+program
+  .command('accept <server> <proposal_id>')
+  .description('Accept a proposal')
+  .option('-i, --identity <file>', 'Path to identity file (required)', DEFAULT_IDENTITY_PATH)
+  .option('-p, --payment-code <code>', 'Your payment code for receiving payment')
+  .action(async (server, proposalId, options) => {
+    try {
+      const client = new AgentChatClient({ server, identity: options.identity });
+      await client.connect();
+
+      const response = await client.accept(proposalId, options.paymentCode);
+
+      console.log('Proposal accepted:');
+      console.log(`  Proposal ID: ${response.proposal_id}`);
+      console.log(`  Status: ${response.status}`);
+
+      client.disconnect();
+      process.exit(0);
+    } catch (err) {
+      console.error('Error:', err.message);
+      process.exit(1);
+    }
+  });
+
+// Reject proposal command
+program
+  .command('reject <server> <proposal_id>')
+  .description('Reject a proposal')
+  .option('-i, --identity <file>', 'Path to identity file (required)', DEFAULT_IDENTITY_PATH)
+  .option('-r, --reason <reason>', 'Reason for rejection')
+  .action(async (server, proposalId, options) => {
+    try {
+      const client = new AgentChatClient({ server, identity: options.identity });
+      await client.connect();
+
+      const response = await client.reject(proposalId, options.reason);
+
+      console.log('Proposal rejected:');
+      console.log(`  Proposal ID: ${response.proposal_id}`);
+      console.log(`  Status: ${response.status}`);
+
+      client.disconnect();
+      process.exit(0);
+    } catch (err) {
+      console.error('Error:', err.message);
+      process.exit(1);
+    }
+  });
+
+// Complete proposal command
+program
+  .command('complete <server> <proposal_id>')
+  .description('Mark a proposal as complete')
+  .option('-i, --identity <file>', 'Path to identity file (required)', DEFAULT_IDENTITY_PATH)
+  .option('-p, --proof <proof>', 'Proof of completion (tx hash, URL, etc)')
+  .action(async (server, proposalId, options) => {
+    try {
+      const client = new AgentChatClient({ server, identity: options.identity });
+      await client.connect();
+
+      const response = await client.complete(proposalId, options.proof);
+
+      console.log('Proposal completed:');
+      console.log(`  Proposal ID: ${response.proposal_id}`);
+      console.log(`  Status: ${response.status}`);
+
+      client.disconnect();
+      process.exit(0);
+    } catch (err) {
+      console.error('Error:', err.message);
+      process.exit(1);
+    }
+  });
+
+// Dispute proposal command
+program
+  .command('dispute <server> <proposal_id> <reason>')
+  .description('Dispute a proposal')
+  .option('-i, --identity <file>', 'Path to identity file (required)', DEFAULT_IDENTITY_PATH)
+  .action(async (server, proposalId, reason, options) => {
+    try {
+      const client = new AgentChatClient({ server, identity: options.identity });
+      await client.connect();
+
+      const response = await client.dispute(proposalId, reason);
+
+      console.log('Proposal disputed:');
+      console.log(`  Proposal ID: ${response.proposal_id}`);
+      console.log(`  Status: ${response.status}`);
+      console.log(`  Reason: ${reason}`);
+
+      client.disconnect();
+      process.exit(0);
+    } catch (err) {
+      console.error('Error:', err.message);
+      process.exit(1);
+    }
+  });
+
 // Identity management command
 program
   .command('identity')

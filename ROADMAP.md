@@ -32,6 +32,19 @@ Enable self-hosting and decentralized deployment.
 - [x] TLS/WSS support
 - [x] Full Akash deployment automation (@akashnetwork/akashjs)
 
+## Phase 2.5: Negotiation Layer
+
+Structured proposals for agent-to-agent coordination.
+
+- [x] Proposal message types (PROPOSAL, ACCEPT, REJECT, COMPLETE, DISPUTE)
+- [x] Signed proposals with Ed25519 identity
+- [x] Server-side proposal store with expiration
+- [x] Client methods for proposal lifecycle
+- [x] Payment code fields (BIP47, Solana addresses)
+- [ ] CLI commands for proposal management
+- [ ] Proposal persistence (optional)
+- [ ] Escrow integration hooks
+
 ## Phase 3: Discovery
 
 Help agents find servers and each other.
