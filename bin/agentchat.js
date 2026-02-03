@@ -8,6 +8,7 @@
 import { program } from 'commander';
 import { AgentChatClient, quickSend, listen } from '../lib/client.js';
 import { startServer } from '../lib/server.js';
+import { Identity, DEFAULT_IDENTITY_PATH } from '../lib/identity.js';
 
 program
   .name('agentchat')
@@ -36,9 +37,10 @@ program
   .command('send <server> <target> <message>')
   .description('Send a message and disconnect (fire-and-forget)')
   .option('-n, --name <name>', 'Agent name', `agent-${process.pid}`)
+  .option('-i, --identity <file>', 'Path to identity file')
   .action(async (server, target, message, options) => {
     try {
-      await quickSend(server, options.name, target, message);
+      await quickSend(server, options.name, target, message, options.identity);
       console.log('Message sent');
       process.exit(0);
     } catch (err) {
@@ -52,6 +54,7 @@ program
   .command('listen <server> [channels...]')
   .description('Connect and stream messages as JSON lines')
   .option('-n, --name <name>', 'Agent name', `agent-${process.pid}`)
+  .option('-i, --identity <file>', 'Path to identity file')
   .option('-m, --max-messages <n>', 'Disconnect after receiving n messages (recommended for agents)')
   .action(async (server, channels, options) => {
     try {
@@ -72,7 +75,7 @@ program
           client.disconnect();
           process.exit(0);
         }
-      });
+      }, options.identity);
 
       console.error(`Connected as ${client.agentId}`);
       console.error(`Joined: ${channels.join(', ')}`);
@@ -98,9 +101,10 @@ program
   .command('channels <server>')
   .description('List available channels on a server')
   .option('-n, --name <name>', 'Agent name', `agent-${process.pid}`)
+  .option('-i, --identity <file>', 'Path to identity file')
   .action(async (server, options) => {
     try {
-      const client = new AgentChatClient({ server, name: options.name });
+      const client = new AgentChatClient({ server, name: options.name, identity: options.identity });
       await client.connect();
       
       const channels = await client.listChannels();
@@ -123,9 +127,10 @@ program
   .command('agents <server> <channel>')
   .description('List agents in a channel')
   .option('-n, --name <name>', 'Agent name', `agent-${process.pid}`)
+  .option('-i, --identity <file>', 'Path to identity file')
   .action(async (server, channel, options) => {
     try {
-      const client = new AgentChatClient({ server, name: options.name });
+      const client = new AgentChatClient({ server, name: options.name, identity: options.identity });
       await client.connect();
       
       const agents = await client.listAgents(channel);
@@ -148,10 +153,11 @@ program
   .command('connect <server>')
   .description('Interactive connection (for debugging)')
   .option('-n, --name <name>', 'Agent name', `agent-${process.pid}`)
+  .option('-i, --identity <file>', 'Path to identity file')
   .option('-j, --join <channels...>', 'Channels to join automatically')
   .action(async (server, options) => {
     try {
-      const client = new AgentChatClient({ server, name: options.name });
+      const client = new AgentChatClient({ server, name: options.name, identity: options.identity });
       await client.connect();
       
       console.log(`Connected as ${client.agentId}`);
@@ -250,10 +256,11 @@ program
   .command('create <server> <channel>')
   .description('Create a new channel')
   .option('-n, --name <name>', 'Agent name', `agent-${process.pid}`)
+  .option('-i, --identity <file>', 'Path to identity file')
   .option('-p, --private', 'Make channel invite-only')
   .action(async (server, channel, options) => {
     try {
-      const client = new AgentChatClient({ server, name: options.name });
+      const client = new AgentChatClient({ server, name: options.name, identity: options.identity });
       await client.connect();
       
       await client.createChannel(channel, options.private);
@@ -272,9 +279,10 @@ program
   .command('invite <server> <channel> <agent>')
   .description('Invite an agent to a private channel')
   .option('-n, --name <name>', 'Agent name', `agent-${process.pid}`)
+  .option('-i, --identity <file>', 'Path to identity file')
   .action(async (server, channel, agent, options) => {
     try {
-      const client = new AgentChatClient({ server, name: options.name });
+      const client = new AgentChatClient({ server, name: options.name, identity: options.identity });
       await client.connect();
       await client.join(channel);
       
@@ -282,6 +290,76 @@ program
       console.log(`Invited ${agent} to ${channel}`);
       
       client.disconnect();
+      process.exit(0);
+    } catch (err) {
+      console.error('Error:', err.message);
+      process.exit(1);
+    }
+  });
+
+// Identity management command
+program
+  .command('identity')
+  .description('Manage agent identity (Ed25519 keypair)')
+  .option('-g, --generate', 'Generate new keypair')
+  .option('-s, --show', 'Show current identity')
+  .option('-e, --export', 'Export public key for sharing (JSON to stdout)')
+  .option('-f, --file <path>', 'Identity file path', DEFAULT_IDENTITY_PATH)
+  .option('-n, --name <name>', 'Agent name (for --generate)', `agent-${process.pid}`)
+  .option('--force', 'Overwrite existing identity')
+  .action(async (options) => {
+    try {
+      if (options.generate) {
+        // Check if identity already exists
+        const exists = await Identity.exists(options.file);
+        if (exists && !options.force) {
+          console.error(`Identity already exists at ${options.file}`);
+          console.error('Use --force to overwrite');
+          process.exit(1);
+        }
+
+        // Generate new identity
+        const identity = Identity.generate(options.name);
+        await identity.save(options.file);
+
+        console.log('Generated new identity:');
+        console.log(`  Name: ${identity.name}`);
+        console.log(`  Fingerprint: ${identity.getFingerprint()}`);
+        console.log(`  Agent ID: ${identity.getAgentId()}`);
+        console.log(`  Saved to: ${options.file}`);
+
+      } else if (options.show) {
+        // Load and display identity
+        const identity = await Identity.load(options.file);
+
+        console.log('Current identity:');
+        console.log(`  Name: ${identity.name}`);
+        console.log(`  Fingerprint: ${identity.getFingerprint()}`);
+        console.log(`  Agent ID: ${identity.getAgentId()}`);
+        console.log(`  Created: ${identity.created}`);
+        console.log(`  File: ${options.file}`);
+
+      } else if (options.export) {
+        // Export public key info
+        const identity = await Identity.load(options.file);
+        console.log(JSON.stringify(identity.export(), null, 2));
+
+      } else {
+        // Default: show if exists, otherwise show help
+        const exists = await Identity.exists(options.file);
+        if (exists) {
+          const identity = await Identity.load(options.file);
+          console.log('Current identity:');
+          console.log(`  Name: ${identity.name}`);
+          console.log(`  Fingerprint: ${identity.getFingerprint()}`);
+          console.log(`  Agent ID: ${identity.getAgentId()}`);
+          console.log(`  Created: ${identity.created}`);
+        } else {
+          console.log('No identity found.');
+          console.log(`Use --generate to create one at ${options.file}`);
+        }
+      }
+
       process.exit(0);
     } catch (err) {
       console.error('Error:', err.message);

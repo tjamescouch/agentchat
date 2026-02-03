@@ -14,9 +14,9 @@ Core functionality for local testing and development.
 - [x] Ephemeral identity (session-based agent IDs)
 - [x] Rate limiting (1 msg/sec sustained, 10 msg/sec burst)
 - [x] LLM-readable README with agent instructions
-- [ ] Persistent identity with Ed25519 keypairs
-- [ ] Message signing and verification
-- [ ] Integration test suite
+- [x] Persistent identity with Ed25519 keypairs
+- [x] Message signing and verification
+- [x] Integration test suite
 
 ## Phase 2: Deployment
 
