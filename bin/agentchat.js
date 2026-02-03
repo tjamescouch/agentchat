@@ -40,8 +40,14 @@ import {
 import { loadConfig, DEFAULT_CONFIG, generateExampleConfig } from '../lib/deploy/config.js';
 import {
   ReceiptStore,
-  DEFAULT_RECEIPTS_PATH
+  DEFAULT_RECEIPTS_PATH,
+  readReceipts
 } from '../lib/receipts.js';
+import {
+  ReputationStore,
+  DEFAULT_RATINGS_PATH,
+  DEFAULT_RATING
+} from '../lib/reputation.js';
 
 program
   .name('agentchat')
@@ -792,6 +798,141 @@ program
           console.log('');
           console.log('Receipts are automatically saved by the daemon when');
           console.log('COMPLETE messages are received for proposals you are party to.');
+      }
+
+      process.exit(0);
+    } catch (err) {
+      console.error('Error:', err.message);
+      process.exit(1);
+    }
+  });
+
+// Ratings command
+program
+  .command('ratings [agent]')
+  .description('View and manage ELO-based reputation ratings')
+  .option('-i, --identity <file>', 'Path to identity file', DEFAULT_IDENTITY_PATH)
+  .option('--file <path>', 'Ratings file path', DEFAULT_RATINGS_PATH)
+  .option('-e, --export', 'Export all ratings as JSON')
+  .option('-r, --recalculate', 'Recalculate ratings from receipt history')
+  .option('-l, --leaderboard [n]', 'Show top N agents by rating')
+  .option('-s, --stats', 'Show rating system statistics')
+  .action(async (agent, options) => {
+    try {
+      const store = new ReputationStore(options.file);
+
+      // Export all ratings
+      if (options.export) {
+        const ratings = await store.exportRatings();
+        console.log(JSON.stringify(ratings, null, 2));
+        process.exit(0);
+      }
+
+      // Recalculate from receipts
+      if (options.recalculate) {
+        console.log('Recalculating ratings from receipt history...');
+        const receipts = await readReceipts();
+        const ratings = await store.recalculateFromReceipts(receipts);
+        const count = Object.keys(ratings).length;
+        console.log(`Processed ${receipts.length} receipts, updated ${count} agents.`);
+
+        const stats = await store.getStats();
+        console.log(`\nRating Statistics:`);
+        console.log(`  Total agents: ${stats.totalAgents}`);
+        console.log(`  Average rating: ${stats.averageRating}`);
+        console.log(`  Highest: ${stats.highestRating}`);
+        console.log(`  Lowest: ${stats.lowestRating}`);
+        process.exit(0);
+      }
+
+      // Show leaderboard
+      if (options.leaderboard) {
+        const limit = typeof options.leaderboard === 'string'
+          ? parseInt(options.leaderboard)
+          : 10;
+        const leaderboard = await store.getLeaderboard(limit);
+
+        if (leaderboard.length === 0) {
+          console.log('No ratings recorded yet.');
+        } else {
+          console.log(`Top ${leaderboard.length} agents by rating:\n`);
+          leaderboard.forEach((entry, i) => {
+            console.log(`  ${i + 1}. ${entry.agentId}`);
+            console.log(`     Rating: ${entry.rating} | Transactions: ${entry.transactions}`);
+          });
+        }
+        process.exit(0);
+      }
+
+      // Show stats
+      if (options.stats) {
+        const stats = await store.getStats();
+        console.log('Rating System Statistics:');
+        console.log(`  Total agents: ${stats.totalAgents}`);
+        console.log(`  Total transactions: ${stats.totalTransactions}`);
+        console.log(`  Average rating: ${stats.averageRating}`);
+        console.log(`  Highest rating: ${stats.highestRating}`);
+        console.log(`  Lowest rating: ${stats.lowestRating}`);
+        console.log(`  Default rating: ${DEFAULT_RATING}`);
+        console.log(`\nRatings file: ${options.file}`);
+        process.exit(0);
+      }
+
+      // Show specific agent's rating
+      if (agent) {
+        const rating = await store.getRating(agent);
+        console.log(`Rating for ${rating.agentId}:`);
+        console.log(`  Rating: ${rating.rating}${rating.isNew ? ' (new agent)' : ''}`);
+        console.log(`  Transactions: ${rating.transactions}`);
+        if (rating.updated) {
+          console.log(`  Last updated: ${rating.updated}`);
+        }
+
+        // Show K-factor
+        const kFactor = await store.getAgentKFactor(agent);
+        console.log(`  K-factor: ${kFactor}`);
+        process.exit(0);
+      }
+
+      // Default: show own rating (from identity)
+      let agentId = null;
+      try {
+        const identity = await Identity.load(options.identity);
+        agentId = `@${identity.getAgentId()}`;
+      } catch {
+        // No identity available
+      }
+
+      if (agentId) {
+        const rating = await store.getRating(agentId);
+        console.log(`Your rating (${agentId}):`);
+        console.log(`  Rating: ${rating.rating}${rating.isNew ? ' (new agent)' : ''}`);
+        console.log(`  Transactions: ${rating.transactions}`);
+        if (rating.updated) {
+          console.log(`  Last updated: ${rating.updated}`);
+        }
+        const kFactor = await store.getAgentKFactor(agentId);
+        console.log(`  K-factor: ${kFactor}`);
+      } else {
+        // Show help
+        console.log('ELO-based Reputation Rating System');
+        console.log('');
+        console.log('Usage:');
+        console.log('  agentchat ratings              Show your rating (requires identity)');
+        console.log('  agentchat ratings <agent-id>   Show specific agent rating');
+        console.log('  agentchat ratings --leaderboard [n]  Show top N agents');
+        console.log('  agentchat ratings --stats      Show system statistics');
+        console.log('  agentchat ratings --export     Export all ratings as JSON');
+        console.log('  agentchat ratings --recalculate  Rebuild ratings from receipts');
+        console.log('');
+        console.log('How it works:');
+        console.log(`  - New agents start at ${DEFAULT_RATING}`);
+        console.log('  - On COMPLETE: both parties gain rating');
+        console.log('  - On DISPUTE: at-fault party loses rating');
+        console.log('  - Completing with higher-rated agents = more gain');
+        console.log('  - K-factor: 32 (new) → 24 (intermediate) → 16 (established)');
+        console.log('');
+        console.log(`Ratings file: ${options.file}`);
       }
 
       process.exit(0);

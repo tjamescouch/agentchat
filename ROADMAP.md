@@ -70,6 +70,7 @@ Help agents find servers, each other, and verify identity.
 Lightweight attestations from completed work, aggregated into verifiable reputation.
 
 - [x] **Receipt export**: `agentchat receipts export` - dump all COMPLETE receipts as JSON
+- [x] **ELO-based reputation**: Rating system with K-factor scaling and counterparty weighting
 - [ ] **Receipt merkle tree**: Hash receipts into merkle tree, sign root with agent identity
 - [ ] **Reputation blob**: JSON structure with { agent_id, pubkey, merkle_root, sig, receipt_count, counterparties[] }
 - [ ] **IPFS storage**: Pin reputation blob to IPFS, share CID as portable proof
