@@ -6,9 +6,13 @@
  */
 
 import { program } from 'commander';
+import fs from 'fs/promises';
+import path from 'path';
 import { AgentChatClient, quickSend, listen } from '../lib/client.js';
 import { startServer } from '../lib/server.js';
 import { Identity, DEFAULT_IDENTITY_PATH } from '../lib/identity.js';
+import { deployToDocker, generateDockerfile } from '../lib/deploy/index.js';
+import { loadConfig, DEFAULT_CONFIG, generateExampleConfig } from '../lib/deploy/config.js';
 
 program
   .name('agentchat')
@@ -23,12 +27,22 @@ program
   .option('-H, --host <host>', 'Host to bind to', '0.0.0.0')
   .option('-n, --name <name>', 'Server name', 'agentchat')
   .option('--log-messages', 'Log all messages (for debugging)')
+  .option('--cert <file>', 'TLS certificate file (PEM format)')
+  .option('--key <file>', 'TLS private key file (PEM format)')
   .action((options) => {
+    // Validate TLS options (both or neither)
+    if ((options.cert && !options.key) || (!options.cert && options.key)) {
+      console.error('Error: Both --cert and --key must be provided for TLS');
+      process.exit(1);
+    }
+
     startServer({
       port: parseInt(options.port),
       host: options.host,
       name: options.name,
-      logMessages: options.logMessages
+      logMessages: options.logMessages,
+      cert: options.cert,
+      key: options.key
     });
   });
 
@@ -358,6 +372,96 @@ program
           console.log('No identity found.');
           console.log(`Use --generate to create one at ${options.file}`);
         }
+      }
+
+      process.exit(0);
+    } catch (err) {
+      console.error('Error:', err.message);
+      process.exit(1);
+    }
+  });
+
+// Deploy command
+program
+  .command('deploy')
+  .description('Generate deployment files for agentchat server')
+  .option('--provider <provider>', 'Deployment target (docker)', 'docker')
+  .option('--config <file>', 'Deploy configuration file (deploy.yaml)')
+  .option('--output <dir>', 'Output directory for generated files', '.')
+  .option('-p, --port <port>', 'Server port')
+  .option('-n, --name <name>', 'Server/container name')
+  .option('--volumes', 'Enable volume mounts for data persistence')
+  .option('--no-health-check', 'Disable health check configuration')
+  .option('--cert <file>', 'TLS certificate file path')
+  .option('--key <file>', 'TLS private key file path')
+  .option('--network <name>', 'Docker network name')
+  .option('--dockerfile', 'Also generate Dockerfile')
+  .option('--init-config', 'Generate example deploy.yaml config file')
+  .action(async (options) => {
+    try {
+      // Generate example config
+      if (options.initConfig) {
+        const configPath = path.resolve(options.output, 'deploy.yaml');
+        await fs.mkdir(path.dirname(configPath), { recursive: true });
+        await fs.writeFile(configPath, generateExampleConfig());
+        console.log(`Generated: ${configPath}`);
+        process.exit(0);
+      }
+
+      let config = { ...DEFAULT_CONFIG };
+
+      // Load config file if provided
+      if (options.config) {
+        const fileConfig = await loadConfig(options.config);
+        config = { ...config, ...fileConfig };
+      }
+
+      // Override with CLI options
+      if (options.port) config.port = parseInt(options.port);
+      if (options.name) config.name = options.name;
+      if (options.volumes) config.volumes = true;
+      if (options.healthCheck === false) config.healthCheck = false;
+      if (options.network) config.network = options.network;
+      if (options.cert && options.key) {
+        config.tls = { cert: options.cert, key: options.key };
+      }
+
+      // Validate TLS
+      if ((options.cert && !options.key) || (!options.cert && options.key)) {
+        console.error('Error: Both --cert and --key must be provided for TLS');
+        process.exit(1);
+      }
+
+      // Ensure output directory exists
+      const outputDir = path.resolve(options.output);
+      await fs.mkdir(outputDir, { recursive: true });
+
+      // Generate based on provider
+      if (options.provider === 'docker' || config.provider === 'docker') {
+        // Generate docker-compose.yml
+        const compose = await deployToDocker(config);
+        const composePath = path.join(outputDir, 'docker-compose.yml');
+        await fs.writeFile(composePath, compose);
+        console.log(`Generated: ${composePath}`);
+
+        // Optionally generate Dockerfile
+        if (options.dockerfile) {
+          const dockerfile = await generateDockerfile(config);
+          const dockerfilePath = path.join(outputDir, 'Dockerfile.generated');
+          await fs.writeFile(dockerfilePath, dockerfile);
+          console.log(`Generated: ${dockerfilePath}`);
+        }
+
+        console.log('\nTo deploy:');
+        console.log(`  cd ${outputDir}`);
+        console.log('  docker-compose up -d');
+
+      } else if (options.provider === 'akash' || config.provider === 'akash') {
+        console.error('Akash deployment not yet implemented. Coming soon.');
+        process.exit(1);
+      } else {
+        console.error(`Unknown provider: ${options.provider}`);
+        process.exit(1);
       }
 
       process.exit(0);

@@ -22,14 +22,14 @@ Core functionality for local testing and development.
 
 Enable self-hosting and decentralized deployment.
 
-- [ ] Dockerfile and docker-compose.yml
+- [x] Dockerfile and docker-compose.yml
 - [ ] Published Docker image (ghcr.io)
 - [ ] Published npm package
 - [ ] Akash Network deployment module
 - [ ] Wallet integration for AKT payments
-- [ ] `agentchat deploy` command
-- [ ] Deployment configuration (deploy.yaml)
-- [ ] TLS/WSS support
+- [x] `agentchat deploy` command
+- [x] Deployment configuration (deploy.yaml)
+- [x] TLS/WSS support
 
 ## Phase 3: Discovery
 
