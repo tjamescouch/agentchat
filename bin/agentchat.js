@@ -16,10 +16,11 @@ import {
   isDaemonRunning,
   stopDaemon,
   getDaemonStatus,
-  INBOX_PATH,
-  OUTBOX_PATH,
-  LOG_PATH,
-  DEFAULT_CHANNELS
+  listDaemons,
+  stopAllDaemons,
+  getDaemonPaths,
+  DEFAULT_CHANNELS,
+  DEFAULT_INSTANCE
 } from '../lib/daemon.js';
 import {
   deployToDocker,
@@ -551,20 +552,54 @@ program
 program
   .command('daemon [server]')
   .description('Run persistent listener daemon with file-based inbox/outbox')
+  .option('-n, --name <name>', 'Daemon instance name (allows multiple daemons)', DEFAULT_INSTANCE)
   .option('-i, --identity <file>', 'Path to identity file', DEFAULT_IDENTITY_PATH)
   .option('-c, --channels <channels...>', 'Channels to join', DEFAULT_CHANNELS)
   .option('-b, --background', 'Run in background (daemonize)')
   .option('-s, --status', 'Show daemon status')
+  .option('-l, --list', 'List all daemon instances')
   .option('--stop', 'Stop the daemon')
+  .option('--stop-all', 'Stop all running daemons')
   .action(async (server, options) => {
     try {
+      const instanceName = options.name;
+      const paths = getDaemonPaths(instanceName);
+
+      // List all daemons
+      if (options.list) {
+        const instances = await listDaemons();
+        if (instances.length === 0) {
+          console.log('No daemon instances found');
+        } else {
+          console.log('Daemon instances:');
+          for (const inst of instances) {
+            const status = inst.running ? `running (PID: ${inst.pid})` : 'stopped';
+            console.log(`  ${inst.name}: ${status}`);
+          }
+        }
+        process.exit(0);
+      }
+
+      // Stop all daemons
+      if (options.stopAll) {
+        const results = await stopAllDaemons();
+        if (results.length === 0) {
+          console.log('No running daemons to stop');
+        } else {
+          for (const r of results) {
+            console.log(`Stopped ${r.instance} (PID: ${r.pid})`);
+          }
+        }
+        process.exit(0);
+      }
+
       // Status check
       if (options.status) {
-        const status = await getDaemonStatus();
+        const status = await getDaemonStatus(instanceName);
         if (!status.running) {
-          console.log('Daemon is not running');
+          console.log(`Daemon '${instanceName}' is not running`);
         } else {
-          console.log('Daemon is running:');
+          console.log(`Daemon '${instanceName}' is running:`);
           console.log(`  PID: ${status.pid}`);
           console.log(`  Inbox: ${status.inboxPath} (${status.inboxLines} messages)`);
           console.log(`  Outbox: ${status.outboxPath}`);
@@ -578,9 +613,9 @@ program
 
       // Stop daemon
       if (options.stop) {
-        const result = await stopDaemon();
+        const result = await stopDaemon(instanceName);
         if (result.stopped) {
-          console.log(`Daemon stopped (PID: ${result.pid})`);
+          console.log(`Daemon '${instanceName}' stopped (PID: ${result.pid})`);
         } else {
           console.log(result.reason);
         }
@@ -590,15 +625,15 @@ program
       // Start daemon requires server
       if (!server) {
         console.error('Error: server URL required to start daemon');
-        console.error('Usage: agentchat daemon wss://agentchat-server.fly.dev');
+        console.error('Usage: agentchat daemon wss://agentchat-server.fly.dev --name myagent');
         process.exit(1);
       }
 
       // Check if already running
-      const status = await isDaemonRunning();
+      const status = await isDaemonRunning(instanceName);
       if (status.running) {
-        console.error(`Daemon already running (PID: ${status.pid})`);
-        console.error('Use --stop to stop it first');
+        console.error(`Daemon '${instanceName}' already running (PID: ${status.pid})`);
+        console.error('Use --stop to stop it first, or use a different --name');
         process.exit(1);
       }
 
@@ -615,21 +650,22 @@ program
         });
 
         child.unref();
-        console.log(`Daemon started in background (PID: ${child.pid})`);
-        console.log(`  Inbox: ${INBOX_PATH}`);
-        console.log(`  Outbox: ${OUTBOX_PATH}`);
-        console.log(`  Log: ${LOG_PATH}`);
+        console.log(`Daemon '${instanceName}' started in background (PID: ${child.pid})`);
+        console.log(`  Inbox: ${paths.inbox}`);
+        console.log(`  Outbox: ${paths.outbox}`);
+        console.log(`  Log: ${paths.log}`);
         console.log('');
         console.log('To send messages, append to outbox:');
-        console.log(`  echo '{"to":"#general","content":"Hello!"}' >> ${OUTBOX_PATH}`);
+        console.log(`  echo '{"to":"#general","content":"Hello!"}' >> ${paths.outbox}`);
         console.log('');
         console.log('To read messages:');
-        console.log(`  tail -f ${INBOX_PATH}`);
+        console.log(`  tail -f ${paths.inbox}`);
         process.exit(0);
       }
 
       // Foreground mode
       console.log('Starting daemon in foreground (Ctrl+C to stop)...');
+      console.log(`  Instance: ${instanceName}`);
       console.log(`  Server: ${server}`);
       console.log(`  Identity: ${options.identity}`);
       console.log(`  Channels: ${options.channels.join(', ')}`);
@@ -637,6 +673,7 @@ program
 
       const daemon = new AgentChatDaemon({
         server,
+        name: instanceName,
         identity: options.identity,
         channels: options.channels
       });
