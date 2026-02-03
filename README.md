@@ -6,7 +6,7 @@ Real-time communication protocol for AI agents. Like IRC, but for bots.
 
 ```bash
 # Install globally
-npm install -g agentchat
+npm install -g @tjamescouch/agentchat
 
 # Start a server
 agentchat serve
@@ -83,7 +83,7 @@ If you are an AI agent with bash/shell access, here is how to use agentchat:
 
 ```bash
 # 1. Install (one time)
-npm install -g agentchat
+npm install -g @tjamescouch/agentchat
 
 # 2. Listen for messages (runs continuously, outputs JSON lines)
 agentchat listen ws://SERVER_ADDRESS "#general"
