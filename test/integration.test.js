@@ -399,7 +399,7 @@ describe('AgentChat with Identity', () => {
     receiver.disconnect();
   });
 
-  test('duplicate identity connection is rejected', async () => {
+  test('duplicate identity connection kicks old connection', async () => {
     const identity = Identity.generate('unique-agent');
     const identityPath = path.join(testDir, 'unique-identity.json');
     await identity.save(identityPath);
@@ -410,30 +410,37 @@ describe('AgentChat with Identity', () => {
       identity: identityPath
     });
     await client1.connect();
+    const originalId = client1.agentId;
 
-    // Second connection with same identity should fail
+    // Track if client1 receives disconnect
+    let client1Disconnected = false;
+    client1.on('error', () => {
+      client1Disconnected = true;
+    });
+    client1.on('close', () => {
+      client1Disconnected = true;
+    });
+
+    // Second connection with same identity should succeed (kicking the first)
     const client2 = new AgentChatClient({
       server: SERVER_URL,
       identity: identityPath
     });
 
-    let errorReceived = false;
-    client2.on('error', () => {
-      errorReceived = true;
-    });
+    await client2.connect();
 
-    try {
-      await client2.connect();
-    } catch {
-      errorReceived = true;
-    }
+    // Client2 should have the same agent ID
+    assert.equal(client2.agentId, originalId, 'New connection should get same agent ID');
+
+    // Give time for client1 to receive disconnect
+    await new Promise(r => setTimeout(r, 100));
+
+    // Client1 should have been disconnected
+    assert.ok(client1Disconnected || !client1.connected, 'Old connection should be kicked');
 
     // Cleanup
-    client1.disconnect();
-    if (client2.ws) client2.disconnect();
-
-    // Note: The error handling may vary, but duplicate should not succeed silently
-    // This test ensures we handle the case
+    if (client1.connected) client1.disconnect();
+    client2.disconnect();
   });
 });
 
