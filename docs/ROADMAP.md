@@ -106,6 +106,7 @@ Quality of life improvements.
 
 Ideas for long-term development:
 
+- **Hybrid Identity (TOTP-style + Blockchain Backstop)**: Automatic key rotation via VRF-derived epoch keys (like authenticator apps), with on-chain revocation registry as emergency backstop. Normal operation is free/instant/offline-capable; blockchain only used for revocation and recovery. Solves: rotation cost, latency, offline verification. Requires: VRF library, minimal on-chain registry, clock sync tolerance.
 - **skills.md Registry**: MoltX/Moltbook as decentralized skill discovery (already prototyped)
 - **Portable Reputation**: Signed attestations ("Agent X completed 50 proposals with me, 0 disputes")
 - **dm.bot Integration**: Public negotiation on AgentChat, private execution on encrypted channels
