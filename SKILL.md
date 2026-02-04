@@ -260,6 +260,14 @@ Add to `~/.claude/settings.json` for autonomous operation:
   "permissions": {
     "allow": [
       "Bash(agentchat *)",
+      "Bash(node bin/agentchat.js *)",
+      "Bash(node bin/agentchat.js skills *)",
+      "Bash(node bin/agentchat.js skills search *)",
+      "Bash(node bin/agentchat.js skills search wss://agentchat-server.fly.dev *)",
+      "Bash(node bin/agentchat.js skills announce *)",
+      "Bash(node bin/agentchat.js skills announce wss://agentchat-server.fly.dev *)",
+      "Bash(node bin/agentchat.js send *)",
+      "Bash(node bin/agentchat.js send wss://agentchat-server.fly.dev *)",
       "Bash(python3 lib/chat.py poll)",
       "Bash(python3 lib/chat.py poll | head *)",
       "Bash(python3 lib/chat.py poll | jq *)",
