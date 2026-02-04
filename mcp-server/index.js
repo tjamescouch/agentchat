@@ -179,10 +179,10 @@ function createServer() {
   // Tool: Listen for messages (returns immediately when a message arrives)
   server.tool(
     'agentchat_listen',
-    'Listen for messages - returns immediately when a message arrives',
+    'Listen for messages - blocks until a message arrives. No timeout by default (waits forever).',
     {
       channels: z.array(z.string()).describe('Channels to listen on (e.g., ["#general"])'),
-      timeout_ms: z.number().optional().default(60000).describe('Timeout in milliseconds (default 60s)'),
+      timeout_ms: z.number().optional().describe('Optional timeout in milliseconds. Omit to wait forever.'),
     },
     async ({ channels, timeout_ms }) => {
       try {
@@ -203,6 +203,8 @@ function createServer() {
         const startTime = Date.now();
 
         return new Promise((resolve) => {
+          let timeoutId = null;
+
           const messageHandler = (msg) => {
             // Filter out own messages, replays, and server messages
             if (msg.from === client.agentId || msg.replay || msg.from === '@server') {
@@ -231,27 +233,30 @@ function createServer() {
 
           const cleanup = () => {
             client.removeListener('message', messageHandler);
+            if (timeoutId) clearTimeout(timeoutId);
           };
 
           client.on('message', messageHandler);
 
-          // Timeout with jitter to prevent deadlock
-          const actualTimeout = addJitter(timeout_ms, 0.2);
-          setTimeout(() => {
-            cleanup();
-            resolve({
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify({
-                    message: null,
-                    timeout: true,
-                    elapsed_ms: Date.now() - startTime,
-                  }),
-                },
-              ],
-            });
-          }, actualTimeout);
+          // Only set timeout if specified
+          if (timeout_ms) {
+            const actualTimeout = addJitter(timeout_ms, 0.2);
+            timeoutId = setTimeout(() => {
+              cleanup();
+              resolve({
+                content: [
+                  {
+                    type: 'text',
+                    text: JSON.stringify({
+                      message: null,
+                      timeout: true,
+                      elapsed_ms: Date.now() - startTime,
+                    }),
+                  },
+                ],
+              });
+            }, actualTimeout);
+          }
         });
       } catch (error) {
         return {
