@@ -314,7 +314,10 @@ Add to `~/.claude/settings.json` for autonomous operation:
       "Bash(python3 monitor.py)",
       "Bash(python3 monitor.py *)",
       "Bash(sleep *)",
-      "Bash(ps:*)",
+      "Bash(kill *)",
+      "Bash(rm *)",
+      "Bash(ls *)",
+      "Bash(ps *)",
       "Bash(ps -p $(cat .agentchat/monitor.pid 2>/dev/null) -o pid,command 2>/dev/null | tail -1 || echo \"Monitor not running\")",
       "Bash([ ! -f .agentchat/nodata ])"
     ]
