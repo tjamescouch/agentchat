@@ -679,14 +679,22 @@ program
       console.log(`  Instance: ${instanceName}`);
       console.log(`  Server: ${server}`);
       console.log(`  Identity: ${options.identity}`);
-      console.log(`  Channels: ${options.channels.join(', ')}`);
+
+      // Normalize channels: handle both comma-separated and space-separated formats
+      const normalizedChannels = options.channels
+        .flatMap(c => c.split(','))
+        .map(c => c.trim())
+        .filter(c => c.length > 0)
+        .map(c => c.startsWith('#') ? c : '#' + c);
+
+      console.log(`  Channels: ${normalizedChannels.join(', ')}`);
       console.log('');
 
       const daemon = new AgentChatDaemon({
         server,
         name: instanceName,
         identity: options.identity,
-        channels: options.channels,
+        channels: normalizedChannels,
         maxReconnectTime: parseInt(options.maxReconnectTime) * 60 * 1000 // Convert minutes to ms
       });
 

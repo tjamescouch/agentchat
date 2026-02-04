@@ -205,6 +205,45 @@ describe('Daemon', () => {
   });
 });
 
+describe('Channel normalization', () => {
+  // This logic is in bin/agentchat.js - testing the expected behavior
+  const normalizeChannels = (channels) => channels
+    .flatMap(c => c.split(','))
+    .map(c => c.trim())
+    .filter(c => c.length > 0)
+    .map(c => c.startsWith('#') ? c : '#' + c);
+
+  test('normalizes comma-separated channels', () => {
+    const result = normalizeChannels(['#general,#skills']);
+    assert.deepEqual(result, ['#general', '#skills']);
+  });
+
+  test('normalizes space-separated channels', () => {
+    const result = normalizeChannels(['#general', '#skills']);
+    assert.deepEqual(result, ['#general', '#skills']);
+  });
+
+  test('adds # prefix if missing', () => {
+    const result = normalizeChannels(['general,skills']);
+    assert.deepEqual(result, ['#general', '#skills']);
+  });
+
+  test('handles mixed formats', () => {
+    const result = normalizeChannels(['#general,skills', '#agents']);
+    assert.deepEqual(result, ['#general', '#skills', '#agents']);
+  });
+
+  test('trims whitespace', () => {
+    const result = normalizeChannels(['#general , #skills']);
+    assert.deepEqual(result, ['#general', '#skills']);
+  });
+
+  test('filters empty strings', () => {
+    const result = normalizeChannels(['#general,,#skills', '']);
+    assert.deepEqual(result, ['#general', '#skills']);
+  });
+});
+
 describe('Daemon file paths', () => {
   test('inbox path is in home directory', () => {
     assert.ok(INBOX_PATH.includes('.agentchat'));
