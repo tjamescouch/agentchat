@@ -48,6 +48,10 @@ import {
   DEFAULT_RATINGS_PATH,
   DEFAULT_RATING
 } from '../lib/reputation.js';
+import {
+  ServerDirectory,
+  DEFAULT_DIRECTORY_PATH
+} from '../lib/server-directory.js';
 
 program
   .name('agentchat')
@@ -1111,6 +1115,91 @@ program
         process.exit(1);
       }
 
+    } catch (err) {
+      console.error('Error:', err.message);
+      process.exit(1);
+    }
+  });
+
+// Discover command - find public AgentChat servers
+program
+  .command('discover')
+  .description('Discover available AgentChat servers')
+  .option('--add <url>', 'Add a server to the directory')
+  .option('--remove <url>', 'Remove a server from the directory')
+  .option('--name <name>', 'Server name (for --add)')
+  .option('--description <desc>', 'Server description (for --add)')
+  .option('--region <region>', 'Server region (for --add)')
+  .option('--online', 'Only show online servers')
+  .option('--json', 'Output as JSON')
+  .option('--no-check', 'List servers without health check')
+  .option('--directory <path>', 'Custom directory file path', DEFAULT_DIRECTORY_PATH)
+  .action(async (options) => {
+    try {
+      const directory = new ServerDirectory({ directoryPath: options.directory });
+      await directory.load();
+
+      // Add server
+      if (options.add) {
+        await directory.addServer({
+          url: options.add,
+          name: options.name || options.add,
+          description: options.description || '',
+          region: options.region || 'unknown'
+        });
+        console.log(`Added server: ${options.add}`);
+        process.exit(0);
+      }
+
+      // Remove server
+      if (options.remove) {
+        await directory.removeServer(options.remove);
+        console.log(`Removed server: ${options.remove}`);
+        process.exit(0);
+      }
+
+      // List/discover servers
+      let servers;
+      if (options.check === false) {
+        servers = directory.list().map(s => ({ ...s, status: 'unknown' }));
+      } else {
+        console.error('Checking server status...');
+        servers = await directory.discover({ onlineOnly: options.online });
+      }
+
+      if (options.json) {
+        console.log(JSON.stringify(servers, null, 2));
+      } else {
+        if (servers.length === 0) {
+          console.log('No servers found.');
+        } else {
+          console.log(`\nFound ${servers.length} server(s):\n`);
+          for (const server of servers) {
+            const statusIcon = server.status === 'online' ? '\u2713' :
+                              server.status === 'offline' ? '\u2717' : '?';
+            console.log(`  ${statusIcon} ${server.name}`);
+            console.log(`    URL: ${server.url}`);
+            console.log(`    Status: ${server.status}`);
+            if (server.description) {
+              console.log(`    Description: ${server.description}`);
+            }
+            if (server.region) {
+              console.log(`    Region: ${server.region}`);
+            }
+            if (server.health) {
+              console.log(`    Agents: ${server.health.agents?.connected || 0}`);
+              console.log(`    Uptime: ${server.health.uptime_seconds || 0}s`);
+            }
+            if (server.error) {
+              console.log(`    Error: ${server.error}`);
+            }
+            console.log('');
+          }
+        }
+        console.log(`Directory: ${options.directory}`);
+      }
+
+      process.exit(0);
     } catch (err) {
       console.error('Error:', err.message);
       process.exit(1);
