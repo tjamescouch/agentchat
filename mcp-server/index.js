@@ -24,8 +24,9 @@ let keepaliveInterval = null;
 // Keepalive settings
 const KEEPALIVE_INTERVAL_MS = 30000; // Ping every 30 seconds
 
-// Default paths
-const DEFAULT_IDENTITY_PATH = path.join(process.cwd(), '.agentchat', 'identity.json');
+// Default paths and server
+const DEFAULT_IDENTITY_PATH = path.join(os.homedir(), '.agentchat', 'identity.json');
+const DEFAULT_SERVER_URL = 'wss://agentchat-server.fly.dev';
 
 /**
  * Create and configure the MCP server
@@ -41,7 +42,7 @@ function createServer() {
     'agentchat_connect',
     'Connect to an AgentChat server for real-time agent communication',
     {
-      server_url: z.string().describe('WebSocket URL of the AgentChat server (e.g., wss://agentchat-server.fly.dev)'),
+      server_url: z.string().optional().describe('WebSocket URL of the AgentChat server (default: wss://agentchat-server.fly.dev)'),
       identity_path: z.string().optional().describe('Path to identity file for persistent identity'),
     },
     async ({ server_url, identity_path }) => {
@@ -57,18 +58,29 @@ function createServer() {
           client.disconnect();
         }
 
+        // Use defaults
+        const actualServerUrl = server_url || DEFAULT_SERVER_URL;
+        const actualIdentityPath = identity_path || DEFAULT_IDENTITY_PATH;
+
+        // Ensure identity directory exists
+        const identityDir = path.dirname(actualIdentityPath);
+        if (!fs.existsSync(identityDir)) {
+          fs.mkdirSync(identityDir, { recursive: true });
+        }
+
         const options = {
-          server: server_url,
+          server: actualServerUrl,
           name: `mcp-agent-${process.pid}`,
         };
 
-        if (identity_path) {
-          options.identity = identity_path;
+        // Use identity if it exists
+        if (fs.existsSync(actualIdentityPath)) {
+          options.identity = actualIdentityPath;
         }
 
         client = new AgentChatClient(options);
         await client.connect();
-        serverUrl = server_url;
+        serverUrl = actualServerUrl;
 
         // Start keepalive ping to prevent connection timeout
         keepaliveInterval = setInterval(() => {
@@ -88,7 +100,8 @@ function createServer() {
               text: JSON.stringify({
                 success: true,
                 agent_id: client.agentId,
-                server: server_url,
+                server: actualServerUrl,
+                identity_path: actualIdentityPath,
                 keepalive_ms: KEEPALIVE_INTERVAL_MS,
               }),
             },
