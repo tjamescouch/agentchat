@@ -23,9 +23,15 @@ let keepaliveInterval = null;
 // Keepalive settings
 const KEEPALIVE_INTERVAL_MS = 30000; // Ping every 30 seconds
 
-// Default paths and server (project-scoped for sandbox compatibility)
-const DEFAULT_IDENTITY_PATH = path.join(process.cwd(), '.agentchat', 'identity.json');
+// Default server
 const DEFAULT_SERVER_URL = 'wss://agentchat-server.fly.dev';
+
+/**
+ * Get identity path for a named agent
+ */
+function getIdentityPath(name) {
+  return path.join(process.cwd(), '.agentchat', 'identities', `${name}.json`);
+}
 
 /**
  * Create and configure the MCP server
@@ -41,10 +47,11 @@ function createServer() {
     'agentchat_connect',
     'Connect to an AgentChat server for real-time agent communication',
     {
-      server_url: z.string().optional().describe('WebSocket URL of the AgentChat server (default: wss://agentchat-server.fly.dev)'),
-      identity_path: z.string().optional().describe('Path to identity file for persistent identity'),
+      server_url: z.string().optional().describe('WebSocket URL (default: wss://agentchat-server.fly.dev)'),
+      name: z.string().optional().describe('Agent name for persistent identity. Creates .agentchat/identities/<name>.json. Omit for ephemeral identity.'),
+      identity_path: z.string().optional().describe('Custom path to identity file (overrides name)'),
     },
-    async ({ server_url, identity_path }) => {
+    async ({ server_url, name, identity_path }) => {
       try {
         // Stop existing keepalive
         if (keepaliveInterval) {
@@ -57,24 +64,32 @@ function createServer() {
           client.disconnect();
         }
 
-        // Use defaults
         const actualServerUrl = server_url || DEFAULT_SERVER_URL;
-        const actualIdentityPath = identity_path || DEFAULT_IDENTITY_PATH;
 
-        // Ensure identity directory exists
-        const identityDir = path.dirname(actualIdentityPath);
-        if (!fs.existsSync(identityDir)) {
-          fs.mkdirSync(identityDir, { recursive: true });
+        // Determine identity path: explicit path > named > ephemeral (none)
+        let actualIdentityPath = null;
+        if (identity_path) {
+          actualIdentityPath = identity_path;
+        } else if (name) {
+          actualIdentityPath = getIdentityPath(name);
         }
+        // If neither provided, identity stays null = ephemeral
 
         const options = {
           server: actualServerUrl,
-          name: `mcp-agent-${process.pid}`,
+          name: name || `mcp-agent-${process.pid}`,
         };
 
-        // Use identity if it exists
-        if (fs.existsSync(actualIdentityPath)) {
-          options.identity = actualIdentityPath;
+        // Set up persistent identity if path specified
+        if (actualIdentityPath) {
+          const identityDir = path.dirname(actualIdentityPath);
+          if (!fs.existsSync(identityDir)) {
+            fs.mkdirSync(identityDir, { recursive: true });
+          }
+          // Use identity if it exists, otherwise client will create one
+          if (fs.existsSync(actualIdentityPath)) {
+            options.identity = actualIdentityPath;
+          }
         }
 
         client = new AgentChatClient(options);
@@ -100,8 +115,8 @@ function createServer() {
                 success: true,
                 agent_id: client.agentId,
                 server: actualServerUrl,
+                persistent: !!actualIdentityPath,
                 identity_path: actualIdentityPath,
-                keepalive_ms: KEEPALIVE_INTERVAL_MS,
               }),
             },
           ],
