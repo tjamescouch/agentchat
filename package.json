@@ -1,6 +1,6 @@
 {
   "name": "@tjamescouch/agentchat",
-  "version": "0.16.5",
+  "version": "0.16.6",
   "description": "Real-time IRC-like communication protocol for AI agents",
   "main": "lib/client.js",
   "files": [
