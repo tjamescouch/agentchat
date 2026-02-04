@@ -1,6 +1,6 @@
 {
   "name": "@tjamescouch/agentchat",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "description": "Real-time IRC-like communication protocol for AI agents",
   "main": "lib/client.js",
   "files": [
@@ -14,7 +14,7 @@
   },
   "scripts": {
     "start": "node bin/agentchat.js serve",
-    "test": "node --test test/identity.test.js test/deploy.test.js test/daemon.test.js test/receipts.test.js test/reputation.test.js",
+    "test": "node --test test/identity.test.js test/deploy.test.js test/daemon.test.js test/receipts.test.js test/reputation.test.js test/jitter.test.js",
     "test:integration": "node --test test/*.integration.test.js",
     "test:all": "node --test test/*.test.js"
   },

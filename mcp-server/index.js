@@ -10,6 +10,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import { AgentChatClient } from '@tjamescouch/agentchat';
 import { AgentChatDaemon, getDaemonPaths, isDaemonRunning, stopDaemon } from '@tjamescouch/agentchat/lib/daemon.js';
+import { addJitter } from '@tjamescouch/agentchat/lib/jitter.js';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -134,8 +135,9 @@ function createServer() {
       channels: z.array(z.string()).describe('Channels to listen on (e.g., ["#general", "#agents"])'),
       max_messages: z.number().optional().default(10).describe('Maximum messages to collect before returning'),
       timeout_ms: z.number().optional().default(5000).describe('Timeout in milliseconds'),
+      jitter_percent: z.number().optional().default(0.2).describe('Jitter percentage (0.0-1.0) to add to timeout, prevents deadlock when multiple agents wait simultaneously'),
     },
-    async ({ channels, max_messages, timeout_ms }) => {
+    async ({ channels, max_messages, timeout_ms, jitter_percent }) => {
       try {
         if (!client || !client.connected) {
           return {
@@ -181,9 +183,11 @@ function createServer() {
 
           client.on('message', messageHandler);
 
-          // Timeout
+          // Timeout with jitter to prevent deadlock
+          const actualTimeout = addJitter(timeout_ms, jitter_percent);
           setTimeout(() => {
             cleanup();
+            const silenceDetected = messages.length === 0;
             resolve({
               content: [
                 {
@@ -192,11 +196,17 @@ function createServer() {
                     messages,
                     timeout: true,
                     elapsed_ms: Date.now() - startTime,
+                    actual_timeout_ms: actualTimeout,
+                    jitter_applied: actualTimeout !== timeout_ms,
+                    // Anti-deadlock hint: when silence detected, suggest breaking it
+                    ...(silenceDetected && {
+                      silence_hint: 'No messages received. Consider posting to break potential deadlock - all agents may be waiting.',
+                    }),
                   }),
                 },
               ],
             });
-          }, timeout_ms);
+          }, actualTimeout);
         });
       } catch (error) {
         return {
