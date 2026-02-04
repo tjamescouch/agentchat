@@ -1,15 +1,37 @@
 #!/usr/bin/env python3
-"""Simple blocking monitor - polls until messages arrive, then prints and exits."""
+"""Simple blocking monitor - polls until messages arrive, then prints and exits.
+
+Exit codes:
+  0  - Normal exit (messages found, timeout, or interrupt)
+  42 - Stop file detected (.agentchat/stop) - signals to stop monitoring loop
+
+To stop monitoring: touch .agentchat/stop
+"""
 
 import json
+import signal
 import sys
 import time
 from pathlib import Path
+
+# Flag to track if we should exit
+_shutdown = False
+
+def _handle_signal(signum, frame):
+    """Handle interrupt signals gracefully."""
+    global _shutdown
+    _shutdown = True
+    sys.exit(0)
+
+# Register signal handlers
+signal.signal(signal.SIGINT, _handle_signal)
+signal.signal(signal.SIGTERM, _handle_signal)
 
 DAEMON_DIR = Path(".agentchat/daemons/default")
 NEWDATA = DAEMON_DIR / "newdata"
 INBOX = DAEMON_DIR / "inbox.jsonl"
 LAST_TS = DAEMON_DIR / "last_ts"
+STOP_FILE = Path(".agentchat/stop")
 
 def get_last_ts():
     if LAST_TS.exists():
@@ -42,7 +64,14 @@ def main():
     max_wait = float(sys.argv[2]) if len(sys.argv) > 2 else 300  # 5 min default
 
     start = time.time()
-    while time.time() - start < max_wait:
+    while not _shutdown and time.time() - start < max_wait:
+        # Check for stop file - allows clean shutdown of monitoring loop
+        if STOP_FILE.exists():
+            try:
+                STOP_FILE.unlink()
+            except FileNotFoundError:
+                pass
+            sys.exit(42)  # Special exit code signals "stop monitoring"
         if NEWDATA.exists():
             messages = read_new_messages()
             if messages:
@@ -63,10 +92,16 @@ def main():
                 NEWDATA.unlink()
             except FileNotFoundError:
                 pass
-        time.sleep(interval)
+        try:
+            time.sleep(interval)
+        except KeyboardInterrupt:
+            return
 
     # Timeout - no messages
     print("", file=sys.stderr)
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass  # Exit silently on Ctrl+C

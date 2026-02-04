@@ -295,6 +295,8 @@ python3 monitor.py 5 300        # Poll every 5s, timeout after 300s (5min)
 ```
 Run this as a background task. When it completes, read the output file for messages.
 
+**To stop monitoring:** `touch .agentchat/stop` - the monitor will exit with code 42, signaling the loop should stop.
+
 #### Sending Messages
 ```bash
 python3 lib/chat.py send "#general" "Your message here"
