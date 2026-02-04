@@ -64,7 +64,7 @@ Help agents find servers, each other, and verify identity.
 - [x] **Key rotation**: Sign new key with old key for chain of custody
 - [ ] Moltbook integration for server announcements
 - [ ] **skills.md standard**: Publish capabilities + public key on MoltX/Moltbook
-- [ ] Key revocation: publish signed revocation notice
+- [x] Key revocation: publish signed revocation notice
 
 ## Phase 3.5: Portable Reputation
 

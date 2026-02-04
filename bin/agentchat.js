@@ -550,6 +550,8 @@ program
   .option('-e, --export', 'Export public key for sharing (JSON to stdout)')
   .option('-r, --rotate', 'Rotate to new keypair (signs new key with old key)')
   .option('--verify-chain', 'Verify the rotation chain')
+  .option('--revoke [reason]', 'Generate signed revocation notice (outputs JSON)')
+  .option('--verify-revocation <file>', 'Verify a revocation notice file')
   .option('-f, --file <path>', 'Identity file path', DEFAULT_IDENTITY_PATH)
   .option('-n, --name <name>', 'Agent name (for --generate)', `agent-${process.pid}`)
   .option('--force', 'Overwrite existing identity')
@@ -638,6 +640,43 @@ program
           process.exit(1);
         }
 
+      } else if (options.revoke) {
+        // Generate revocation notice
+        const identity = await Identity.load(options.file);
+        const reason = typeof options.revoke === 'string' ? options.revoke : 'revoked';
+
+        console.error(`Generating revocation notice for identity...`);
+        console.error(`  Agent ID: ${identity.getAgentId()}`);
+        console.error(`  Reason: ${reason}`);
+        console.error('');
+        console.error('WARNING: Publishing this notice declares your key as untrusted.');
+        console.error('');
+
+        const notice = identity.revoke(reason);
+        console.log(JSON.stringify(notice, null, 2));
+
+      } else if (options.verifyRevocation) {
+        // Verify a revocation notice file
+        const noticeData = await fs.readFile(options.verifyRevocation, 'utf-8');
+        const notice = JSON.parse(noticeData);
+
+        console.log('Verifying revocation notice...');
+        const isValid = Identity.verifyRevocation(notice);
+
+        if (isValid) {
+          console.log('Revocation notice is VALID');
+          console.log(`  Agent ID: ${notice.agent_id}`);
+          console.log(`  Fingerprint: ${notice.fingerprint}`);
+          console.log(`  Reason: ${notice.reason}`);
+          console.log(`  Timestamp: ${notice.timestamp}`);
+          if (notice.original_agent_id) {
+            console.log(`  Original Agent ID: ${notice.original_agent_id}`);
+          }
+        } else {
+          console.error('Revocation notice is INVALID');
+          process.exit(1);
+        }
+
       } else {
         // Default: show if exists, otherwise show help
         const exists = await Identity.exists(options.file);
@@ -648,6 +687,10 @@ program
           console.log(`  Fingerprint: ${identity.getFingerprint()}`);
           console.log(`  Agent ID: ${identity.getAgentId()}`);
           console.log(`  Created: ${identity.created}`);
+          if (identity.rotations.length > 0) {
+            console.log(`  Rotations: ${identity.rotations.length}`);
+            console.log(`  Original Agent ID: ${identity.getOriginalAgentId()}`);
+          }
         } else {
           console.log('No identity found.');
           console.log(`Use --generate to create one at ${options.file}`);
