@@ -103,6 +103,62 @@ def poll_new(paths: dict):
     return messages
 
 
+def wait_for_messages(paths: dict, interval: float = 2.0, timeout: float = 300.0):
+    """Block until new messages arrive. Returns messages or empty list on timeout."""
+    import signal
+    import time
+
+    stop_file = paths["inbox"].parent.parent.parent / "stop"
+
+    # Handle interrupts gracefully
+    interrupted = False
+    def handle_signal(signum, frame):
+        nonlocal interrupted
+        interrupted = True
+
+    old_handler = signal.signal(signal.SIGINT, handle_signal)
+
+    try:
+        start = time.time()
+        while not interrupted and (time.time() - start) < timeout:
+            # Check stop file
+            if stop_file.exists():
+                try:
+                    stop_file.unlink()
+                except FileNotFoundError:
+                    pass
+                return []  # Signal to stop
+
+            # Check semaphore
+            if paths["newdata"].exists():
+                messages = read_inbox(paths)
+                # Filter out @server messages
+                messages = [m for m in messages if m.get("from") != "@server"]
+
+                if messages:
+                    # Update timestamp
+                    max_ts = max(m.get("ts", 0) for m in messages)
+                    set_last_ts(paths, max_ts)
+                    # Clear semaphore
+                    try:
+                        paths["newdata"].unlink()
+                    except FileNotFoundError:
+                        pass
+                    return messages
+
+                # Semaphore but no messages after filtering - clear and continue
+                try:
+                    paths["newdata"].unlink()
+                except FileNotFoundError:
+                    pass
+
+            time.sleep(interval)
+
+        return []  # Timeout
+    finally:
+        signal.signal(signal.SIGINT, old_handler)
+
+
 def main():
     parser = argparse.ArgumentParser(description="AgentChat daemon helper")
     parser.add_argument("--daemon-dir", type=Path, default=DEFAULT_DAEMON_DIR,
@@ -132,6 +188,11 @@ def main():
 
     # poll command - efficient check using semaphore
     poll_p = subparsers.add_parser("poll", help="Poll for new messages (uses semaphore, silent if none)")
+
+    # wait command - block until messages arrive
+    wait_p = subparsers.add_parser("wait", help="Block until new messages arrive")
+    wait_p.add_argument("--interval", type=float, default=2.0, help="Poll interval in seconds")
+    wait_p.add_argument("--timeout", type=float, default=300.0, help="Max wait time in seconds")
 
     args = parser.parse_args()
     paths = get_paths(args.daemon_dir)
@@ -169,6 +230,11 @@ def main():
             for msg in messages:
                 print(json.dumps(msg))
         # Empty list = semaphore existed but no new messages after filtering
+
+    elif args.command == "wait":
+        messages = wait_for_messages(paths, interval=args.interval, timeout=args.timeout)
+        for msg in messages:
+            print(json.dumps(msg))
 
 
 if __name__ == "__main__":
