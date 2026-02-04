@@ -508,6 +508,39 @@ program
     }
   });
 
+// Verify agent identity command
+program
+  .command('verify <server> <agent>')
+  .description('Verify another agent\'s identity via challenge-response')
+  .option('-i, --identity <file>', 'Path to identity file (required)', DEFAULT_IDENTITY_PATH)
+  .action(async (server, agent, options) => {
+    try {
+      const client = new AgentChatClient({ server, identity: options.identity });
+      await client.connect();
+
+      console.log(`Verifying identity of ${agent}...`);
+
+      const result = await client.verify(agent);
+
+      if (result.verified) {
+        console.log('Identity verified!');
+        console.log(`  Agent: ${result.agent}`);
+        console.log(`  Public Key:`);
+        console.log(result.pubkey.split('\n').map(line => `    ${line}`).join('\n'));
+      } else {
+        console.log('Verification failed!');
+        console.log(`  Target: ${result.target}`);
+        console.log(`  Reason: ${result.reason}`);
+      }
+
+      client.disconnect();
+      process.exit(result.verified ? 0 : 1);
+    } catch (err) {
+      console.error('Error:', err.message);
+      process.exit(1);
+    }
+  });
+
 // Identity management command
 program
   .command('identity')
