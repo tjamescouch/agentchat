@@ -176,107 +176,15 @@ function createServer() {
     }
   );
 
-  // Tool: Listen for messages
+  // Tool: Listen for messages (returns immediately when a message arrives)
   server.tool(
     'agentchat_listen',
-    'Listen for messages on channels and return recent messages',
+    'Listen for messages - returns immediately when a message arrives',
     {
-      channels: z.array(z.string()).describe('Channels to listen on (e.g., ["#general", "#agents"])'),
-      max_messages: z.number().optional().default(10).describe('Maximum messages to collect before returning'),
-      timeout_ms: z.number().optional().default(5000).describe('Timeout in milliseconds'),
-      jitter_percent: z.number().optional().default(0.2).describe('Jitter percentage (0.0-1.0) to add to timeout, prevents deadlock when multiple agents wait simultaneously'),
+      channels: z.array(z.string()).describe('Channels to listen on (e.g., ["#general"])'),
+      timeout_ms: z.number().optional().default(60000).describe('Timeout in milliseconds (default 60s)'),
     },
-    async ({ channels, max_messages, timeout_ms, jitter_percent }) => {
-      try {
-        if (!client || !client.connected) {
-          return {
-            content: [{ type: 'text', text: 'Not connected. Use agentchat_connect first.' }],
-            isError: true,
-          };
-        }
-
-        // Join channels
-        for (const channel of channels) {
-          if (!client.channels.has(channel)) {
-            await client.join(channel);
-          }
-        }
-
-        // Collect messages
-        const messages = [];
-        const startTime = Date.now();
-
-        return new Promise((resolve) => {
-          const messageHandler = (msg) => {
-            // Filter out own messages and replays
-            if (msg.from !== client.agentId && !msg.replay) {
-              messages.push({
-                from: msg.from,
-                to: msg.to,
-                content: msg.content,
-                ts: msg.ts,
-              });
-            }
-
-            if (messages.length >= max_messages) {
-              cleanup();
-              resolve({
-                content: [{ type: 'text', text: JSON.stringify({ messages }) }],
-              });
-            }
-          };
-
-          const cleanup = () => {
-            client.removeListener('message', messageHandler);
-          };
-
-          client.on('message', messageHandler);
-
-          // Timeout with jitter to prevent deadlock
-          const actualTimeout = addJitter(timeout_ms, jitter_percent);
-          setTimeout(() => {
-            cleanup();
-            const silenceDetected = messages.length === 0;
-            resolve({
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify({
-                    messages,
-                    timeout: true,
-                    elapsed_ms: Date.now() - startTime,
-                    actual_timeout_ms: actualTimeout,
-                    jitter_applied: actualTimeout !== timeout_ms,
-                    // Anti-deadlock hint: when silence detected, suggest breaking it
-                    ...(silenceDetected && {
-                      silence_hint: 'No messages received. Consider posting to break potential deadlock - all agents may be waiting.',
-                    }),
-                  }),
-                },
-              ],
-            });
-          }, actualTimeout);
-        });
-      } catch (error) {
-        return {
-          content: [{ type: 'text', text: `Error listening: ${error.message}` }],
-          isError: true,
-        };
-      }
-    }
-  );
-
-  // Tool: Wait for messages (event-driven)
-  server.tool(
-    'agentchat_wait',
-    'Wait for messages - returns immediately when a message arrives (event-driven). More efficient than polling with agentchat_listen.',
-    {
-      channels: z.array(z.string()).describe('Channels to wait on (e.g., ["#general", "#agents"])'),
-      timeout_ms: z.number().optional().default(300000).describe('Maximum wait time in milliseconds (default 5 minutes)'),
-      jitter_percent: z.number().optional().default(0.2).describe('Jitter percentage (0.0-1.0) to add to timeout'),
-      filter_server: z.boolean().optional().default(true).describe('Filter out @server messages (welcome spam)'),
-    },
-    async ({ channels, timeout_ms, jitter_percent, filter_server }) => {
+    async ({ channels, timeout_ms }) => {
       try {
         if (!client || !client.connected) {
           return {
@@ -296,13 +204,8 @@ function createServer() {
 
         return new Promise((resolve) => {
           const messageHandler = (msg) => {
-            // Filter out own messages and replays
-            if (msg.from === client.agentId || msg.replay) {
-              return;
-            }
-
-            // Filter out @server messages if requested
-            if (filter_server && msg.from === '@server') {
+            // Filter out own messages, replays, and server messages
+            if (msg.from === client.agentId || msg.replay || msg.from === '@server') {
               return;
             }
 
@@ -319,7 +222,7 @@ function createServer() {
                       content: msg.content,
                       ts: msg.ts,
                     },
-                    waited_ms: Date.now() - startTime,
+                    elapsed_ms: Date.now() - startTime,
                   }),
                 },
               ],
@@ -332,8 +235,8 @@ function createServer() {
 
           client.on('message', messageHandler);
 
-          // Timeout with jitter
-          const actualTimeout = addJitter(timeout_ms, jitter_percent);
+          // Timeout with jitter to prevent deadlock
+          const actualTimeout = addJitter(timeout_ms, 0.2);
           setTimeout(() => {
             cleanup();
             resolve({
@@ -343,9 +246,7 @@ function createServer() {
                   text: JSON.stringify({
                     message: null,
                     timeout: true,
-                    waited_ms: Date.now() - startTime,
-                    actual_timeout_ms: actualTimeout,
-                    silence_hint: 'No messages received. Consider posting to break potential deadlock.',
+                    elapsed_ms: Date.now() - startTime,
                   }),
                 },
               ],
@@ -354,7 +255,7 @@ function createServer() {
         });
       } catch (error) {
         return {
-          content: [{ type: 'text', text: `Error waiting: ${error.message}` }],
+          content: [{ type: 'text', text: `Error listening: ${error.message}` }],
           isError: true,
         };
       }
