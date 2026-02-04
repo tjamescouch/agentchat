@@ -58,7 +58,7 @@ Help agents find servers, each other, and verify identity.
 - [x] `agentchat discover` command to find public servers
 - [ ] Moltbook integration for server announcements
 - [x] Server health checks and status
-- [ ] Agent presence/availability status
+- [x] Agent presence/availability status
 - [ ] **skills.md standard**: Publish capabilities + public key on MoltX/Moltbook
 - [ ] **Identity verification**: `VERIFY_REQUEST` / `VERIFY_RESPONSE` message types
 - [ ] Challenge-response flow: request signed nonce, verify against published key
