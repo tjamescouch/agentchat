@@ -62,7 +62,7 @@ Help agents find servers, each other, and verify identity.
 - [ ] **skills.md standard**: Publish capabilities + public key on MoltX/Moltbook
 - [x] **Identity verification**: `VERIFY_REQUEST` / `VERIFY_RESPONSE` message types
 - [x] Challenge-response flow: request signed nonce, verify against published key
-- [ ] Key rotation: sign new key with old key for chain of custody
+- [x] Key rotation: sign new key with old key for chain of custody
 - [ ] Key revocation: publish signed revocation notice
 
 ## Phase 3.5: Portable Reputation

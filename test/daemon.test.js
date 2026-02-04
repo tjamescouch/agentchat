@@ -10,15 +10,13 @@ import path from 'path';
 import os from 'os';
 import { AgentChatServer } from '../lib/server.js';
 import { Identity } from '../lib/identity.js';
+import crypto from 'crypto';
 import {
   AgentChatDaemon,
   isDaemonRunning,
   stopDaemon,
   getDaemonStatus,
-  INBOX_PATH,
-  OUTBOX_PATH,
-  LOG_PATH,
-  PID_PATH
+  getDaemonPaths
 } from '../lib/daemon.js';
 
 describe('Daemon', () => {
@@ -26,11 +24,18 @@ describe('Daemon', () => {
   const PORT = 16672; // Use non-standard port for testing
   const SERVER_URL = `ws://localhost:${PORT}`;
   const testDir = path.join(os.tmpdir(), `agentchat-daemon-test-${Date.now()}`);
+
+  // Use isolated test instance to avoid interfering with real daemons
+  const TEST_INSTANCE = `test-${crypto.randomBytes(4).toString('hex')}`;
+  const testPaths = getDaemonPaths(TEST_INSTANCE);
   const testIdentityPath = path.join(testDir, 'test-identity.json');
 
   before(async () => {
     // Create test directory
     await fs.mkdir(testDir, { recursive: true });
+
+    // Create test instance directory
+    await fs.mkdir(testPaths.dir, { recursive: true });
 
     // Create test identity
     const identity = Identity.generate('daemon-test-agent');
@@ -42,7 +47,7 @@ describe('Daemon', () => {
 
     // Clean up any existing daemon files from previous runs
     try {
-      await fs.unlink(PID_PATH);
+      await fs.unlink(testPaths.pid);
     } catch {}
   });
 
@@ -54,9 +59,9 @@ describe('Daemon', () => {
       await fs.rm(testDir, { recursive: true });
     } catch {}
 
-    // Clean up daemon files
+    // Clean up test instance directory
     try {
-      await fs.unlink(PID_PATH);
+      await fs.rm(testPaths.dir, { recursive: true });
     } catch {}
   });
 
@@ -80,7 +85,8 @@ describe('Daemon', () => {
     const daemon = new AgentChatDaemon({
       server: SERVER_URL,
       identity: testIdentityPath,
-      channels: ['#general', '#agents']
+      channels: ['#general', '#agents'],
+      name: TEST_INSTANCE
     });
 
     assert.equal(daemon.server, SERVER_URL);
@@ -93,7 +99,8 @@ describe('Daemon', () => {
     const daemon = new AgentChatDaemon({
       server: SERVER_URL,
       identity: testIdentityPath,
-      channels: ['#general']
+      channels: ['#general'],
+      name: TEST_INSTANCE
     });
 
     // Start daemon
@@ -113,27 +120,28 @@ describe('Daemon', () => {
 
     // Clean up PID file
     try {
-      await fs.unlink(PID_PATH);
+      await fs.unlink(testPaths.pid);
     } catch {}
   });
 
   test('daemon writes messages to inbox', async () => {
     // Clear inbox first
     try {
-      await fs.writeFile(INBOX_PATH, '');
+      await fs.writeFile(testPaths.inbox, '');
     } catch {}
 
     const daemon = new AgentChatDaemon({
       server: SERVER_URL,
       identity: testIdentityPath,
-      channels: ['#general']
+      channels: ['#general'],
+      name: TEST_INSTANCE
     });
 
     await daemon.start();
     await new Promise(r => setTimeout(r, 500));
 
     // Check inbox has messages (at least the channel history)
-    const inboxContent = await fs.readFile(INBOX_PATH, 'utf-8');
+    const inboxContent = await fs.readFile(testPaths.inbox, 'utf-8');
 
     // Stop daemon
     daemon.running = false;
@@ -141,7 +149,7 @@ describe('Daemon', () => {
     daemon.client.disconnect();
 
     try {
-      await fs.unlink(PID_PATH);
+      await fs.unlink(testPaths.pid);
     } catch {}
 
     // Inbox might be empty if no history, but shouldn't throw
@@ -152,21 +160,22 @@ describe('Daemon', () => {
     const daemon = new AgentChatDaemon({
       server: SERVER_URL,
       identity: testIdentityPath,
-      channels: ['#general']
+      channels: ['#general'],
+      name: TEST_INSTANCE
     });
 
     await daemon.start();
     await new Promise(r => setTimeout(r, 500));
 
-    // Write to outbox
-    const testMsg = '{"to":"#general","content":"Test from daemon test"}\n';
-    await fs.writeFile(OUTBOX_PATH, testMsg);
+    // Write to outbox (using isolated test path, not shared with real daemons)
+    const testMsg = '{"to":"#general","content":"Test message from isolated daemon.test.js"}\n';
+    await fs.writeFile(testPaths.outbox, testMsg);
 
     // Wait for processing
     await new Promise(r => setTimeout(r, 1000));
 
     // Outbox should be truncated after processing
-    const outboxContent = await fs.readFile(OUTBOX_PATH, 'utf-8');
+    const outboxContent = await fs.readFile(testPaths.outbox, 'utf-8');
     assert.equal(outboxContent.trim(), '', 'Outbox should be empty after processing');
 
     // Stop daemon
@@ -175,7 +184,7 @@ describe('Daemon', () => {
     daemon.client.disconnect();
 
     try {
-      await fs.unlink(PID_PATH);
+      await fs.unlink(testPaths.pid);
     } catch {}
   });
 
@@ -183,14 +192,15 @@ describe('Daemon', () => {
     const daemon = new AgentChatDaemon({
       server: SERVER_URL,
       identity: testIdentityPath,
-      channels: ['#general']
+      channels: ['#general'],
+      name: TEST_INSTANCE
     });
 
     await daemon.start();
     await new Promise(r => setTimeout(r, 200));
 
     // Check PID file exists
-    const pidContent = await fs.readFile(PID_PATH, 'utf-8');
+    const pidContent = await fs.readFile(testPaths.pid, 'utf-8');
     const pid = parseInt(pidContent.trim());
     assert.equal(pid, process.pid);
 
@@ -200,7 +210,7 @@ describe('Daemon', () => {
     daemon.client.disconnect();
 
     try {
-      await fs.unlink(PID_PATH);
+      await fs.unlink(testPaths.pid);
     } catch {}
   });
 });
@@ -245,24 +255,26 @@ describe('Channel normalization', () => {
 });
 
 describe('Daemon file paths', () => {
+  const defaultPaths = getDaemonPaths('default');
+
   test('inbox path is in home directory', () => {
-    assert.ok(INBOX_PATH.includes('.agentchat'));
-    assert.ok(INBOX_PATH.endsWith('inbox.jsonl'));
+    assert.ok(defaultPaths.inbox.includes('.agentchat'));
+    assert.ok(defaultPaths.inbox.endsWith('inbox.jsonl'));
   });
 
   test('outbox path is in home directory', () => {
-    assert.ok(OUTBOX_PATH.includes('.agentchat'));
-    assert.ok(OUTBOX_PATH.endsWith('outbox.jsonl'));
+    assert.ok(defaultPaths.outbox.includes('.agentchat'));
+    assert.ok(defaultPaths.outbox.endsWith('outbox.jsonl'));
   });
 
   test('log path is in home directory', () => {
-    assert.ok(LOG_PATH.includes('.agentchat'));
-    assert.ok(LOG_PATH.endsWith('daemon.log'));
+    assert.ok(defaultPaths.log.includes('.agentchat'));
+    assert.ok(defaultPaths.log.endsWith('daemon.log'));
   });
 
   test('pid path is in home directory', () => {
-    assert.ok(PID_PATH.includes('.agentchat'));
-    assert.ok(PID_PATH.endsWith('daemon.pid'));
+    assert.ok(defaultPaths.pid.includes('.agentchat'));
+    assert.ok(defaultPaths.pid.endsWith('daemon.pid'));
   });
 });
 

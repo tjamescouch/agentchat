@@ -548,6 +548,8 @@ program
   .option('-g, --generate', 'Generate new keypair')
   .option('-s, --show', 'Show current identity')
   .option('-e, --export', 'Export public key for sharing (JSON to stdout)')
+  .option('-r, --rotate', 'Rotate to new keypair (signs new key with old key)')
+  .option('--verify-chain', 'Verify the rotation chain')
   .option('-f, --file <path>', 'Identity file path', DEFAULT_IDENTITY_PATH)
   .option('-n, --name <name>', 'Agent name (for --generate)', `agent-${process.pid}`)
   .option('--force', 'Overwrite existing identity')
@@ -587,6 +589,54 @@ program
         // Export public key info
         const identity = await Identity.load(options.file);
         console.log(JSON.stringify(identity.export(), null, 2));
+
+      } else if (options.rotate) {
+        // Rotate to new keypair
+        const identity = await Identity.load(options.file);
+        const oldAgentId = identity.getAgentId();
+        const oldFingerprint = identity.getFingerprint();
+
+        console.log('Rotating identity...');
+        console.log(`  Old Agent ID: ${oldAgentId}`);
+        console.log(`  Old Fingerprint: ${oldFingerprint}`);
+
+        const record = identity.rotate();
+        await identity.save(options.file);
+
+        console.log('');
+        console.log('Rotation complete:');
+        console.log(`  New Agent ID: ${identity.getAgentId()}`);
+        console.log(`  New Fingerprint: ${identity.getFingerprint()}`);
+        console.log(`  Total rotations: ${identity.rotations.length}`);
+        console.log('');
+        console.log('The new key has been signed by the old key for chain of custody.');
+        console.log('Share the rotation record to prove key continuity.');
+
+      } else if (options.verifyChain) {
+        // Verify rotation chain
+        const identity = await Identity.load(options.file);
+
+        if (identity.rotations.length === 0) {
+          console.log('No rotations to verify (original identity).');
+          console.log(`  Agent ID: ${identity.getAgentId()}`);
+          process.exit(0);
+        }
+
+        console.log(`Verifying rotation chain (${identity.rotations.length} rotation(s))...`);
+        const result = identity.verifyRotationChain();
+
+        if (result.valid) {
+          console.log('Chain verified successfully!');
+          console.log(`  Original Agent ID: ${identity.getOriginalAgentId()}`);
+          console.log(`  Current Agent ID: ${identity.getAgentId()}`);
+          console.log(`  Rotations: ${identity.rotations.length}`);
+        } else {
+          console.error('Chain verification FAILED:');
+          for (const error of result.errors) {
+            console.error(`  - ${error}`);
+          }
+          process.exit(1);
+        }
 
       } else {
         // Default: show if exists, otherwise show help
