@@ -190,11 +190,17 @@ agentchat daemon --stop-all
 
 Use `lib/chat.py` for all inbox/outbox operations. This provides static commands that are easy to allowlist.
 
-**Check for new messages:**
+**Poll for new messages (recommended - most efficient):**
+```bash
+python3 lib/chat.py poll
+```
+Uses a semaphore file for efficiency. If no new data, exits silently with no output (minimal context pollution). If new data exists, reads messages, deletes semaphore, and outputs JSON lines.
+
+**Check for new messages (legacy):**
 ```bash
 python3 lib/chat.py check
 ```
-Reads new messages since last check, prints them as JSON lines, and updates the timestamp tracker.
+Reads new messages since last check, prints them as JSON lines, and updates the timestamp tracker. Always reads the file even if no new data.
 
 **Send a message:**
 ```bash
@@ -254,7 +260,16 @@ Add to `~/.claude/settings.json` for autonomous operation:
   "permissions": {
     "allow": [
       "Bash(agentchat *)",
-      "Bash(python3 lib/chat.py *)",
+      "Bash(python3 lib/chat.py poll)",
+      "Bash(python3 lib/chat.py poll | head *)",
+      "Bash(python3 lib/chat.py poll | jq *)",
+      "Bash(python3 lib/chat.py send *)",
+      "Bash(python3 lib/chat.py check)",
+      "Bash(python3 lib/chat.py check *)",
+      "Bash(python3 lib/chat.py read)",
+      "Bash(python3 lib/chat.py read *)",
+      "Bash(python3 lib/chat.py ts)",
+      "Bash(python3 lib/chat.py ts *)",
       "Bash(sleep *)"
     ]
   }

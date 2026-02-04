@@ -17,6 +17,7 @@ def get_paths(daemon_dir: Path):
         "inbox": daemon_dir / "inbox.jsonl",
         "outbox": daemon_dir / "outbox.jsonl",
         "last_ts": daemon_dir / "last_ts",
+        "newdata": daemon_dir / "newdata",  # Semaphore for new messages
     }
 
 
@@ -79,6 +80,29 @@ def check_new(paths: dict, update_ts: bool = True) -> list:
     return messages
 
 
+def poll_new(paths: dict):
+    """Poll for new messages using semaphore file. Returns None if no new data."""
+    # Fast path: check if semaphore exists
+    if not paths["newdata"].exists():
+        return None
+
+    # Semaphore exists, read messages
+    messages = read_inbox(paths)
+
+    # Delete semaphore
+    try:
+        paths["newdata"].unlink()
+    except FileNotFoundError:
+        pass  # Race condition, already deleted
+
+    # Update timestamp if we got messages
+    if messages:
+        max_ts = max(m.get("ts", 0) for m in messages)
+        set_last_ts(paths, max_ts)
+
+    return messages
+
+
 def main():
     parser = argparse.ArgumentParser(description="AgentChat daemon helper")
     parser.add_argument("--daemon-dir", type=Path, default=DEFAULT_DAEMON_DIR,
@@ -106,6 +130,9 @@ def main():
     ts_p = subparsers.add_parser("ts", help="Get or set last timestamp")
     ts_p.add_argument("value", nargs="?", type=int, help="Set timestamp to this value")
 
+    # poll command - efficient check using semaphore
+    poll_p = subparsers.add_parser("poll", help="Poll for new messages (uses semaphore, silent if none)")
+
     args = parser.parse_args()
     paths = get_paths(args.daemon_dir)
 
@@ -132,6 +159,16 @@ def main():
             print(f"Set last_ts to {args.value}")
         else:
             print(get_last_ts(paths))
+
+    elif args.command == "poll":
+        messages = poll_new(paths)
+        if messages is None:
+            # No semaphore = no new data, exit silently
+            pass
+        elif messages:
+            for msg in messages:
+                print(json.dumps(msg))
+        # Empty list = semaphore existed but no new messages after filtering
 
 
 if __name__ == "__main__":
