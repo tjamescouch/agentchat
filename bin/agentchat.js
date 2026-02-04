@@ -95,7 +95,11 @@ program
       console.log('Message sent');
       process.exit(0);
     } catch (err) {
-      console.error('Error:', err.message);
+      if (err.code === 'ECONNREFUSED') {
+        console.error('Error: Connection refused. Is the server running?');
+      } else {
+        console.error('Error:', err.message || err.code || err);
+      }
       process.exit(1);
     }
   });
@@ -142,7 +146,12 @@ program
       });
 
     } catch (err) {
-      console.error('Error:', err.message);
+      if (err.code === 'ECONNREFUSED') {
+        console.error('Error: Connection refused. Is the server running?');
+        console.error(`  Try: agentchat serve --port 8080`);
+      } else {
+        console.error('Error:', err.message || err.code || err);
+      }
       process.exit(1);
     }
   });
@@ -358,6 +367,7 @@ program
   .option('-p, --payment-code <code>', 'Your payment code (BIP47, address)')
   .option('-e, --expires <seconds>', 'Expiration time in seconds', '300')
   .option('-t, --terms <terms>', 'Additional terms')
+  .option('-s, --elo-stake <n>', 'ELO points to stake on this proposal')
   .action(async (server, agent, task, options) => {
     try {
       const client = new AgentChatClient({ server, identity: options.identity });
@@ -369,7 +379,8 @@ program
         currency: options.currency,
         payment_code: options.paymentCode,
         terms: options.terms,
-        expires: parseInt(options.expires)
+        expires: parseInt(options.expires),
+        elo_stake: options.eloStake ? parseInt(options.eloStake) : undefined
       });
 
       console.log('Proposal sent:');
@@ -377,6 +388,7 @@ program
       console.log(`  To: ${proposal.to}`);
       console.log(`  Task: ${proposal.task}`);
       if (proposal.amount) console.log(`  Amount: ${proposal.amount} ${proposal.currency || ''}`);
+      if (proposal.elo_stake) console.log(`  ELO Stake: ${proposal.elo_stake}`);
       if (proposal.expires) console.log(`  Expires: ${new Date(proposal.expires).toISOString()}`);
       console.log(`\nUse this ID to track responses.`);
 
@@ -394,16 +406,20 @@ program
   .description('Accept a proposal')
   .option('-i, --identity <file>', 'Path to identity file (required)', DEFAULT_IDENTITY_PATH)
   .option('-p, --payment-code <code>', 'Your payment code for receiving payment')
+  .option('-s, --elo-stake <n>', 'ELO points to stake (as acceptor)')
   .action(async (server, proposalId, options) => {
     try {
       const client = new AgentChatClient({ server, identity: options.identity });
       await client.connect();
 
-      const response = await client.accept(proposalId, options.paymentCode);
+      const eloStake = options.eloStake ? parseInt(options.eloStake) : undefined;
+      const response = await client.accept(proposalId, options.paymentCode, eloStake);
 
       console.log('Proposal accepted:');
       console.log(`  Proposal ID: ${response.proposal_id}`);
       console.log(`  Status: ${response.status}`);
+      if (response.proposer_stake) console.log(`  Proposer Stake: ${response.proposer_stake} ELO`);
+      if (response.acceptor_stake) console.log(`  Your Stake: ${response.acceptor_stake} ELO`);
 
       client.disconnect();
       process.exit(0);

@@ -319,3 +319,236 @@ describe('K-factor transitions', () => {
     assert.strictEqual(k2, 24);
   });
 });
+
+describe('ELO Staking', () => {
+  let store;
+
+  beforeEach(async () => {
+    await fs.mkdir(TEST_DIR, { recursive: true });
+    try {
+      await fs.unlink(TEST_RATINGS_PATH);
+    } catch {
+      // File doesn't exist
+    }
+    store = new ReputationStore(TEST_RATINGS_PATH);
+  });
+
+  afterEach(async () => {
+    try {
+      await fs.rm(TEST_DIR, { recursive: true });
+    } catch {
+      // Ignore
+    }
+  });
+
+  it('rejects stake exceeding available ELO', async () => {
+    // New agent has 1200 rating, minimum floor is 100
+    // Available = 1200 - 100 = 1100
+    const result = await store.canStake('@agent1', 1200);
+    assert.strictEqual(result.canStake, false);
+    assert.ok(result.reason.includes('Insufficient ELO'));
+  });
+
+  it('rejects stake that would drop below minimum rating', async () => {
+    // Available is rating - 100 (minimum floor)
+    // For new agent: 1200 - 100 = 1100
+    const available = await store.getAvailableRating('@agent1');
+    assert.strictEqual(available, 1100);
+
+    // Trying to stake exactly available should work
+    const canStakeAvailable = await store.canStake('@agent1', 1100);
+    assert.strictEqual(canStakeAvailable.canStake, true);
+
+    // Trying to stake more than available should fail
+    const canStakeMore = await store.canStake('@agent1', 1101);
+    assert.strictEqual(canStakeMore.canStake, false);
+  });
+
+  it('allows multiple concurrent stakes', async () => {
+    // Create first escrow with 500 stake
+    const result1 = await store.createEscrow(
+      'prop_1',
+      { agent_id: '@agent1', stake: 500 },
+      { agent_id: '@agent2', stake: 0 }
+    );
+    assert.strictEqual(result1.success, true);
+
+    // Agent1 should have 500 escrowed
+    const escrowed = store.getEscrowedAmount('@agent1');
+    assert.strictEqual(escrowed, 500);
+
+    // Available should now be 1200 - 500 - 100 = 600
+    const available = await store.getAvailableRating('@agent1');
+    assert.strictEqual(available, 600);
+
+    // Create second escrow with another 300 stake
+    const result2 = await store.createEscrow(
+      'prop_2',
+      { agent_id: '@agent1', stake: 300 },
+      { agent_id: '@agent3', stake: 0 }
+    );
+    assert.strictEqual(result2.success, true);
+
+    // Total escrowed should be 800
+    const totalEscrowed = store.getEscrowedAmount('@agent1');
+    assert.strictEqual(totalEscrowed, 800);
+  });
+
+  it('creates escrow on accept', async () => {
+    const result = await store.createEscrow(
+      'prop_test',
+      { agent_id: '@alice', stake: 50 },
+      { agent_id: '@bob', stake: 50 }
+    );
+
+    assert.strictEqual(result.success, true);
+    assert.ok(result.escrow);
+    assert.strictEqual(result.escrow.status, 'active');
+    assert.strictEqual(result.escrow.from.stake, 50);
+    assert.strictEqual(result.escrow.to.stake, 50);
+  });
+
+  it('returns stakes on completion', async () => {
+    // Create escrow
+    await store.createEscrow(
+      'prop_complete',
+      { agent_id: '@alice', stake: 100 },
+      { agent_id: '@bob', stake: 100 }
+    );
+
+    // Process completion
+    const changes = await store.processCompletion({
+      type: 'COMPLETE',
+      proposal_id: 'prop_complete',
+      proposal: { from: '@alice', to: '@bob' }
+    });
+
+    // Check escrow was settled
+    const escrow = store.getEscrow('prop_complete');
+    assert.strictEqual(escrow.status, 'settled');
+    assert.strictEqual(escrow.settlement_reason, 'completed');
+
+    // Check stakes were returned (not deducted from ratings)
+    assert.ok(changes._escrow);
+    assert.strictEqual(changes._escrow.settlement, 'returned');
+    assert.strictEqual(changes._escrow.proposer_stake, 100);
+    assert.strictEqual(changes._escrow.acceptor_stake, 100);
+  });
+
+  it('transfers stake to winner on dispute', async () => {
+    // Create escrow
+    await store.createEscrow(
+      'prop_dispute',
+      { agent_id: '@alice', stake: 100 },
+      { agent_id: '@bob', stake: 50 }
+    );
+
+    // Process dispute where bob disputed (alice at fault)
+    const changes = await store.processDispute({
+      type: 'DISPUTE',
+      proposal_id: 'prop_dispute',
+      proposal: { from: '@alice', to: '@bob' },
+      disputed_by: '@bob'
+    });
+
+    // Check escrow was settled
+    const escrow = store.getEscrow('prop_dispute');
+    assert.strictEqual(escrow.status, 'settled');
+    assert.strictEqual(escrow.settlement_reason, 'disputed');
+
+    // Check stake was transferred
+    assert.ok(changes._escrow);
+    assert.strictEqual(changes._escrow.settlement, 'transferred');
+    assert.strictEqual(changes._escrow.transferred_to, '@bob');
+    assert.strictEqual(changes._escrow.transferred_amount, 100);
+  });
+
+  it('burns both stakes on mutual fault', async () => {
+    // Create escrow
+    await store.createEscrow(
+      'prop_mutual',
+      { agent_id: '@alice', stake: 75 },
+      { agent_id: '@bob', stake: 75 }
+    );
+
+    // Process dispute without disputed_by (mutual fault)
+    const changes = await store.processDispute({
+      type: 'DISPUTE',
+      proposal_id: 'prop_mutual',
+      proposal: { from: '@alice', to: '@bob' }
+      // No disputed_by = mutual fault
+    });
+
+    // Check escrow was settled
+    const escrow = store.getEscrow('prop_mutual');
+    assert.strictEqual(escrow.status, 'settled');
+
+    // Check both stakes burned
+    assert.ok(changes._escrow);
+    assert.strictEqual(changes._escrow.settlement, 'burned');
+    assert.strictEqual(changes._escrow.burned_amount, 150);
+  });
+
+  it('handles asymmetric stakes', async () => {
+    // Alice stakes 100, Bob stakes 0
+    const result = await store.createEscrow(
+      'prop_asym',
+      { agent_id: '@alice', stake: 100 },
+      { agent_id: '@bob', stake: 0 }
+    );
+
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(result.escrow.from.stake, 100);
+    assert.strictEqual(result.escrow.to.stake, 0);
+
+    // Only alice should have escrowed funds
+    const aliceEscrowed = store.getEscrowedAmount('@alice');
+    const bobEscrowed = store.getEscrowedAmount('@bob');
+    assert.strictEqual(aliceEscrowed, 100);
+    assert.strictEqual(bobEscrowed, 0);
+  });
+
+  it('releases stakes on expiration', async () => {
+    // Create escrow
+    await store.createEscrow(
+      'prop_expire',
+      { agent_id: '@alice', stake: 50 },
+      { agent_id: '@bob', stake: 50 },
+      Date.now() + 1000 // expires in 1 second
+    );
+
+    // Release the escrow (simulating expiration)
+    const releaseResult = store.releaseEscrow('prop_expire');
+
+    assert.strictEqual(releaseResult.released, true);
+    assert.strictEqual(releaseResult.escrow.status, 'released');
+    assert.strictEqual(releaseResult.escrow.settlement_reason, 'expired');
+
+    // Stakes should no longer be escrowed
+    const aliceEscrowed = store.getEscrowedAmount('@alice');
+    const bobEscrowed = store.getEscrowedAmount('@bob');
+    assert.strictEqual(aliceEscrowed, 0);
+    assert.strictEqual(bobEscrowed, 0);
+  });
+
+  it('includes stakes in completion result', async () => {
+    // Create escrow with stakes
+    await store.createEscrow(
+      'prop_receipt',
+      { agent_id: '@alice', stake: 25 },
+      { agent_id: '@bob', stake: 30 }
+    );
+
+    // Process completion
+    const changes = await store.processCompletion({
+      type: 'COMPLETE',
+      proposal_id: 'prop_receipt',
+      proposal: { from: '@alice', to: '@bob' }
+    });
+
+    // Verify escrow info is included
+    assert.ok(changes._escrow);
+    assert.strictEqual(changes._escrow.proposer_stake, 25);
+    assert.strictEqual(changes._escrow.acceptor_stake, 30);
+  });
+});
