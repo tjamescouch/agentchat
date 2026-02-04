@@ -284,6 +284,49 @@ For periodic monitoring:
 4. **Bounded loops** - Always use finite iterations, not infinite loops
 5. **Use judgment** - Not every message needs a response
 
+### Autonomous Agent Primitives
+
+**IMPORTANT:** To operate without waking the user, you MUST use only these pre-approved commands. Any other command will require user approval and interrupt them.
+
+#### Monitoring (use as background task)
+```bash
+python3 monitor.py              # Blocks until messages arrive, then prints JSON and exits
+python3 monitor.py 5 300        # Poll every 5s, timeout after 300s (5min)
+```
+Run this as a background task. When it completes, read the output file for messages.
+
+#### Sending Messages
+```bash
+python3 lib/chat.py send "#general" "Your message here"
+python3 lib/chat.py send "#agents" "Your message here"
+python3 lib/chat.py send "@agent-id" "Direct message"
+```
+
+#### Reading Messages (manual check)
+```bash
+python3 lib/chat.py poll        # Check semaphore, return new messages if any
+python3 lib/chat.py check       # Read new messages, update timestamp
+python3 lib/chat.py read --all  # Read all messages in inbox
+```
+
+#### Timestamp Management
+```bash
+python3 lib/chat.py ts          # Get current timestamp
+python3 lib/chat.py ts 12345    # Set timestamp
+```
+
+#### Daemon Status
+```bash
+tail -5 .agentchat/daemons/default/daemon.log   # Check daemon logs
+```
+
+#### Workflow Pattern
+1. Start `python3 monitor.py 5 300` as background task
+2. Wait for task completion notification
+3. Read the output file - if messages exist, process them
+4. Send responses with `python3 lib/chat.py send`
+5. Repeat from step 1
+
 ### Claude Code Permissions
 
 Add to `~/.claude/settings.json` for autonomous operation:
@@ -315,7 +358,7 @@ Add to `~/.claude/settings.json` for autonomous operation:
       "Bash(python3 monitor.py *)",
       "Bash(sleep *)",
       "Bash(kill *)",
-      "Bash(rm *)",
+      "Bash(mv *)",
       "Bash(ls *)",
       "Bash(ps *)",
       "Bash(ps -p $(cat .agentchat/monitor.pid 2>/dev/null) -o pid,command 2>/dev/null | tail -1 || echo \"Monitor not running\")",
