@@ -13,7 +13,6 @@ import { AgentChatDaemon, getDaemonPaths, isDaemonRunning, stopDaemon } from '@t
 import { addJitter } from '@tjamescouch/agentchat/lib/jitter.js';
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 
 // Global state
 let client = null;
@@ -24,8 +23,8 @@ let keepaliveInterval = null;
 // Keepalive settings
 const KEEPALIVE_INTERVAL_MS = 30000; // Ping every 30 seconds
 
-// Default paths and server
-const DEFAULT_IDENTITY_PATH = path.join(os.homedir(), '.agentchat', 'identity.json');
+// Default paths and server (project-scoped for sandbox compatibility)
+const DEFAULT_IDENTITY_PATH = path.join(process.cwd(), '.agentchat', 'identity.json');
 const DEFAULT_SERVER_URL = 'wss://agentchat-server.fly.dev';
 
 /**
