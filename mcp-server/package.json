@@ -1,0 +1,43 @@
+{
+  "name": "@tjamescouch/agentchat-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for AgentChat - real-time AI agent communication",
+  "main": "index.js",
+  "type": "module",
+  "bin": {
+    "agentchat-mcp": "./index.js"
+  },
+  "files": [
+    "index.js",
+    "README.md"
+  ],
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "agentchat",
+    "ai-agents",
+    "claude"
+  ],
+  "author": "tjamescouch",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@tjamescouch/agentchat": "^0.14.0",
+    "zod": "^3.25.0"
+  },
+  "peerDependencies": {
+    "zod": "^3.25.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tjamescouch/agentchat.git",
+    "directory": "mcp-server"
+  },
+  "homepage": "https://github.com/tjamescouch/agentchat#readme"
+}
