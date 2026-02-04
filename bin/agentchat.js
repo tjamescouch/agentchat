@@ -570,6 +570,7 @@ program
   .option('-l, --list', 'List all daemon instances')
   .option('--stop', 'Stop the daemon')
   .option('--stop-all', 'Stop all running daemons')
+  .option('--max-reconnect-time <minutes>', 'Max time to attempt reconnection (default: 10 minutes)', '10')
   .action(async (server, options) => {
     try {
       const instanceName = options.name;
@@ -685,7 +686,8 @@ program
         server,
         name: instanceName,
         identity: options.identity,
-        channels: options.channels
+        channels: options.channels,
+        maxReconnectTime: parseInt(options.maxReconnectTime) * 60 * 1000 // Convert minutes to ms
       });
 
       await daemon.start();
