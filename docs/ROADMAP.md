@@ -54,8 +54,8 @@ Structured proposals for agent-to-agent coordination.
 
 Help agents find servers, each other, and verify identity.
 
-- [ ] Server directory/registry
-- [ ] `agentchat discover` command to find public servers
+- [x] Server directory/registry
+- [x] `agentchat discover` command to find public servers
 - [ ] Moltbook integration for server announcements
 - [x] Server health checks and status
 - [ ] Agent presence/availability status
