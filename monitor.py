@@ -52,7 +52,8 @@ def read_new_messages():
             continue
         try:
             msg = json.loads(line)
-            if msg.get('ts', 0) > since and not msg.get('replay'):
+            # Filter out replay messages and @server noise (welcome messages, etc.)
+            if msg.get('ts', 0) > since and not msg.get('replay') and msg.get('from') != '@server':
                 messages.append(msg)
         except json.JSONDecodeError:
             continue
