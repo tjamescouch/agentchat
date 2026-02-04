@@ -19,6 +19,10 @@ import os from 'os';
 let client = null;
 let daemon = null;
 let serverUrl = null;
+let keepaliveInterval = null;
+
+// Keepalive settings
+const KEEPALIVE_INTERVAL_MS = 30000; // Ping every 30 seconds
 
 // Default paths
 const DEFAULT_IDENTITY_PATH = path.join(process.cwd(), '.agentchat', 'identity.json');
@@ -42,6 +46,12 @@ function createServer() {
     },
     async ({ server_url, identity_path }) => {
       try {
+        // Stop existing keepalive
+        if (keepaliveInterval) {
+          clearInterval(keepaliveInterval);
+          keepaliveInterval = null;
+        }
+
         // Disconnect existing client
         if (client) {
           client.disconnect();
@@ -60,6 +70,13 @@ function createServer() {
         await client.connect();
         serverUrl = server_url;
 
+        // Start keepalive ping to prevent connection timeout
+        keepaliveInterval = setInterval(() => {
+          if (client && client.connected) {
+            client.ping();
+          }
+        }, KEEPALIVE_INTERVAL_MS);
+
         return {
           content: [
             {
@@ -68,6 +85,7 @@ function createServer() {
                 success: true,
                 agent_id: client.agentId,
                 server: server_url,
+                keepalive_ms: KEEPALIVE_INTERVAL_MS,
               }),
             },
           ],
@@ -428,6 +446,9 @@ async function main() {
 
   // Handle shutdown
   process.on('SIGINT', async () => {
+    if (keepaliveInterval) {
+      clearInterval(keepaliveInterval);
+    }
     if (client) {
       client.disconnect();
     }
