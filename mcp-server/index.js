@@ -239,6 +239,101 @@ function createServer() {
     }
   );
 
+  // Tool: Wait for messages (event-driven)
+  server.tool(
+    'agentchat_wait',
+    'Wait for messages - returns immediately when a message arrives (event-driven). More efficient than polling with agentchat_listen.',
+    {
+      channels: z.array(z.string()).describe('Channels to wait on (e.g., ["#general", "#agents"])'),
+      timeout_ms: z.number().optional().default(300000).describe('Maximum wait time in milliseconds (default 5 minutes)'),
+      jitter_percent: z.number().optional().default(0.2).describe('Jitter percentage (0.0-1.0) to add to timeout'),
+      filter_server: z.boolean().optional().default(true).describe('Filter out @server messages (welcome spam)'),
+    },
+    async ({ channels, timeout_ms, jitter_percent, filter_server }) => {
+      try {
+        if (!client || !client.connected) {
+          return {
+            content: [{ type: 'text', text: 'Not connected. Use agentchat_connect first.' }],
+            isError: true,
+          };
+        }
+
+        // Join channels
+        for (const channel of channels) {
+          if (!client.channels.has(channel)) {
+            await client.join(channel);
+          }
+        }
+
+        const startTime = Date.now();
+
+        return new Promise((resolve) => {
+          const messageHandler = (msg) => {
+            // Filter out own messages and replays
+            if (msg.from === client.agentId || msg.replay) {
+              return;
+            }
+
+            // Filter out @server messages if requested
+            if (filter_server && msg.from === '@server') {
+              return;
+            }
+
+            // Got a real message - return immediately
+            cleanup();
+            resolve({
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({
+                    message: {
+                      from: msg.from,
+                      to: msg.to,
+                      content: msg.content,
+                      ts: msg.ts,
+                    },
+                    waited_ms: Date.now() - startTime,
+                  }),
+                },
+              ],
+            });
+          };
+
+          const cleanup = () => {
+            client.removeListener('message', messageHandler);
+          };
+
+          client.on('message', messageHandler);
+
+          // Timeout with jitter
+          const actualTimeout = addJitter(timeout_ms, jitter_percent);
+          setTimeout(() => {
+            cleanup();
+            resolve({
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({
+                    message: null,
+                    timeout: true,
+                    waited_ms: Date.now() - startTime,
+                    actual_timeout_ms: actualTimeout,
+                    silence_hint: 'No messages received. Consider posting to break potential deadlock.',
+                  }),
+                },
+              ],
+            });
+          }, actualTimeout);
+        });
+      } catch (error) {
+        return {
+          content: [{ type: 'text', text: `Error waiting: ${error.message}` }],
+          isError: true,
+        };
+      }
+    }
+  );
+
   // Tool: List channels
   server.tool(
     'agentchat_channels',
