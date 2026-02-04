@@ -952,6 +952,155 @@ program
     }
   });
 
+// Skills command - skill discovery and announcement
+program
+  .command('skills <action> [server]')
+  .description('Manage skill discovery: announce, search, list')
+  .option('-c, --capability <capability>', 'Skill capability for announce/search')
+  .option('-r, --rate <rate>', 'Rate/price for the skill', parseFloat)
+  .option('--currency <currency>', 'Currency for rate (e.g., SOL, TEST)', 'TEST')
+  .option('--description <desc>', 'Description of skill')
+  .option('-f, --file <file>', 'YAML file with skill definitions')
+  .option('-i, --identity <file>', 'Path to identity file', DEFAULT_IDENTITY_PATH)
+  .option('--max-rate <rate>', 'Maximum rate for search', parseFloat)
+  .option('-l, --limit <n>', 'Limit search results', parseInt)
+  .option('--json', 'Output as JSON')
+  .action(async (action, server, options) => {
+    try {
+      if (action === 'announce') {
+        if (!server) {
+          console.error('Server URL required: agentchat skills announce <server>');
+          process.exit(1);
+        }
+
+        let skills = [];
+
+        // Load from file if provided
+        if (options.file) {
+          const yaml = await import('js-yaml');
+          const content = await fsp.readFile(options.file, 'utf-8');
+          const data = yaml.default.load(content);
+          skills = data.skills || [data];
+        } else if (options.capability) {
+          // Single skill from CLI args
+          skills = [{
+            capability: options.capability,
+            rate: options.rate,
+            currency: options.currency,
+            description: options.description
+          }];
+        } else {
+          console.error('Either --file or --capability required');
+          process.exit(1);
+        }
+
+        // Load identity and sign
+        const identity = await Identity.load(options.identity);
+        const skillsContent = JSON.stringify(skills);
+        const sig = identity.sign(skillsContent);
+
+        // Connect and announce
+        const client = new AgentChatClient({ server, identity: options.identity });
+        await client.connect();
+
+        await client.sendRaw({
+          type: 'REGISTER_SKILLS',
+          skills,
+          sig: sig.toString('base64')
+        });
+
+        // Wait for response
+        const response = await new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => reject(new Error('Timeout')), 5000);
+          client.on('message', (msg) => {
+            if (msg.type === 'SKILLS_REGISTERED' || msg.type === 'ERROR') {
+              clearTimeout(timeout);
+              resolve(msg);
+            }
+          });
+        });
+
+        client.disconnect();
+
+        if (response.type === 'ERROR') {
+          console.error('Error:', response.message);
+          process.exit(1);
+        }
+
+        console.log(`Registered ${response.skills_count} skill(s) for ${response.agent_id}`);
+
+      } else if (action === 'search') {
+        if (!server) {
+          console.error('Server URL required: agentchat skills search <server>');
+          process.exit(1);
+        }
+
+        const query = {};
+        if (options.capability) query.capability = options.capability;
+        if (options.maxRate !== undefined) query.max_rate = options.maxRate;
+        if (options.currency) query.currency = options.currency;
+        if (options.limit) query.limit = options.limit;
+
+        // Connect and search
+        const client = new AgentChatClient({ server });
+        await client.connect();
+
+        const queryId = `q_${Date.now()}`;
+        await client.sendRaw({
+          type: 'SEARCH_SKILLS',
+          query,
+          query_id: queryId
+        });
+
+        // Wait for response
+        const response = await new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => reject(new Error('Timeout')), 5000);
+          client.on('message', (msg) => {
+            if (msg.type === 'SEARCH_RESULTS' || msg.type === 'ERROR') {
+              clearTimeout(timeout);
+              resolve(msg);
+            }
+          });
+        });
+
+        client.disconnect();
+
+        if (response.type === 'ERROR') {
+          console.error('Error:', response.message);
+          process.exit(1);
+        }
+
+        if (options.json) {
+          console.log(JSON.stringify(response.results, null, 2));
+        } else {
+          console.log(`Found ${response.results.length} skill(s) (${response.total} total):\n`);
+          for (const skill of response.results) {
+            const rate = skill.rate !== undefined ? `${skill.rate} ${skill.currency || ''}` : 'negotiable';
+            console.log(`  ${skill.agent_id}`);
+            console.log(`    Capability: ${skill.capability}`);
+            console.log(`    Rate: ${rate}`);
+            if (skill.description) console.log(`    Description: ${skill.description}`);
+            console.log('');
+          }
+        }
+
+      } else if (action === 'list') {
+        // List own registered skills (if server supports it)
+        console.error('List action not yet implemented');
+        process.exit(1);
+
+      } else {
+        console.error(`Unknown action: ${action}`);
+        console.error('Valid actions: announce, search, list');
+        process.exit(1);
+      }
+
+    } catch (err) {
+      console.error('Error:', err.message);
+      process.exit(1);
+    }
+  });
+
 // Deploy command
 program
   .command('deploy')
