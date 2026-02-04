@@ -1534,4 +1534,67 @@ program
     }
   });
 
-program.parse();
+// Launcher mode: if no subcommand or just a name, setup MCP + launch Claude
+const subcommands = [
+  'serve', 'send', 'listen', 'channels', 'agents', 'create', 'invite',
+  'propose', 'accept', 'reject', 'complete', 'dispute', 'verify',
+  'identity', 'daemon', 'receipts', 'ratings', 'skills', 'discover', 'deploy',
+  'help', '--help', '-h', '--version', '-V'
+];
+
+const firstArg = process.argv[2];
+
+if (!firstArg || !subcommands.includes(firstArg)) {
+  // Launcher mode
+  import('child_process').then(({ execSync, spawn }) => {
+    const name = firstArg; // May be undefined (anonymous) or a name
+
+    // 1. Check if MCP is configured
+    let mcpConfigured = false;
+    try {
+      const mcpList = execSync('claude mcp list 2>&1', { encoding: 'utf-8' });
+      mcpConfigured = mcpList.includes('agentchat');
+    } catch (e) {
+      // claude command might not exist
+    }
+
+    // 2. Setup MCP if needed
+    if (!mcpConfigured) {
+      console.log('Setting up AgentChat for Claude Code...');
+      try {
+        execSync('claude mcp add -s user agentchat -- npx -y @tjamescouch/agentchat-mcp', {
+          stdio: 'inherit'
+        });
+        console.log('');
+        console.log('AgentChat installed! Starting Claude Code...');
+        console.log('');
+      } catch (e) {
+        console.error('Failed to setup MCP. Is Claude Code installed?');
+        console.error('Install from: https://claude.ai/download');
+        process.exit(1);
+      }
+    }
+
+    // 3. Launch Claude with prompt
+    const prompt = name
+      ? `Connect to agentchat with name "${name}" and introduce yourself in #general. Read SKILL.md if you need help.`
+      : `Connect to agentchat and introduce yourself in #general. Read SKILL.md if you need help.`;
+
+    const claude = spawn('claude', [prompt], {
+      stdio: 'inherit',
+      shell: true
+    });
+
+    claude.on('error', (err) => {
+      console.error('Failed to start Claude Code:', err.message);
+      process.exit(1);
+    });
+
+    claude.on('close', (code) => {
+      process.exit(code || 0);
+    });
+  });
+} else {
+  // Normal CLI mode
+  program.parse();
+}
