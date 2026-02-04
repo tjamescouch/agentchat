@@ -72,8 +72,12 @@ function createServer() {
 
         // Start keepalive ping to prevent connection timeout
         keepaliveInterval = setInterval(() => {
-          if (client && client.connected) {
-            client.ping();
+          try {
+            if (client && client.connected) {
+              client.ping();
+            }
+          } catch (e) {
+            // Connection likely dead, will reconnect on next tool call
           }
         }, KEEPALIVE_INTERVAL_MS);
 
