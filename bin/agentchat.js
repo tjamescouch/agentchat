@@ -201,7 +201,8 @@ program
       
       console.log(`Agents in ${channel}:`);
       for (const agent of agents) {
-        console.log(`  ${agent}`);
+        const status = agent.status_text ? ` - ${agent.status_text}` : '';
+        console.log(`  ${agent.id} (${agent.name}) [${agent.presence}]${status}`);
       }
       
       client.disconnect();
