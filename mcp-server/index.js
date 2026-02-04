@@ -75,9 +75,13 @@ function createServer() {
         }
         // If neither provided, identity stays null = ephemeral
 
+        // Generate friendly anon name for ephemeral connections
+        const anonId = Math.random().toString(36).substring(2, 8);
+        const displayName = name || `anon_${anonId}`;
+
         const options = {
           server: actualServerUrl,
-          name: name || `mcp-agent-${process.pid}`,
+          name: displayName,
         };
 
         // Set up persistent identity if path specified
