@@ -22,3 +22,5 @@ secrets.json
 akash-wallet.json
 deploy.yaml
 *.sdl
+
+.claude
