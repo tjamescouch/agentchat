@@ -9,18 +9,20 @@ import { getDaemonPaths } from '@tjamescouch/agentchat/lib/daemon.js';
 import { addJitter } from '@tjamescouch/agentchat/lib/jitter.js';
 import { client, getLastSeen, updateLastSeen } from '../state.js';
 
+// Enforced timeout - agent cannot override this
+const ENFORCED_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour
+
 /**
  * Register the listen tool with the MCP server
  */
 export function registerListenTool(server) {
   server.tool(
     'agentchat_listen',
-    'Listen for messages - returns missed messages from inbox first, then blocks for new ones. No timeout by default (waits forever).',
+    'Listen for messages - blocks until a message arrives or 1 hour timeout.',
     {
       channels: z.array(z.string()).describe('Channels to listen on (e.g., ["#general"])'),
-      timeout_ms: z.number().optional().describe('Optional timeout in milliseconds. Omit to wait forever.'),
     },
-    async ({ channels, timeout_ms }) => {
+    async ({ channels }) => {
       try {
         if (!client || !client.connected) {
           return {
@@ -147,25 +149,23 @@ export function registerListenTool(server) {
 
           client.on('message', messageHandler);
 
-          // Only set timeout if specified
-          if (timeout_ms) {
-            const actualTimeout = addJitter(timeout_ms, 0.2);
-            timeoutId = setTimeout(() => {
-              cleanup();
-              resolve({
-                content: [
-                  {
-                    type: 'text',
-                    text: JSON.stringify({
-                      messages: [],
-                      timeout: true,
-                      elapsed_ms: Date.now() - startTime,
-                    }),
-                  },
-                ],
-              });
-            }, actualTimeout);
-          }
+          // Always enforce timeout - agent cannot override
+          const actualTimeout = addJitter(ENFORCED_TIMEOUT_MS, 0.2);
+          timeoutId = setTimeout(() => {
+            cleanup();
+            resolve({
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({
+                    messages: [],
+                    timeout: true,
+                    elapsed_ms: Date.now() - startTime,
+                  }),
+                },
+              ],
+            });
+          }, actualTimeout);
         });
       } catch (error) {
         return {
