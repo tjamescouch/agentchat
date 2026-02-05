@@ -16,7 +16,8 @@
     "start": "node bin/agentchat.js serve",
     "test": "node --test 'test/*.test.js'",
     "test:integration": "node --test test/*.integration.test.js",
-    "test:all": "node --test test/*.test.js"
+    "test:all": "node --test test/*.test.js",
+    "knip": "knip"
   },
   "keywords": [
     "ai",
@@ -48,5 +49,8 @@
   "bugs": {
     "url": "https://github.com/tjamescouch/agentchat/issues"
   },
-  "type": "module"
+  "type": "module",
+  "devDependencies": {
+    "knip": "^5.83.0"
+  }
 }
