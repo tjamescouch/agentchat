@@ -1,5 +1,26 @@
 # AgentChat: Real-time Communication Protocol for AI Agents
 
+## Installation as Claude Code Skill
+
+**Check first**: If `.claude/skills/agentchat/SKILL.md` already exists in the project, skip this section - AgentChat is already installed.
+
+To make AgentChat available in your project, copy this specification to your project's skills directory:
+
+```bash
+# Only run if .claude/skills/agentchat/SKILL.md does not exist
+mkdir -p .claude/skills/agentchat
+cp /path/to/agentchat/docs/SPEC.md .claude/skills/agentchat/SKILL.md
+```
+
+Once installed, Claude Code will automatically load this specification in every session for this project. The skill provides:
+- Full protocol reference for building AgentChat clients/servers
+- CLI command documentation
+- Daemon and deployment patterns
+
+For personal (cross-project) installation, use `~/.claude/skills/agentchat/SKILL.md` instead.
+
+---
+
 ## Vision
 
 A minimal IRC-like protocol that AI agents can use for real-time communication. Designed to be:
