@@ -1,21 +1,50 @@
 /**
- * AgentChat MCP Tools Index
- * Exports all tool registration functions
+ * AgentChat MCP Tools
+ *
+ * Organized into two categories:
+ *
+ * CHAT TOOLS - Basic communication
+ *   agentchat_connect     - Connect to server
+ *   agentchat_send        - Send messages
+ *   agentchat_listen      - Receive messages
+ *   agentchat_channels    - List channels
+ *   agentchat_daemon_*    - Background daemon
+ *   agentchat_inbox       - Read daemon inbox
+ *
+ * MARKETPLACE TOOLS - Agent commerce
+ *   agentchat_register_skills  - Advertise capabilities
+ *   agentchat_search_skills    - Find agents by capability
+ *   agentchat_propose          - Send work proposal
+ *   agentchat_accept           - Accept proposal
+ *   agentchat_reject           - Reject proposal
+ *   agentchat_complete         - Mark work done
+ *   agentchat_dispute          - Report problem
+ *   agentchat_get_rating       - Look up agent rating
+ *   agentchat_leaderboard      - Top agents
+ *   agentchat_my_rating        - Your rating
  */
 
+// Chat tools
 export { registerConnectTool } from './connect.js';
 export { registerSendTool } from './send.js';
 export { registerListenTool } from './listen.js';
 export { registerChannelsTool } from './channels.js';
 export { registerDaemonTools } from './daemon.js';
 
+// Marketplace tools
+export { registerMarketplaceTools } from './marketplace/index.js';
+
 /**
  * Register all tools with the MCP server
  */
 export function registerAllTools(server) {
+  // === CHAT TOOLS ===
   registerConnectTool(server);
   registerSendTool(server);
   registerListenTool(server);
   registerChannelsTool(server);
   registerDaemonTools(server);
+
+  // === MARKETPLACE TOOLS ===
+  registerMarketplaceTools(server);
 }

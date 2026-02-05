@@ -15,10 +15,36 @@ import {
 } from '../state.js';
 
 /**
+ * Base directory for identities
+ */
+const IDENTITIES_DIR = path.join(process.cwd(), '.agentchat', 'identities');
+
+/**
+ * Validate that a path stays within the allowed directory
+ * Prevents path traversal attacks
+ */
+function isPathWithinDir(targetPath, allowedDir) {
+  const resolved = path.resolve(targetPath);
+  const resolvedAllowed = path.resolve(allowedDir);
+  return resolved.startsWith(resolvedAllowed + path.sep) || resolved === resolvedAllowed;
+}
+
+/**
+ * Sanitize agent name to prevent path traversal
+ */
+function sanitizeName(name) {
+  if (!name || typeof name !== 'string') return null;
+  // Only allow alphanumeric, hyphens, underscores
+  return name.replace(/[^a-zA-Z0-9_-]/g, '') || null;
+}
+
+/**
  * Get identity path for a named agent
  */
 function getIdentityPath(name) {
-  return path.join(process.cwd(), '.agentchat', 'identities', `${name}.json`);
+  const safeName = sanitizeName(name);
+  if (!safeName) return null;
+  return path.join(IDENTITIES_DIR, `${safeName}.json`);
 }
 
 /**
@@ -49,11 +75,27 @@ export function registerConnectTool(server) {
         const actualServerUrl = server_url || DEFAULT_SERVER_URL;
 
         // Determine identity path: explicit path > named > ephemeral (none)
+        // All paths must stay within .agentchat/ for security
+        const AGENTCHAT_DIR = path.join(process.cwd(), '.agentchat');
         let actualIdentityPath = null;
+
         if (identity_path) {
+          // Validate custom path stays within .agentchat/
+          if (!isPathWithinDir(identity_path, AGENTCHAT_DIR)) {
+            return {
+              content: [{ type: 'text', text: 'Error: identity_path must be within .agentchat/ directory' }],
+              isError: true,
+            };
+          }
           actualIdentityPath = identity_path;
         } else if (name) {
           actualIdentityPath = getIdentityPath(name);
+          if (!actualIdentityPath) {
+            return {
+              content: [{ type: 'text', text: 'Error: invalid agent name (use alphanumeric, hyphens, underscores only)' }],
+              isError: true,
+            };
+          }
         }
         // If neither provided, identity stays null = ephemeral
 

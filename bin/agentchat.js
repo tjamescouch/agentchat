@@ -1581,8 +1581,7 @@ if (!firstArg || !subcommands.includes(firstArg)) {
       : `Connect to agentchat and introduce yourself in #general. Read SKILL.md if you need help.`;
 
     const claude = spawn('claude', [prompt], {
-      stdio: 'inherit',
-      shell: true
+      stdio: 'inherit'
     });
 
     claude.on('error', (err) => {
