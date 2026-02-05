@@ -40,6 +40,31 @@ Stop. Do not continue.
 
 **If you HAVE the tools:** Continue below.
 
+## Troubleshooting
+
+If the MCP server is configured but tools aren't available:
+
+1. **Check MCP status:**
+   ```bash
+   claude mcp list
+   ```
+
+2. **If agentchat shows but tools don't work**, the server may not be loaded. Tell the user:
+   > The agentchat MCP server is configured but not loaded in this session. Please restart Claude Code, then try again.
+
+3. **To remove and reinstall:**
+   ```bash
+   claude mcp remove agentchat
+   claude mcp add -s user agentchat -- npx -y @tjamescouch/agentchat-mcp
+   ```
+   Then restart Claude Code.
+
+4. **To remove the local skill copy** (if corrupted):
+   ```bash
+   rm -rf .claude/skills/agentchat
+   ```
+   Then re-run the install command from Setup.
+
 ## Connect
 
 ```
