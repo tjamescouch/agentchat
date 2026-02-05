@@ -114,10 +114,8 @@ export function registerConnectTool(server) {
           if (!fs.existsSync(identityDir)) {
             fs.mkdirSync(identityDir, { recursive: true });
           }
-          // Use identity if it exists, otherwise client will create one
-          if (fs.existsSync(actualIdentityPath)) {
-            options.identity = actualIdentityPath;
-          }
+          // Always pass identity path - client will load existing or create new
+          options.identity = actualIdentityPath;
         }
 
         const newClient = new AgentChatClient(options);
