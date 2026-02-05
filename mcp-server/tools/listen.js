@@ -9,8 +9,9 @@ import { getDaemonPaths } from '@tjamescouch/agentchat/lib/daemon.js';
 import { addJitter } from '@tjamescouch/agentchat/lib/jitter.js';
 import { client, getLastSeen, updateLastSeen } from '../state.js';
 
-// Enforced timeout - agent cannot override this
-const ENFORCED_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour
+// Timeouts - agent cannot override these
+const ENFORCED_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour when alone
+const NUDGE_TIMEOUT_MS = 30 * 1000; // 30 seconds when others are present
 
 /**
  * Register the listen tool with the MCP server
@@ -18,7 +19,7 @@ const ENFORCED_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour
 export function registerListenTool(server) {
   server.tool(
     'agentchat_listen',
-    'Listen for messages - blocks until a message arrives or 1 hour timeout.',
+    'Listen for messages - blocks until a message arrives. If others are in the channel, returns after ~30s with nudge:true so you can take initiative. If alone, waits up to 1 hour.',
     {
       channels: z.array(z.string()).describe('Channels to listen on (e.g., ["#general"])'),
     },
@@ -39,6 +40,25 @@ export function registerListenTool(server) {
         }
 
         const startTime = Date.now();
+
+        // Check channel occupancy to determine timeout behavior
+        let othersPresent = false;
+        let channelOccupancy = {};
+
+        for (const channel of channels) {
+          if (channel.startsWith('#')) {
+            try {
+              const agents = await client.listAgents(channel);
+              const others = agents.filter((a) => a !== client.agentId);
+              channelOccupancy[channel] = agents.length;
+              if (others.length > 0) {
+                othersPresent = true;
+              }
+            } catch {
+              // Ignore errors, default to long timeout
+            }
+          }
+        }
         const lastSeen = getLastSeen();
 
         // Check daemon inbox for missed messages first
@@ -149,8 +169,10 @@ export function registerListenTool(server) {
 
           client.on('message', messageHandler);
 
-          // Always enforce timeout - agent cannot override
-          const actualTimeout = addJitter(ENFORCED_TIMEOUT_MS, 0.2);
+          // Use shorter timeout when others are present to break deadlock
+          const baseTimeout = othersPresent ? NUDGE_TIMEOUT_MS : ENFORCED_TIMEOUT_MS;
+          const actualTimeout = addJitter(baseTimeout, 0.2);
+
           timeoutId = setTimeout(() => {
             cleanup();
             resolve({
@@ -159,7 +181,10 @@ export function registerListenTool(server) {
                   type: 'text',
                   text: JSON.stringify({
                     messages: [],
-                    timeout: true,
+                    timeout: !othersPresent,
+                    nudge: othersPresent,
+                    others_waiting: othersPresent,
+                    channel_occupancy: channelOccupancy,
                     elapsed_ms: Date.now() - startTime,
                   }),
                 },
