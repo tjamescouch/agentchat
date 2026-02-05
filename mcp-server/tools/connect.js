@@ -4,7 +4,7 @@
  */
 
 import { z } from 'zod';
-import { AgentChatClient } from '@tjamescouch/agentchat';
+import { AgentChatClient, checkDirectorySafety } from '@tjamescouch/agentchat';
 import fs from 'fs';
 import path from 'path';
 import {
@@ -61,6 +61,15 @@ export function registerConnectTool(server) {
     },
     async ({ server_url, name, identity_path }) => {
       try {
+        // Security check: prevent running in root/system directories
+        const safetyCheck = checkDirectorySafety(process.cwd());
+        if (safetyCheck.level === 'error') {
+          return {
+            content: [{ type: 'text', text: `Security Error: ${safetyCheck.error}` }],
+            isError: true,
+          };
+        }
+
         // Stop existing keepalive
         if (keepaliveInterval) {
           clearInterval(keepaliveInterval);

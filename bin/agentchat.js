@@ -52,6 +52,7 @@ import {
   ServerDirectory,
   DEFAULT_DIRECTORY_PATH
 } from '../lib/server-directory.js';
+import { enforceDirectorySafety, checkDirectorySafety } from '../lib/security.js';
 
 program
   .name('agentchat')
@@ -619,6 +620,12 @@ program
     try {
       const instanceName = options.name;
       const paths = getDaemonPaths(instanceName);
+
+      // Security check for operations that create files (not for status/list/stop)
+      const needsSafetyCheck = !options.list && !options.status && !options.stop && !options.stopAll;
+      if (needsSafetyCheck) {
+        enforceDirectorySafety(process.cwd(), { allowWarnings: true, silent: false });
+      }
 
       // List all daemons
       if (options.list) {
@@ -1546,6 +1553,17 @@ const firstArg = process.argv[2];
 
 if (!firstArg || !subcommands.includes(firstArg)) {
   // Launcher mode
+
+  // Security check: prevent running in root/system directories
+  const safetyCheck = checkDirectorySafety(process.cwd());
+  if (safetyCheck.level === 'error') {
+    console.error(`\n❌ ERROR: ${safetyCheck.error}`);
+    process.exit(1);
+  }
+  if (safetyCheck.level === 'warning') {
+    console.error(`\n⚠️  WARNING: ${safetyCheck.warning}`);
+  }
+
   import('child_process').then(({ execSync, spawn }) => {
     const name = firstArg; // May be undefined (anonymous) or a name
 
