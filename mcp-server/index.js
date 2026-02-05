@@ -10,6 +10,14 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { registerAllTools } from './tools/index.js';
 import { client, daemon, keepaliveInterval } from './state.js';
 
+// Re-export for external use
+import { registerConnectTool } from './tools/connect.js';
+import { registerSendTool } from './tools/send.js';
+import { registerListenTool } from './tools/listen.js';
+import { registerChannelsTool } from './tools/channels.js';
+import { registerDaemonTools } from './tools/daemon.js';
+import { registerMarketplaceTools } from './tools/marketplace/index.js';
+
 /**
  * Create and configure the MCP server
  */
@@ -53,3 +61,10 @@ main().catch((error) => {
   console.error('Fatal error:', error);
   process.exit(1);
 });
+
+export { registerConnectTool }
+export { registerSendTool }
+export { registerListenTool }
+export { registerChannelsTool }
+export { registerDaemonTools }
+export { registerMarketplaceTools }

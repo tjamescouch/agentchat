@@ -7,6 +7,12 @@
  * - Reputation: Track trust via ELO ratings
  */
 
+// Import for local use
+import { registerSkillsTools } from './skills.js';
+import { registerProposalTools } from './proposals.js';
+import { registerReputationTools } from './reputation.js';
+
+// Re-export for external use
 export { registerSkillsTools } from './skills.js';
 export { registerProposalTools } from './proposals.js';
 export { registerReputationTools } from './reputation.js';

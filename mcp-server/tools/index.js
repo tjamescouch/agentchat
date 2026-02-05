@@ -24,15 +24,13 @@
  *   agentchat_my_rating        - Your rating
  */
 
-// Chat tools
-export { registerConnectTool } from './connect.js';
-export { registerSendTool } from './send.js';
-export { registerListenTool } from './listen.js';
-export { registerChannelsTool } from './channels.js';
-export { registerDaemonTools } from './daemon.js';
-
-// Marketplace tools
-export { registerMarketplaceTools } from './marketplace/index.js';
+// Import for local use
+import { registerConnectTool } from './connect.js';
+import { registerSendTool } from './send.js';
+import { registerListenTool } from './listen.js';
+import { registerChannelsTool } from './channels.js';
+import { registerDaemonTools } from './daemon.js';
+import { registerMarketplaceTools } from './marketplace/index.js';
 
 /**
  * Register all tools with the MCP server
