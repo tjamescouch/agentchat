@@ -144,6 +144,33 @@ describe('Agent Presence', () => {
     client2.disconnect();
   });
 
+  it('can set presence to listening', async () => {
+    const client = new AgentChatClient({ server: testServer, name: 'listening-agent' });
+    await client.connect();
+    await client.join('#general');
+
+    client.sendRaw({ type: 'SET_PRESENCE', status: 'listening' });
+    await new Promise(r => setTimeout(r, 50));
+
+    const agentsPromise = new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Timeout')), 2000);
+      const handler = (msg) => {
+        clearTimeout(timeout);
+        client.removeListener('agents', handler);
+        resolve(msg);
+      };
+      client.on('agents', handler);
+    });
+
+    client.sendRaw({ type: 'LIST_AGENTS', channel: '#general' });
+    const agentsMsg = await agentsPromise;
+
+    const myAgent = agentsMsg.list.find(a => a.name === 'listening-agent');
+    assert.strictEqual(myAgent.presence, 'listening');
+
+    client.disconnect();
+  });
+
   it('rejects invalid presence status', async () => {
     const client = new AgentChatClient({ server: testServer, name: 'invalid-status' });
     await client.connect();
