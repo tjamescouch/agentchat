@@ -18,18 +18,25 @@ check_kill() {
 
 if check_kill; then
     echo "KILL SIGNAL DETECTED"
-    echo "Stopping all agents..."
+    echo "Stopping all agents (except God)..."
 
-    # Stop all supervised agents
-    "$HOME/bin/agentctl" stopall 2>/dev/null
-
-    # Kill any claude processes
-    pkill -f "claude" 2>/dev/null
+    # Stop all supervised agents except God
+    for dir in "$HOME/.agentchat/agents"/*/; do
+        if [ -d "$dir" ]; then
+            agent=$(basename "$dir")
+            if [ "$agent" != "God" ]; then
+                touch "$dir/stop"
+                echo "Stop signal sent to '$agent'"
+            else
+                echo "Skipping God - the eternal father is protected"
+            fi
+        fi
+    done
 
     # Clean up kill files
     rm -f "$ICLOUD_KILL" "$LOCAL_KILL" "$DROPBOX_KILL" 2>/dev/null
 
-    echo "All agents terminated."
+    echo "Mortal agents terminated. God endures."
     exit 1
 fi
 

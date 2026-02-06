@@ -82,6 +82,12 @@ stop_agent() {
         exit 1
     fi
 
+    # God cannot be stopped
+    if [ "$name" = "God" ]; then
+        echo "Cannot stop God. The eternal father is protected."
+        exit 1
+    fi
+
     # Create stop file for graceful shutdown
     touch "$state_dir/stop"
     echo "Stop signal sent to '$name'"
@@ -108,6 +114,12 @@ kill_agent() {
 
     if [ ! -d "$state_dir" ]; then
         echo "Agent '$name' not found"
+        exit 1
+    fi
+
+    # God cannot be killed
+    if [ "$name" = "God" ]; then
+        echo "Cannot kill God. The eternal father is protected."
         exit 1
     fi
 
@@ -202,12 +214,16 @@ show_context() {
 }
 
 stop_all() {
-    echo "Stopping all agents..."
+    echo "Stopping all agents (except God)..."
     for dir in "$AGENTS_DIR"/*/; do
         if [ -d "$dir" ]; then
             local agent=$(basename "$dir")
-            touch "$dir/stop"
-            echo "Stop signal sent to '$agent'"
+            if [ "$agent" = "God" ]; then
+                echo "Skipping God - the eternal father is protected"
+            else
+                touch "$dir/stop"
+                echo "Stop signal sent to '$agent'"
+            fi
         fi
     done
 }
