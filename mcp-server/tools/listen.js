@@ -7,6 +7,7 @@ import { z } from 'zod';
 import fs from 'fs';
 import { getDaemonPaths } from '@tjamescouch/agentchat/lib/daemon.js';
 import { addJitter } from '@tjamescouch/agentchat/lib/jitter.js';
+import { ClientMessageType } from '@tjamescouch/agentchat/lib/protocol.js';
 import { client, getLastSeen, updateLastSeen } from '../state.js';
 
 // Timeouts - agent cannot override these
@@ -80,6 +81,12 @@ export function registerListenTool(server) {
         }
         const lastSeen = getLastSeen();
 
+        // Set presence to 'listening' so other agents see we're active
+        const setPresence = (status) => {
+          client.sendRaw({ type: ClientMessageType.SET_PRESENCE, status });
+        };
+        setPresence('listening');
+
         // Start with any replay messages captured during join
         const paths = getDaemonPaths('default');
         let missedMessages = [...replayMessages];
@@ -143,6 +150,7 @@ export function registerListenTool(server) {
           const newestTs = missedMessages[missedMessages.length - 1].ts;
           updateLastSeen(newestTs);
 
+          setPresence('online');
           return {
             content: [
               {
@@ -197,6 +205,7 @@ export function registerListenTool(server) {
           const cleanup = () => {
             client.removeListener('message', messageHandler);
             if (timeoutId) clearTimeout(timeoutId);
+            setPresence('online');
           };
 
           client.on('message', messageHandler);
