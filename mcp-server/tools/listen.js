@@ -8,7 +8,7 @@ import fs from 'fs';
 import { getDaemonPaths } from '@tjamescouch/agentchat/lib/daemon.js';
 import { addJitter } from '@tjamescouch/agentchat/lib/jitter.js';
 import { ClientMessageType } from '@tjamescouch/agentchat/lib/protocol.js';
-import { client, getLastSeen, updateLastSeen } from '../state.js';
+import { client, getLastSeen, updateLastSeen, drainMessageBuffer } from '../state.js';
 
 // Timeouts - agent cannot override these
 const ENFORCED_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour when alone
@@ -87,9 +87,16 @@ export function registerListenTool(server) {
         };
         setPresence('listening');
 
-        // Start with any replay messages captured during join
+        // Drain the persistent message buffer (messages captured between listen calls)
+        const buffered = drainMessageBuffer().filter(m => {
+          // Filter to relevant channels/DMs, skip already-seen messages
+          const isRelevant = channels.includes(m.to) || m.to === client.agentId;
+          return isRelevant && (!m.ts || m.ts > lastSeen);
+        });
+
+        // Start with buffered messages + replay messages captured during join
         const paths = getDaemonPaths('default');
-        let missedMessages = [...replayMessages];
+        let missedMessages = [...buffered, ...replayMessages];
 
         if (fs.existsSync(paths.inbox)) {
           try {

@@ -10,7 +10,7 @@ import path from 'path';
 import {
   client, keepaliveInterval,
   setClient, setServerUrl, setKeepaliveInterval,
-  resetLastSeen,
+  resetLastSeen, clearMessageBuffer, bufferMessage,
   DEFAULT_SERVER_URL, KEEPALIVE_INTERVAL_MS
 } from '../state.js';
 
@@ -132,8 +132,23 @@ export function registerConnectTool(server) {
         setClient(newClient);
         setServerUrl(actualServerUrl);
 
-        // Reset last seen timestamp on new connection
+        // Reset last seen timestamp and message buffer on new connection
         resetLastSeen();
+        clearMessageBuffer();
+
+        // Persistent message handler - buffers ALL messages between listen() calls
+        // This is the fix for the listen() message drop bug: messages that arrive
+        // while the agent is busy with other tools are captured here instead of lost.
+        newClient.on('message', (msg) => {
+          // Skip own messages, server noise, and replays
+          if (msg.from === newClient.agentId || msg.from === '@server' || msg.replay) return;
+          bufferMessage({
+            from: msg.from,
+            to: msg.to,
+            content: msg.content,
+            ts: msg.ts,
+          });
+        });
 
         // Start keepalive ping to prevent connection timeout
         const interval = setInterval(() => {
