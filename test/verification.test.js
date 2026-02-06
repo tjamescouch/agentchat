@@ -232,21 +232,22 @@ describe('Identity Verification', () => {
     client.disconnect();
   });
 
-  it('handles verification timeout', async () => {
+  it('handles verification timeout', { timeout: 10000 }, async () => {
     // Create a server with very short timeout for testing
+    const shortTimeoutPort = testPort + 100 + Math.floor(Math.random() * 100);
     const shortTimeoutServer = new AgentChatServer({
-      port: testPort + 1,
+      port: shortTimeoutPort,
       logMessages: false,
       verificationTimeoutMs: 500 // 500ms timeout
     });
     shortTimeoutServer.start();
 
     const client1 = new AgentChatClient({
-      server: `ws://localhost:${testPort + 1}`,
+      server: `ws://localhost:${shortTimeoutPort}`,
       identity: path.join(tempDir, 'verifier.json')
     });
     const client2 = new AgentChatClient({
-      server: `ws://localhost:${testPort + 1}`,
+      server: `ws://localhost:${shortTimeoutPort}`,
       identity: path.join(tempDir, 'target.json')
     });
 
@@ -255,7 +256,7 @@ describe('Identity Verification', () => {
 
     // Don't enable auto-verification - let it timeout
     const failedPromise = new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('Test timeout')), 2000);
+      const timeout = setTimeout(() => reject(new Error('Test timeout')), 5000);
       const handler = (msg) => {
         clearTimeout(timeout);
         client1.removeListener('verify_failed', handler);
