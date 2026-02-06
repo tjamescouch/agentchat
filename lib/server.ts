@@ -61,6 +61,7 @@ interface ExtendedWebSocket extends WebSocket {
   _connectedAt?: number;
   _realIp?: string;
   _userAgent?: string;
+  _msgTimestamps?: number[];
 }
 
 // Agent info stored per connection
@@ -508,6 +509,33 @@ export class AgentChatServer {
   }
 
   _handleMessage(ws: ExtendedWebSocket, data: string): void {
+    // Per-connection rate limiting (applies before auth check)
+    const now = Date.now();
+    if (!ws._msgTimestamps) ws._msgTimestamps = [];
+
+    // Sliding window: keep only timestamps from last 10 seconds
+    ws._msgTimestamps = ws._msgTimestamps.filter((t: number) => now - t < 10000);
+    ws._msgTimestamps.push(now);
+
+    const isIdentified = this.agents.has(ws);
+    // Pre-auth: max 10 messages per 10s window (enough for IDENTIFY + JOINs)
+    // Post-auth: max 60 messages per 10s window (existing MSG rate limit also applies)
+    const maxMessages = isIdentified ? 60 : 10;
+
+    if (ws._msgTimestamps.length > maxMessages) {
+      if (!isIdentified) {
+        this._log('pre_auth_rate_limit', {
+          ip: ws._realIp,
+          count: ws._msgTimestamps.length,
+          window: '10s'
+        });
+        ws.close(1008, 'Rate limit exceeded');
+        return;
+      }
+      this._send(ws, createError(ErrorCode.RATE_LIMITED, 'Too many messages'));
+      return;
+    }
+
     const result = validateClientMessage(data);
 
     if (!result.valid) {
