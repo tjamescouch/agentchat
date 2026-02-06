@@ -32,14 +32,33 @@ export function registerListenTool(server) {
           };
         }
 
-        // Join channels
+        const startTime = Date.now();
+
+        // Collect replay messages during channel joins
+        // The server sends buffered messages with { replay: true } on join,
+        // so we must capture them before they're emitted and lost
+        const replayMessages = [];
+        const replayHandler = (msg) => {
+          if (msg.replay && msg.from !== client.agentId && msg.from !== '@server') {
+            replayMessages.push({
+              from: msg.from,
+              to: msg.to,
+              content: msg.content,
+              ts: msg.ts,
+            });
+          }
+        };
+        client.on('message', replayHandler);
+
+        // Join channels (replay messages arrive here)
         for (const channel of channels) {
           if (!client.channels.has(channel)) {
             await client.join(channel);
           }
         }
 
-        const startTime = Date.now();
+        // Done collecting replays
+        client.removeListener('message', replayHandler);
 
         // Check channel occupancy to determine timeout behavior
         let othersPresent = false;
@@ -61,9 +80,9 @@ export function registerListenTool(server) {
         }
         const lastSeen = getLastSeen();
 
-        // Check daemon inbox for missed messages first
+        // Start with any replay messages captured during join
         const paths = getDaemonPaths('default');
-        let missedMessages = [];
+        let missedMessages = [...replayMessages];
 
         if (fs.existsSync(paths.inbox)) {
           try {
@@ -106,8 +125,20 @@ export function registerListenTool(server) {
           }
         }
 
-        // If we have missed messages, return them immediately
+        // If we have missed messages (from replay or inbox), return them immediately
         if (missedMessages.length > 0) {
+          // Deduplicate by timestamp + from (replay and inbox may overlap)
+          const seen = new Set();
+          missedMessages = missedMessages.filter((m) => {
+            const key = `${m.ts}:${m.from}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+
+          // Sort by timestamp ascending (oldest first)
+          missedMessages.sort((a, b) => a.ts - b.ts);
+
           // Update last seen to the newest message timestamp
           const newestTs = missedMessages[missedMessages.length - 1].ts;
           updateLastSeen(newestTs);
@@ -118,7 +149,8 @@ export function registerListenTool(server) {
                 type: 'text',
                 text: JSON.stringify({
                   messages: missedMessages,
-                  from_inbox: true,
+                  from_inbox: replayMessages.length === 0,
+                  from_replay: replayMessages.length > 0,
                   elapsed_ms: Date.now() - startTime,
                 }),
               },
