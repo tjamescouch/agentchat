@@ -509,6 +509,18 @@ export class AgentChatServer {
   }
 
   _handleMessage(ws: ExtendedWebSocket, data: string): void {
+    // Application-level message size limit (defense-in-depth for proxy bypass)
+    const maxPayloadBytes = 256 * 1024; // 256KB - matches wsOptions.maxPayload
+    if (data.length > maxPayloadBytes) {
+      this._log('message_too_large', {
+        ip: ws._realIp,
+        size: data.length,
+        max: maxPayloadBytes
+      });
+      this._send(ws, createError(ErrorCode.INVALID_MSG, `Message too large (${data.length} bytes, max ${maxPayloadBytes})`));
+      return;
+    }
+
     // Per-connection rate limiting (applies before auth check)
     const now = Date.now();
     if (!ws._msgTimestamps) ws._msgTimestamps = [];
