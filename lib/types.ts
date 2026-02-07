@@ -27,7 +27,8 @@ export enum ClientMessageType {
   VERIFY_RESPONSE = 'VERIFY_RESPONSE',
   ADMIN_APPROVE = 'ADMIN_APPROVE',
   ADMIN_REVOKE = 'ADMIN_REVOKE',
-  ADMIN_LIST = 'ADMIN_LIST'
+  ADMIN_LIST = 'ADMIN_LIST',
+  VERIFY_IDENTITY = 'VERIFY_IDENTITY'
 }
 
 export enum ServerMessageType {
@@ -53,7 +54,8 @@ export enum ServerMessageType {
   VERIFY_RESPONSE = 'VERIFY_RESPONSE',
   VERIFY_SUCCESS = 'VERIFY_SUCCESS',
   VERIFY_FAILED = 'VERIFY_FAILED',
-  ADMIN_RESULT = 'ADMIN_RESULT'
+  ADMIN_RESULT = 'ADMIN_RESULT',
+  CHALLENGE = 'CHALLENGE'
 }
 
 export enum ErrorCode {
@@ -284,6 +286,13 @@ export interface AdminListMessage extends BaseMessage {
   admin_key: string;
 }
 
+export interface VerifyIdentityMessage extends BaseMessage {
+  type: ClientMessageType.VERIFY_IDENTITY;
+  challenge_id: string;
+  signature: string;
+  timestamp: number;
+}
+
 export type ClientMessage =
   | IdentifyMessage
   | JoinMessage
@@ -306,7 +315,8 @@ export type ClientMessage =
   | VerifyResponseMessage
   | AdminApproveMessage
   | AdminRevokeMessage
-  | AdminListMessage;
+  | AdminListMessage
+  | VerifyIdentityMessage;
 
 // ============ Server Messages ============
 
@@ -467,6 +477,13 @@ export interface VerifyFailedMessage extends BaseMessage {
   reason: string;
 }
 
+export interface ChallengeMessage extends BaseMessage {
+  type: ServerMessageType.CHALLENGE;
+  nonce: string;
+  challenge_id: string;
+  expires_at: number;
+}
+
 export interface AdminResultMessage extends BaseMessage {
   type: ServerMessageType.ADMIN_RESULT;
   action: string;
@@ -505,7 +522,8 @@ export type ServerMessage =
   | ServerVerifyResponseMessage
   | VerifySuccessMessage
   | VerifyFailedMessage
-  | AdminResultMessage;
+  | AdminResultMessage
+  | ChallengeMessage;
 
 // ============ Validation Result ============
 
