@@ -138,6 +138,7 @@ export interface AgentChatServerOptions {
   allowlistStrict?: boolean;
   allowlistAdminKey?: string | null;
   allowlistFilePath?: string;
+  motd?: string;
   maxConnectionsPerIp?: number;
   heartbeatIntervalMs?: number;
   heartbeatTimeoutMs?: number;
@@ -215,6 +216,9 @@ export class AgentChatServer {
 
   // Allowlist
   allowlist: Allowlist | null;
+
+  // MOTD (message of the day)
+  motd: string | null;
 
   // Per-IP connection limiting
   maxConnectionsPerIp: number;
@@ -312,6 +316,9 @@ export class AgentChatServer {
     } else {
       this.allowlist = null;
     }
+
+    // MOTD
+    this.motd = options.motd || process.env.MOTD || null;
 
     // Per-IP connection limiting
     this.maxConnectionsPerIp = options.maxConnectionsPerIp || parseInt(process.env.MAX_CONNECTIONS_PER_IP || '0');

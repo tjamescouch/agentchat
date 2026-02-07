@@ -325,6 +325,7 @@ export interface WelcomeMessage extends BaseMessage {
   agent_id: string;
   name?: string;
   server?: string;
+  motd?: string;
 }
 
 export interface ServerMsgMessage extends BaseMessage {
