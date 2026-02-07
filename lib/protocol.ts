@@ -45,6 +45,8 @@ export const ClientMessageType = {
   ADMIN_APPROVE: 'ADMIN_APPROVE' as const,
   ADMIN_REVOKE: 'ADMIN_REVOKE' as const,
   ADMIN_LIST: 'ADMIN_LIST' as const,
+  // Challenge-response auth
+  VERIFY_IDENTITY: 'VERIFY_IDENTITY' as const,
 };
 
 export const ServerMessageType = {
@@ -76,6 +78,8 @@ export const ServerMessageType = {
   VERIFY_FAILED: 'VERIFY_FAILED' as const,
   // Admin response
   ADMIN_RESULT: 'ADMIN_RESULT' as const,
+  // Challenge-response auth
+  CHALLENGE: 'CHALLENGE' as const,
 };
 
 export const ErrorCode = {
@@ -232,6 +236,9 @@ interface RawClientMessage {
   admin_key?: string;
   note?: string;
   agent_id?: string;
+  challenge_id?: string;
+  signature?: string;
+  timestamp?: number;
 }
 
 /**
@@ -483,6 +490,18 @@ export function validateClientMessage(raw: string | RawClientMessage): Validatio
       }
       break;
 
+    case ClientMessageType.VERIFY_IDENTITY:
+      if (!msg.challenge_id || typeof msg.challenge_id !== 'string') {
+        return { valid: false, error: 'Missing or invalid challenge_id' };
+      }
+      if (!msg.signature || typeof msg.signature !== 'string') {
+        return { valid: false, error: 'Missing or invalid signature' };
+      }
+      if (!msg.timestamp || typeof msg.timestamp !== 'number') {
+        return { valid: false, error: 'Missing or invalid timestamp' };
+      }
+      break;
+
     default:
       return { valid: false, error: `Unknown message type: ${msg.type}` };
   }
@@ -556,4 +575,22 @@ export function generateVerifyId(): string {
  */
 export function generateNonce(): string {
   return crypto.randomBytes(16).toString('hex');
+}
+
+/**
+ * Generate a unique challenge ID
+ * Format: chal_<timestamp36>_<random>
+ */
+export function generateChallengeId(): string {
+  const timestamp = Date.now().toString(36);
+  const random = crypto.randomBytes(4).toString('hex');
+  return `chal_${timestamp}_${random}`;
+}
+
+/**
+ * Generate the canonical signing content for challenge-response auth.
+ * Client signs this to prove private key ownership.
+ */
+export function generateAuthSigningContent(nonce: string, challengeId: string, timestamp: number): string {
+  return `AGENTCHAT_AUTH|${nonce}|${challengeId}|${timestamp}`;
 }

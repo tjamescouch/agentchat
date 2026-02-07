@@ -8,6 +8,7 @@ import type { WebSocket } from 'ws';
 import type { AgentChatServer } from '../../server.js';
 import type {
   IdentifyMessage,
+  VerifyIdentityMessage,
   VerifyRequestMessage,
   VerifyResponseMessage,
 } from '../../types.js';
@@ -18,8 +19,12 @@ import {
   createError,
   generateAgentId,
   generateVerifyId,
+  generateChallengeId,
+  generateNonce,
+  generateAuthSigningContent,
   pubkeyToAgentId,
 } from '../../protocol.js';
+import { Identity } from '../../identity.js';
 
 // Extended WebSocket with custom properties
 interface ExtendedWebSocket extends WebSocket {
@@ -40,12 +45,23 @@ interface PendingVerification {
 
 /**
  * Handle IDENTIFY command
+ *
+ * For ephemeral agents (no pubkey): immediately create agent state and send WELCOME.
+ * For pubkey agents: send CHALLENGE, wait for VERIFY_IDENTITY before creating state.
  */
 export function handleIdentify(server: AgentChatServer, ws: ExtendedWebSocket, msg: IdentifyMessage): void {
   // Check if already identified
   if (server.agents.has(ws)) {
     server._send(ws, createError(ErrorCode.INVALID_MSG, 'Already identified'));
     return;
+  }
+
+  // Check if this ws already has a pending challenge
+  for (const [, challenge] of server.pendingChallenges) {
+    if (challenge.ws === ws) {
+      server._send(ws, createError(ErrorCode.INVALID_MSG, 'Challenge already pending'));
+      return;
+    }
   }
 
   // Allowlist check (before any state changes)
@@ -63,66 +79,181 @@ export function handleIdentify(server: AgentChatServer, ws: ExtendedWebSocket, m
     }
   }
 
-  let id: string;
-
-  // Use pubkey-derived stable ID if pubkey provided
   if (msg.pubkey) {
-    // Check if this pubkey has connected before
-    const existingId = server.pubkeyToId.get(msg.pubkey);
-    if (existingId) {
-      // Returning agent - use their stable ID
-      id = existingId;
-    } else {
-      // New agent with pubkey - generate stable ID from pubkey
-      id = pubkeyToAgentId(msg.pubkey);
-      server.pubkeyToId.set(msg.pubkey, id);
-    }
+    // Pubkey agent: send challenge, do NOT create agent state yet
+    const challengeId = generateChallengeId();
+    const nonce = generateNonce();
+    const expiresAt = Date.now() + server.challengeTimeoutMs;
 
-    // Check if this ID is currently in use by another connection
-    if (server.agentById.has(id)) {
-      // Kick the old connection instead of rejecting the new one
-      const oldWs = server.agentById.get(id)!;
-      server._log('identity-takeover', { id, reason: 'New connection with same identity' });
-      server._send(oldWs, createError(ErrorCode.INVALID_MSG, 'Disconnected: Another connection claimed this identity'));
-      server._handleDisconnect(oldWs);
-      (oldWs as WebSocket).close(1000, 'Identity claimed by new connection');
-    }
+    server.pendingChallenges.set(challengeId, {
+      ws,
+      name: msg.name,
+      pubkey: msg.pubkey,
+      nonce,
+      challengeId,
+      expires: expiresAt
+    });
+
+    // Set timeout to clean up expired challenges
+    setTimeout(() => {
+      const challenge = server.pendingChallenges.get(challengeId);
+      if (challenge) {
+        server.pendingChallenges.delete(challengeId);
+        if ((challenge.ws as WebSocket).readyState === 1) {
+          server._send(challenge.ws, createError(ErrorCode.VERIFICATION_EXPIRED, 'Challenge expired'));
+          (challenge.ws as WebSocket).close(1000, 'Challenge expired');
+        }
+      }
+    }, server.challengeTimeoutMs);
+
+    server._log('challenge_sent', {
+      challengeId,
+      name: msg.name,
+      ip: ws._realIp
+    });
+
+    server._send(ws, createMessage(ServerMessageType.CHALLENGE, {
+      challenge_id: challengeId,
+      nonce,
+      expires_at: expiresAt
+    }));
   } else {
-    // Ephemeral agent - generate random ID
-    id = generateAgentId();
+    // Ephemeral agent: create state immediately
+    const id = generateAgentId();
+
+    const agent = {
+      id,
+      name: msg.name,
+      pubkey: null,
+      channels: new Set<string>(),
+      connectedAt: Date.now(),
+      presence: 'online' as const,
+      status_text: null as string | null,
+      verified: false
+    };
+
+    server.agents.set(ws, agent);
+    server.agentById.set(id, ws);
+
+    server._log('identify', {
+      id,
+      name: msg.name,
+      hasPubkey: false,
+      ephemeral: true,
+      ip: ws._realIp,
+      user_agent: ws._userAgent
+    });
+
+    server._send(ws, createMessage(ServerMessageType.WELCOME, {
+      agent_id: `@${id}`,
+      name: msg.name,
+      server: server.serverName
+    }));
+  }
+}
+
+/**
+ * Handle VERIFY_IDENTITY command
+ *
+ * Verifies the challenge-response signature. On success, creates agent state
+ * and sends WELCOME. On failure, sends error.
+ */
+export function handleVerifyIdentity(server: AgentChatServer, ws: ExtendedWebSocket, msg: VerifyIdentityMessage): void {
+  // Check if already identified
+  if (server.agents.has(ws)) {
+    server._send(ws, createError(ErrorCode.INVALID_MSG, 'Already identified'));
+    return;
   }
 
+  // Look up the pending challenge
+  const challenge = server.pendingChallenges.get(msg.challenge_id);
+  if (!challenge) {
+    server._send(ws, createError(ErrorCode.VERIFICATION_EXPIRED, 'Challenge not found or expired'));
+    return;
+  }
+
+  // Verify this is the same websocket that initiated the challenge
+  if (challenge.ws !== ws) {
+    server._send(ws, createError(ErrorCode.INVALID_MSG, 'Challenge belongs to a different connection'));
+    return;
+  }
+
+  // Check expiration
+  if (Date.now() > challenge.expires) {
+    server.pendingChallenges.delete(msg.challenge_id);
+    server._send(ws, createError(ErrorCode.VERIFICATION_EXPIRED, 'Challenge expired'));
+    return;
+  }
+
+  // Verify the signature
+  const expectedContent = generateAuthSigningContent(challenge.nonce, msg.challenge_id, msg.timestamp);
+  const verified = Identity.verify(expectedContent, msg.signature, challenge.pubkey);
+
+  if (!verified) {
+    server.pendingChallenges.delete(msg.challenge_id);
+    server._log('challenge_failed', {
+      challengeId: msg.challenge_id,
+      name: challenge.name,
+      ip: ws._realIp
+    });
+    server._send(ws, createError(ErrorCode.VERIFICATION_FAILED, 'Invalid signature'));
+    return;
+  }
+
+  // Challenge passed — clean up pending challenge
+  server.pendingChallenges.delete(msg.challenge_id);
+
+  // Derive stable agent ID from pubkey
+  const existingId = server.pubkeyToId.get(challenge.pubkey);
+  let id: string;
+  if (existingId) {
+    id = existingId;
+  } else {
+    id = pubkeyToAgentId(challenge.pubkey);
+    server.pubkeyToId.set(challenge.pubkey, id);
+  }
+
+  // Check if this ID is currently in use by another connection
+  if (server.agentById.has(id)) {
+    const oldWs = server.agentById.get(id)!;
+    server._log('identity-takeover', { id, reason: 'Verified connection replacing existing' });
+    server._send(oldWs, createError(ErrorCode.INVALID_MSG, 'Disconnected: Another connection verified this identity'));
+    server._handleDisconnect(oldWs);
+    (oldWs as WebSocket).close(1000, 'Identity claimed by verified connection');
+  }
+
+  // Create agent state with verified = true
   const agent = {
     id,
-    name: msg.name,
-    pubkey: msg.pubkey || null,
+    name: challenge.name,
+    pubkey: challenge.pubkey,
     channels: new Set<string>(),
     connectedAt: Date.now(),
     presence: 'online' as const,
-    status_text: null as string | null
+    status_text: null as string | null,
+    verified: true
   };
 
   server.agents.set(ws, agent);
   server.agentById.set(id, ws);
 
-  // Determine if this is a new or returning identity
-  const isReturning = msg.pubkey && server.pubkeyToId.has(msg.pubkey);
-  const isEphemeral = !msg.pubkey;
+  const isReturning = !!existingId;
 
   server._log('identify', {
     id,
-    name: msg.name,
-    hasPubkey: !!msg.pubkey,
+    name: challenge.name,
+    hasPubkey: true,
+    verified: true,
     returning: isReturning,
-    ephemeral: isEphemeral,
     ip: ws._realIp,
     user_agent: ws._userAgent
   });
 
   server._send(ws, createMessage(ServerMessageType.WELCOME, {
     agent_id: `@${id}`,
-    name: msg.name,
-    server: server.serverName
+    name: challenge.name,
+    server: server.serverName,
+    verified: true
   }));
 }
 

@@ -48,6 +48,7 @@ import {
 } from './server/handlers/proposal.js';
 import {
   handleIdentify,
+  handleVerifyIdentity,
   handleVerifyRequest,
   handleVerifyResponse,
 } from './server/handlers/identity.js';
@@ -81,6 +82,17 @@ export interface AgentState {
   presence?: PresenceStatus | string;
   status_text?: string | null;
   connectedAt?: number;
+  verified?: boolean;
+}
+
+// Pending challenge for challenge-response auth
+export interface PendingChallenge {
+  ws: ExtendedWebSocket;
+  name: string;
+  pubkey: string;
+  nonce: string;
+  challengeId: string;
+  expires: number;
 }
 
 // Channel state
@@ -190,9 +202,13 @@ export class AgentChatServer {
   // Escrow hooks
   escrowHooks: EscrowHooks;
 
-  // Pending verifications
+  // Pending verifications (inter-agent)
   pendingVerifications: Map<string, PendingVerification>;
   verificationTimeoutMs: number;
+
+  // Pending challenges (challenge-response auth)
+  pendingChallenges: Map<string, PendingChallenge>;
+  challengeTimeoutMs: number;
 
   // Allowlist
   allowlist: Allowlist | null;
@@ -268,9 +284,13 @@ export class AgentChatServer {
       }
     }
 
-    // Pending verification requests
+    // Pending verification requests (inter-agent)
     this.pendingVerifications = new Map();
     this.verificationTimeoutMs = options.verificationTimeoutMs || 30000;
+
+    // Pending challenges (challenge-response auth)
+    this.pendingChallenges = new Map();
+    this.challengeTimeoutMs = options.verificationTimeoutMs || 30000;
 
     // Allowlist
     const allowlistEnabled = options.allowlistEnabled || process.env.ALLOWLIST_ENABLED === 'true';
@@ -681,6 +701,10 @@ export class AgentChatServer {
         break;
       case ClientMessageType.VERIFY_RESPONSE:
         handleVerifyResponse(this, ws, msg);
+        break;
+      // Challenge-response auth
+      case ClientMessageType.VERIFY_IDENTITY:
+        handleVerifyIdentity(this, ws, msg);
         break;
       // Admin messages
       case ClientMessageType.ADMIN_APPROVE:

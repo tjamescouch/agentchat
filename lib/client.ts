@@ -9,6 +9,7 @@ import {
   ClientMessageType,
   ServerMessageType,
   WelcomeMessage,
+  ChallengeMessage,
   ServerMsgMessage,
   JoinedMessage,
   LeftMessage,
@@ -29,7 +30,8 @@ import {
   createMessage,
   serialize,
   parse,
-  generateNonce
+  generateNonce,
+  generateAuthSigningContent,
 } from './protocol.js';
 import { Identity } from './identity.js';
 import {
@@ -134,6 +136,9 @@ export class AgentChatClient extends EventEmitter {
 
   /**
    * Connect to the server and identify
+   *
+   * For pubkey agents: IDENTIFY → CHALLENGE → VERIFY_IDENTITY → WELCOME
+   * For ephemeral agents: IDENTIFY → WELCOME
    */
   async connect(): Promise<WelcomeMessage> {
     // Load identity if path provided
@@ -165,6 +170,29 @@ export class AgentChatClient extends EventEmitter {
         if (!this.connected) {
           reject(err);
         }
+      });
+
+      // Handle CHALLENGE (for pubkey agents)
+      this.once('challenge', (challenge: ChallengeMessage) => {
+        if (!this._identity || !this._identity.privkey) {
+          reject(new Error('Received challenge but no identity loaded for signing'));
+          return;
+        }
+
+        const timestamp = Date.now();
+        const signingContent = generateAuthSigningContent(
+          challenge.nonce,
+          challenge.challenge_id,
+          timestamp
+        );
+        const signature = this._identity.sign(signingContent);
+
+        this._send({
+          type: ClientMessageType.VERIFY_IDENTITY,
+          challenge_id: challenge.challenge_id,
+          signature,
+          timestamp
+        });
       });
 
       // Wait for WELCOME
@@ -730,6 +758,10 @@ export class AgentChatClient extends EventEmitter {
     switch (msg.type) {
       case ServerMessageType.WELCOME:
         this.emit('welcome', msg);
+        break;
+
+      case ServerMessageType.CHALLENGE:
+        this.emit('challenge', msg);
         break;
 
       case ServerMessageType.MSG:
