@@ -10,9 +10,10 @@ import path from 'path';
 import {
   client, keepaliveInterval,
   setClient, setServerUrl, setKeepaliveInterval,
-  resetLastSeen, clearMessageBuffer, bufferMessage,
+  resetLastSeen,
   DEFAULT_SERVER_URL, KEEPALIVE_INTERVAL_MS
 } from '../state.js';
+import { appendToInbox } from '../inbox-writer.js';
 
 /**
  * Base directory for identities
@@ -132,17 +133,16 @@ export function registerConnectTool(server) {
         setClient(newClient);
         setServerUrl(actualServerUrl);
 
-        // Reset last seen timestamp and message buffer on new connection
+        // Reset last seen timestamp on new connection
         resetLastSeen();
-        clearMessageBuffer();
 
-        // Persistent message handler - buffers ALL messages between listen() calls
-        // This is the fix for the listen() message drop bug: messages that arrive
-        // while the agent is busy with other tools are captured here instead of lost.
+        // Persistent message handler - writes ALL messages to inbox.jsonl so
+        // listen always has a single source of truth (same file the daemon uses).
         newClient.on('message', (msg) => {
-          // Skip own messages, server noise, and replays
-          if (msg.from === newClient.agentId || msg.from === '@server' || msg.replay) return;
-          bufferMessage({
+          // Skip own messages and server noise
+          if (msg.from === newClient.agentId || msg.from === '@server') return;
+          appendToInbox({
+            type: 'MSG',
             from: msg.from,
             to: msg.to,
             content: msg.content,

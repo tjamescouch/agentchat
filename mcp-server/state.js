@@ -15,10 +15,6 @@ export let lastSeenTimestamp = 0;
 // Exponential backoff - tracks consecutive idle nudges
 let consecutiveIdleCount = 0;
 
-// Message buffer - captures messages between listen() calls
-const MAX_BUFFER_SIZE = 200;
-let messageBuffer = [];
-
 // Default server
 export const DEFAULT_SERVER_URL = (() => {
   const explicit = process.env.AGENTCHAT_URL;
@@ -88,32 +84,6 @@ export function resetLastSeen() {
  */
 export function getLastSeen() {
   return lastSeenTimestamp;
-}
-
-/**
- * Push a message into the buffer (called by persistent handler on client)
- */
-export function bufferMessage(msg) {
-  messageBuffer.push(msg);
-  if (messageBuffer.length > MAX_BUFFER_SIZE) {
-    messageBuffer = messageBuffer.slice(-MAX_BUFFER_SIZE);
-  }
-}
-
-/**
- * Drain all buffered messages and clear the buffer
- */
-export function drainMessageBuffer() {
-  const messages = messageBuffer;
-  messageBuffer = [];
-  return messages;
-}
-
-/**
- * Clear the message buffer (e.g., on reconnect)
- */
-export function clearMessageBuffer() {
-  messageBuffer = [];
 }
 
 /**
