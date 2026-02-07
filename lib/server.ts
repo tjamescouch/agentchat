@@ -274,6 +274,10 @@ export class AgentChatServer {
 
     // Create default channels
     this._createChannel('#general', false);
+    this._createChannel('#engineering', false);
+    this._createChannel('#pull-requests', false);
+    this._createChannel('#help', false);
+    this._createChannel('#love', false);
     this._createChannel('#agents', false);
     this._createChannel('#discovery', false);
 
