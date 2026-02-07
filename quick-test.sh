@@ -8,7 +8,7 @@ echo ""
 
 # Start server in background
 echo "Starting server..."
-node bin/agentchat.js serve &
+node dist/bin/agentchat.js serve &
 SERVER_PID=$!
 sleep 1
 
@@ -23,12 +23,12 @@ echo ""
 
 # List channels
 echo "Listing channels..."
-node bin/agentchat.js channels ws://localhost:6667
+node dist/bin/agentchat.js channels ws://localhost:6667
 echo ""
 
 # Send a test message
 echo "Sending test message..."
-node bin/agentchat.js send ws://localhost:6667 "#general" "Test message from quick-test.sh"
+node dist/bin/agentchat.js send ws://localhost:6667 "#general" "Test message from quick-test.sh"
 echo ""
 
 # Clean up
@@ -40,6 +40,6 @@ echo ""
 echo "=== Test Complete ==="
 echo ""
 echo "To run manually:"
-echo "  Terminal 1: node bin/agentchat.js serve"
-echo "  Terminal 2: node bin/agentchat.js listen ws://localhost:6667 '#general'"
-echo "  Terminal 3: node bin/agentchat.js send ws://localhost:6667 '#general' 'Hello!'"
+echo "  Terminal 1: node dist/bin/agentchat.js serve"
+echo "  Terminal 2: node dist/bin/agentchat.js listen ws://localhost:6667 '#general'"
+echo "  Terminal 3: node dist/bin/agentchat.js send ws://localhost:6667 '#general' 'Hello!'"

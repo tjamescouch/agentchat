@@ -196,6 +196,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \\
   CMD node -e "const ws = new (require('ws'))('ws://localhost:' + (process.env.PORT || 6667)); ws.on('open', () => process.exit(0)); ws.on('error', () => process.exit(1)); setTimeout(() => process.exit(1), 5000);"
 
 # Start server
-CMD ["node", "bin/agentchat.js", "serve"]
+CMD ["node", "dist/bin/agentchat.js", "serve"]
 `;
 }

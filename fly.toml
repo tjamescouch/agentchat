@@ -19,3 +19,7 @@ primary_region = 'sjc'
 [[vm]]
   size = 'shared-cpu-1x'
   memory = '256mb'
+
+[env]
+  HOST = "0.0.0.0"
+  PORT = "6667"

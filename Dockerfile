@@ -9,4 +9,4 @@ COPY . .
 
 EXPOSE 6667
 
-CMD ["node", "bin/agentchat.js", "serve"]
+CMD ["node", "dist/bin/agentchat.js", "serve"]
