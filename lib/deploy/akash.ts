@@ -10,17 +10,184 @@
 
 import fs from 'fs/promises';
 import path from 'path';
-import os from 'os';
 import yaml from 'js-yaml';
+
+// ============ Types ============
+
+/**
+ * Akash network configuration
+ */
+export interface NetworkConfig {
+  chainId: string;
+  rpcEndpoint: string;
+  restEndpoint: string;
+  prefix: string;
+}
+
+/**
+ * Wallet data structure
+ */
+export interface WalletData {
+  mnemonic: string;
+  address: string;
+  pubkey: string;
+  network?: string;
+  created?: string;
+}
+
+/**
+ * Wallet file format (versioned)
+ */
+export interface WalletFile {
+  version: number;
+  network: string;
+  address: string;
+  pubkey: string;
+  mnemonic: string;
+  created: string;
+}
+
+/**
+ * Wallet info for display (no sensitive data)
+ */
+export interface WalletInfo {
+  address: string;
+  network: string;
+  created: string;
+}
+
+/**
+ * Balance information
+ */
+export interface BalanceInfo {
+  uakt: string;
+  akt: string;
+  sufficient: boolean;
+}
+
+/**
+ * SDL generation options
+ */
+export interface SDLOptions {
+  name?: string;
+  port?: number;
+  cpu?: number;
+  memory?: number;
+  storage?: number;
+  logMessages?: boolean;
+  image?: string;
+}
+
+/**
+ * Deployment creation options
+ */
+export interface DeploymentOptions {
+  walletPath?: string;
+  dseq?: string;
+  deposit?: string;
+  name?: string;
+  port?: number;
+  cpu?: number;
+  memory?: number;
+  storage?: number;
+  logMessages?: boolean;
+  image?: string;
+}
+
+/**
+ * Local deployment record
+ */
+export interface DeploymentRecord {
+  dseq: string;
+  owner: string;
+  txHash: string;
+  status: string;
+  createdAt: string;
+  sdl: string;
+  provider?: string;
+  leaseCreatedAt?: string;
+  manifestSent?: boolean;
+  manifestSentAt?: string;
+  closedAt?: string;
+}
+
+/**
+ * Deployment creation result
+ */
+export interface DeploymentResult {
+  dseq: string;
+  txHash: string;
+  status: string;
+  manifest: unknown;
+  provider?: string;
+  gseq?: number;
+  oseq?: number;
+  endpoint?: string;
+}
+
+/**
+ * Lease creation result
+ */
+export interface LeaseResult {
+  dseq: string;
+  provider: string;
+  gseq: number;
+  oseq: number;
+  txHash: string;
+}
+
+/**
+ * Close deployment result
+ */
+export interface CloseDeploymentResult {
+  dseq: string;
+  txHash: string;
+  status: string;
+}
+
+/**
+ * Bid information
+ */
+export interface BidInfo {
+  provider: string;
+  price: string;
+  state: string;
+}
+
+/**
+ * Deployment status with bids
+ */
+export interface DeploymentStatusWithBids extends DeploymentRecord {
+  bids?: BidInfo[];
+}
+
+/**
+ * Deployment status with lease
+ */
+export interface DeploymentStatusWithLease extends DeploymentRecord {
+  leaseStatus?: unknown;
+  leaseStatusError?: string;
+}
+
+/**
+ * Certificate data
+ */
+export interface CertificateData {
+  cert: string;
+  privateKey: string;
+  publicKey: string;
+}
+
+// ============ Constants ============
 
 // Default paths
 const AKASH_DIR = path.join(process.cwd(), '.agentchat');
-const WALLET_PATH = path.join(AKASH_DIR, 'akash-wallet.json');
-const DEPLOYMENTS_PATH = path.join(AKASH_DIR, 'akash-deployments.json');
-const CERTIFICATE_PATH = path.join(AKASH_DIR, 'akash-cert.json');
+export const WALLET_PATH = path.join(AKASH_DIR, 'akash-wallet.json');
+export const DEPLOYMENTS_PATH = path.join(AKASH_DIR, 'akash-deployments.json');
+export const CERTIFICATE_PATH = path.join(AKASH_DIR, 'akash-cert.json');
 
 // Network configuration
-const NETWORKS = {
+export const NETWORKS: Record<string, NetworkConfig> = {
   mainnet: {
     chainId: 'akashnet-2',
     rpcEndpoint: 'https://rpc.akashnet.net:443',
@@ -38,11 +205,19 @@ const NETWORKS = {
 // Default deposit amount (5 AKT in uakt)
 const DEFAULT_DEPOSIT = '5000000';
 
+// ============ AkashWallet Class ============
+
 /**
  * Akash Wallet - manages keypair and signing
  */
 export class AkashWallet {
-  constructor(data) {
+  mnemonic: string;
+  address: string;
+  pubkey: string;
+  network: string;
+  created: string;
+
+  constructor(data: WalletData) {
     this.mnemonic = data.mnemonic;
     this.address = data.address;
     this.pubkey = data.pubkey;
@@ -53,7 +228,7 @@ export class AkashWallet {
   /**
    * Generate a new wallet
    */
-  static async generate(network = 'testnet') {
+  static async generate(network: string = 'testnet'): Promise<AkashWallet> {
     const { DirectSecp256k1HdWallet } = await import('@cosmjs/proto-signing');
 
     const wallet = await DirectSecp256k1HdWallet.generate(24, {
@@ -74,7 +249,7 @@ export class AkashWallet {
   /**
    * Load wallet from mnemonic
    */
-  static async fromMnemonic(mnemonic, network = 'testnet') {
+  static async fromMnemonic(mnemonic: string, network: string = 'testnet'): Promise<AkashWallet> {
     const { DirectSecp256k1HdWallet } = await import('@cosmjs/proto-signing');
 
     const wallet = await DirectSecp256k1HdWallet.fromMnemonic(mnemonic, {
@@ -94,7 +269,7 @@ export class AkashWallet {
   /**
    * Get signing wallet instance
    */
-  async getSigningWallet() {
+  async getSigningWallet(): Promise<import('@cosmjs/proto-signing').DirectSecp256k1HdWallet> {
     const { DirectSecp256k1HdWallet } = await import('@cosmjs/proto-signing');
     return DirectSecp256k1HdWallet.fromMnemonic(this.mnemonic, {
       prefix: NETWORKS[this.network].prefix
@@ -104,10 +279,10 @@ export class AkashWallet {
   /**
    * Save wallet to file
    */
-  async save(filePath = WALLET_PATH) {
+  async save(filePath: string = WALLET_PATH): Promise<string> {
     await fs.mkdir(path.dirname(filePath), { recursive: true });
 
-    const data = {
+    const data: WalletFile = {
       version: 1,
       network: this.network,
       address: this.address,
@@ -123,9 +298,9 @@ export class AkashWallet {
   /**
    * Load wallet from file
    */
-  static async load(filePath = WALLET_PATH) {
+  static async load(filePath: string = WALLET_PATH): Promise<AkashWallet> {
     const content = await fs.readFile(filePath, 'utf-8');
-    const data = JSON.parse(content);
+    const data: WalletFile = JSON.parse(content);
 
     if (data.version !== 1) {
       throw new Error(`Unsupported wallet version: ${data.version}`);
@@ -137,7 +312,7 @@ export class AkashWallet {
   /**
    * Check if wallet file exists
    */
-  static async exists(filePath = WALLET_PATH) {
+  static async exists(filePath: string = WALLET_PATH): Promise<boolean> {
     try {
       await fs.access(filePath);
       return true;
@@ -149,7 +324,7 @@ export class AkashWallet {
   /**
    * Get wallet info for display (no sensitive data)
    */
-  getInfo() {
+  getInfo(): WalletInfo {
     return {
       address: this.address,
       network: this.network,
@@ -158,10 +333,12 @@ export class AkashWallet {
   }
 }
 
+// ============ SDL Generation ============
+
 /**
  * Generate SDL (Stack Definition Language) for agentchat server
  */
-export function generateSDL(options = {}) {
+export function generateSDL(options: SDLOptions = {}): string {
   const config = {
     name: options.name || 'agentchat',
     port: options.port || 6667,
@@ -225,11 +402,16 @@ export function generateSDL(options = {}) {
   return yaml.dump(sdl, { lineWidth: -1 });
 }
 
+// ============ AkashClient Class ============
+
 /**
  * Akash deployment client
  */
 export class AkashClient {
-  constructor(wallet) {
+  wallet: AkashWallet;
+  network: NetworkConfig;
+
+  constructor(wallet: AkashWallet) {
     this.wallet = wallet;
     this.network = NETWORKS[wallet.network];
   }
@@ -237,7 +419,7 @@ export class AkashClient {
   /**
    * Get signing client for transactions
    */
-  async getSigningClient() {
+  async getSigningClient(): Promise<import('@cosmjs/stargate').SigningStargateClient> {
     const { SigningStargateClient } = await import('@cosmjs/stargate');
     const { getAkashTypeRegistry } = await import('@akashnetwork/akashjs/build/stargate/index.js');
     const { Registry } = await import('@cosmjs/proto-signing');
@@ -255,10 +437,10 @@ export class AkashClient {
   /**
    * Query account balance
    */
-  async getBalance() {
+  async getBalance(): Promise<BalanceInfo> {
     const { StargateClient } = await import('@cosmjs/stargate');
 
-    let client;
+    let client: import('@cosmjs/stargate').StargateClient;
     try {
       client = await StargateClient.connect(this.network.rpcEndpoint);
     } catch (err) {
@@ -282,7 +464,7 @@ export class AkashClient {
   /**
    * Create a deployment on Akash
    */
-  async createDeployment(sdlContent, options = {}) {
+  async createDeployment(sdlContent: string, options: DeploymentOptions = {}): Promise<DeploymentResult> {
     const { SDL } = await import('@akashnetwork/akashjs/build/sdl/SDL/SDL.js');
     const { MsgCreateDeployment } = await import('@akashnetwork/akash-api/v1beta3');
     const { Message } = await import('@akashnetwork/akashjs/build/stargate/index.js');
@@ -361,7 +543,7 @@ export class AkashClient {
   /**
    * Query bids for a deployment
    */
-  async queryBids(dseq) {
+  async queryBids(dseq: string): Promise<unknown[]> {
     const url = `${this.network.restEndpoint}/akash/market/v1beta4/bids/list?filters.owner=${this.wallet.address}&filters.dseq=${dseq}`;
 
     const response = await fetch(url);
@@ -369,14 +551,14 @@ export class AkashClient {
       throw new Error(`Failed to query bids: ${response.statusText}`);
     }
 
-    const data = await response.json();
+    const data = await response.json() as { bids?: unknown[] };
     return data.bids || [];
   }
 
   /**
    * Accept a bid and create a lease
    */
-  async createLease(dseq, provider, gseq = 1, oseq = 1) {
+  async createLease(dseq: string, provider: string, gseq: number = 1, oseq: number = 1): Promise<LeaseResult> {
     const { MsgCreateLease } = await import('@akashnetwork/akash-api/v1beta3');
     const { Message } = await import('@akashnetwork/akashjs/build/stargate/index.js');
 
@@ -435,18 +617,18 @@ export class AkashClient {
   /**
    * Send manifest to provider
    */
-  async sendManifest(dseq, provider, manifest) {
-    const { certificate } = await import('@akashnetwork/akashjs/build/certificates/index.js');
+  async sendManifest(dseq: string, provider: string, manifest: unknown): Promise<{ success: boolean }> {
+    const certificateModule = await import('@akashnetwork/akashjs/build/certificates/index.js');
 
     // Load or create certificate
-    let cert;
+    let cert: CertificateData;
     try {
       const certData = await fs.readFile(CERTIFICATE_PATH, 'utf-8');
-      cert = JSON.parse(certData);
+      cert = JSON.parse(certData) as CertificateData;
     } catch {
       // Generate new certificate
       console.log('Generating deployment certificate...');
-      const generated = await certificate.create(this.wallet.address);
+      const generated = await certificateModule.createCertificate(this.wallet.address);
       cert = {
         cert: generated.cert,
         privateKey: generated.privateKey,
@@ -461,7 +643,7 @@ export class AkashClient {
     if (!providerResponse.ok) {
       throw new Error(`Failed to get provider info: ${providerResponse.statusText}`);
     }
-    const providerInfo = await providerResponse.json();
+    const providerInfo = await providerResponse.json() as { provider?: { hostUri?: string } };
     const hostUri = providerInfo.provider?.hostUri;
 
     if (!hostUri) {
@@ -499,14 +681,14 @@ export class AkashClient {
   /**
    * Get lease status from provider
    */
-  async getLeaseStatus(dseq, provider, gseq = 1, oseq = 1) {
+  async getLeaseStatus(dseq: string, provider: string, gseq: number = 1, oseq: number = 1): Promise<unknown> {
     // Query provider info
     const providerUrl = `${this.network.restEndpoint}/akash/provider/v1beta3/providers/${provider}`;
     const providerResponse = await fetch(providerUrl);
     if (!providerResponse.ok) {
       throw new Error(`Failed to get provider info: ${providerResponse.statusText}`);
     }
-    const providerInfo = await providerResponse.json();
+    const providerInfo = await providerResponse.json() as { provider?: { hostUri?: string } };
     const hostUri = providerInfo.provider?.hostUri;
 
     if (!hostUri) {
@@ -527,7 +709,7 @@ export class AkashClient {
   /**
    * Close a deployment
    */
-  async closeDeployment(dseq) {
+  async closeDeployment(dseq: string): Promise<CloseDeploymentResult> {
     const { MsgCloseDeployment } = await import('@akashnetwork/akash-api/v1beta3');
     const { Message } = await import('@akashnetwork/akashjs/build/stargate/index.js');
 
@@ -574,11 +756,11 @@ export class AkashClient {
   /**
    * Save deployment to local records
    */
-  async saveDeployment(deployment) {
-    let deployments = [];
+  async saveDeployment(deployment: DeploymentRecord): Promise<void> {
+    let deployments: DeploymentRecord[] = [];
     try {
       const content = await fs.readFile(DEPLOYMENTS_PATH, 'utf-8');
-      deployments = JSON.parse(content);
+      deployments = JSON.parse(content) as DeploymentRecord[];
     } catch {
       // File doesn't exist yet
     }
@@ -590,11 +772,11 @@ export class AkashClient {
   /**
    * Update deployment in local records
    */
-  async updateDeployment(dseq, updates) {
-    let deployments = [];
+  async updateDeployment(dseq: string, updates: Partial<DeploymentRecord>): Promise<void> {
+    let deployments: DeploymentRecord[] = [];
     try {
       const content = await fs.readFile(DEPLOYMENTS_PATH, 'utf-8');
-      deployments = JSON.parse(content);
+      deployments = JSON.parse(content) as DeploymentRecord[];
     } catch {
       return;
     }
@@ -609,21 +791,19 @@ export class AkashClient {
   /**
    * List local deployment records
    */
-  async listDeployments() {
+  async listDeployments(): Promise<DeploymentRecord[]> {
     try {
       const content = await fs.readFile(DEPLOYMENTS_PATH, 'utf-8');
-      return JSON.parse(content);
+      return JSON.parse(content) as DeploymentRecord[];
     } catch {
       return [];
     }
   }
 }
 
-/**
- * High-level deployment functions for CLI
- */
+// ============ High-level deployment functions for CLI ============
 
-export async function generateWallet(network = 'testnet', walletPath = WALLET_PATH) {
+export async function generateWallet(network: string = 'testnet', walletPath: string = WALLET_PATH): Promise<AkashWallet> {
   if (await AkashWallet.exists(walletPath)) {
     throw new Error(
       `Wallet already exists at ${walletPath}\n` +
@@ -637,7 +817,7 @@ export async function generateWallet(network = 'testnet', walletPath = WALLET_PA
   return wallet;
 }
 
-export async function checkBalance(walletPath = WALLET_PATH) {
+export async function checkBalance(walletPath: string = WALLET_PATH): Promise<{ wallet: WalletInfo; balance: BalanceInfo }> {
   const wallet = await AkashWallet.load(walletPath);
   const client = new AkashClient(wallet);
 
@@ -647,7 +827,7 @@ export async function checkBalance(walletPath = WALLET_PATH) {
   };
 }
 
-export async function createDeployment(options = {}) {
+export async function createDeployment(options: DeploymentOptions = {}): Promise<DeploymentResult> {
   const walletPath = options.walletPath || WALLET_PATH;
   const wallet = await AkashWallet.load(walletPath);
   const client = new AkashClient(wallet);
@@ -673,7 +853,13 @@ export async function createDeployment(options = {}) {
   await new Promise(resolve => setTimeout(resolve, 30000));
 
   // Query bids
-  const bids = await client.queryBids(deployment.dseq);
+  const bids = await client.queryBids(deployment.dseq) as Array<{
+    bid?: {
+      state?: string;
+      price?: { amount?: string };
+      bidId?: { provider?: string; gseq?: number; oseq?: number };
+    };
+  }>;
 
   if (bids.length === 0) {
     console.log('No bids received. Deployment is pending.');
@@ -684,7 +870,7 @@ export async function createDeployment(options = {}) {
   // Select best bid (lowest price)
   const sortedBids = bids
     .filter(b => b.bid?.state === 'open')
-    .sort((a, b) => parseInt(a.bid?.price?.amount || 0) - parseInt(b.bid?.price?.amount || 0));
+    .sort((a, b) => parseInt(a.bid?.price?.amount || '0') - parseInt(b.bid?.price?.amount || '0'));
 
   if (sortedBids.length === 0) {
     console.log('No open bids available.');
@@ -693,6 +879,11 @@ export async function createDeployment(options = {}) {
 
   const bestBid = sortedBids[0];
   const provider = bestBid.bid?.bidId?.provider;
+
+  if (!provider) {
+    console.log('No valid provider found in bids.');
+    return deployment;
+  }
 
   console.log(`Accepting bid from provider: ${provider}`);
 
@@ -712,7 +903,9 @@ export async function createDeployment(options = {}) {
   await new Promise(resolve => setTimeout(resolve, 15000));
 
   try {
-    const status = await client.getLeaseStatus(deployment.dseq, provider);
+    const status = await client.getLeaseStatus(deployment.dseq, provider) as {
+      services?: Record<string, { uris?: string[] }>;
+    };
     const services = status.services || {};
     const service = Object.values(services)[0];
     const uris = service?.uris || [];
@@ -729,21 +922,21 @@ export async function createDeployment(options = {}) {
   return { ...deployment, ...lease, status: 'active' };
 }
 
-export async function listDeployments(walletPath = WALLET_PATH) {
+export async function listDeployments(walletPath: string = WALLET_PATH): Promise<DeploymentRecord[]> {
   const wallet = await AkashWallet.load(walletPath);
   const client = new AkashClient(wallet);
 
   return client.listDeployments();
 }
 
-export async function closeDeployment(dseq, walletPath = WALLET_PATH) {
+export async function closeDeployment(dseq: string, walletPath: string = WALLET_PATH): Promise<CloseDeploymentResult> {
   const wallet = await AkashWallet.load(walletPath);
   const client = new AkashClient(wallet);
 
   return client.closeDeployment(dseq);
 }
 
-export async function acceptBid(dseq, provider, walletPath = WALLET_PATH) {
+export async function acceptBid(dseq: string, provider: string, walletPath: string = WALLET_PATH): Promise<LeaseResult> {
   const wallet = await AkashWallet.load(walletPath);
   const client = new AkashClient(wallet);
 
@@ -766,14 +959,14 @@ export async function acceptBid(dseq, provider, walletPath = WALLET_PATH) {
   return lease;
 }
 
-export async function queryBids(dseq, walletPath = WALLET_PATH) {
+export async function queryBids(dseq: string, walletPath: string = WALLET_PATH): Promise<unknown[]> {
   const wallet = await AkashWallet.load(walletPath);
   const client = new AkashClient(wallet);
 
   return client.queryBids(dseq);
 }
 
-export async function getDeploymentStatus(dseq, walletPath = WALLET_PATH) {
+export async function getDeploymentStatus(dseq: string, walletPath: string = WALLET_PATH): Promise<DeploymentStatusWithBids | DeploymentStatusWithLease> {
   const wallet = await AkashWallet.load(walletPath);
   const client = new AkashClient(wallet);
 
@@ -787,13 +980,19 @@ export async function getDeploymentStatus(dseq, walletPath = WALLET_PATH) {
 
   if (!deployment.provider) {
     // No lease yet, check for bids
-    const bids = await client.queryBids(dseq);
+    const bids = await client.queryBids(dseq) as Array<{
+      bid?: {
+        bidId?: { provider?: string };
+        price?: { amount?: string };
+        state?: string;
+      };
+    }>;
     return {
       ...deployment,
       bids: bids.map(b => ({
-        provider: b.bid?.bidId?.provider,
-        price: b.bid?.price?.amount,
-        state: b.bid?.state
+        provider: b.bid?.bidId?.provider || '',
+        price: b.bid?.price?.amount || '',
+        state: b.bid?.state || ''
       }))
     };
   }
@@ -803,9 +1002,6 @@ export async function getDeploymentStatus(dseq, walletPath = WALLET_PATH) {
     const status = await client.getLeaseStatus(dseq, deployment.provider);
     return { ...deployment, leaseStatus: status };
   } catch (err) {
-    return { ...deployment, leaseStatusError: err.message };
+    return { ...deployment, leaseStatusError: (err as Error).message };
   }
 }
-
-// Export for CLI
-export { NETWORKS, WALLET_PATH, DEPLOYMENTS_PATH, CERTIFICATE_PATH };

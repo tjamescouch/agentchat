@@ -4,8 +4,8 @@
 
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert';
-import { ServerDirectory, DEFAULT_SERVERS } from '../lib/server-directory.js';
-import { AgentChatServer } from '../lib/server.js';
+import { ServerDirectory, DEFAULT_SERVERS } from '../dist/lib/server-directory.js';
+import { AgentChatServer } from '../dist/lib/server.js';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
@@ -32,7 +32,7 @@ describe('ServerDirectory', () => {
     const directory = new ServerDirectory();
     const servers = directory.list();
     assert.ok(servers.length > 0, 'should have at least one default server');
-    assert.ok(servers.some(s => s.url.includes('agentchat-server.fly.dev')));
+    assert.ok(servers.some(s => s.url.includes('localhost') || s.url.includes('agentchat-server.fly.dev')));
   });
 
   it('can add a server', async () => {

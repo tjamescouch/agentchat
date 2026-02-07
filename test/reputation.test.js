@@ -16,7 +16,7 @@ import {
   ReputationStore,
   DEFAULT_RATING,
   ELO_DIVISOR
-} from '../lib/reputation.js';
+} from '../dist/lib/reputation.js';
 
 // Test directory
 const TEST_DIR = path.join(os.tmpdir(), 'agentchat-reputation-test');

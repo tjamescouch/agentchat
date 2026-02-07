@@ -15,7 +15,9 @@ import {
   ClientMessage,
   ServerMessage,
   PresenceStatus,
+  AnyMessage,
 } from './types.js';
+import { EscrowEventType } from './escrow-hooks.js';
 import {
   createMessage,
   createError,
@@ -25,6 +27,7 @@ import {
 import { ProposalStore } from './proposals.js';
 import { ReputationStore } from './reputation.js';
 import { EscrowHooks } from './escrow-hooks.js';
+import { Allowlist } from './allowlist.js';
 
 // Import extracted handlers
 import {
@@ -55,6 +58,11 @@ import {
 import {
   handleSetPresence,
 } from './server/handlers/presence.js';
+import {
+  handleAdminApprove,
+  handleAdminRevoke,
+  handleAdminList,
+} from './server/handlers/admin.js';
 
 // Extended WebSocket with custom properties
 interface ExtendedWebSocket extends WebSocket {
@@ -70,8 +78,9 @@ export interface AgentState {
   name?: string;
   channels: Set<string>;
   pubkey?: string | null;
-  presence?: PresenceStatus;
+  presence?: PresenceStatus | string;
   status_text?: string | null;
+  connectedAt?: number;
 }
 
 // Channel state
@@ -80,7 +89,7 @@ export interface ChannelState {
   inviteOnly: boolean;
   invited: Set<string>;
   agents: Set<ExtendedWebSocket>;
-  messageBuffer: ServerMessage[];
+  messageBuffer: AnyMessage[];
 }
 
 // Skill registration entry
@@ -112,6 +121,11 @@ export interface AgentChatServerOptions {
   verificationTimeoutMs?: number;
   logger?: Console;
   escrowHandlers?: Record<string, (payload: unknown) => Promise<void>>;
+  allowlistEnabled?: boolean;
+  allowlistStrict?: boolean;
+  allowlistAdminKey?: string | null;
+  allowlistFilePath?: string;
+  maxConnectionsPerIp?: number;
 }
 
 // Health status response
@@ -180,6 +194,13 @@ export class AgentChatServer {
   pendingVerifications: Map<string, PendingVerification>;
   verificationTimeoutMs: number;
 
+  // Allowlist
+  allowlist: Allowlist | null;
+
+  // Per-IP connection limiting
+  maxConnectionsPerIp: number;
+  connectionsByIp: Map<string, number>;
+
   wss: WebSocketServer | null;
   httpServer: http.Server | https.Server | null;
   startedAt: number | null;
@@ -243,13 +264,30 @@ export class AgentChatServer {
     // Register external escrow handlers if provided
     if (options.escrowHandlers) {
       for (const [event, handler] of Object.entries(options.escrowHandlers)) {
-        this.escrowHooks.on(event, handler);
+        this.escrowHooks.on(event as EscrowEventType, handler);
       }
     }
 
     // Pending verification requests
     this.pendingVerifications = new Map();
     this.verificationTimeoutMs = options.verificationTimeoutMs || 30000;
+
+    // Allowlist
+    const allowlistEnabled = options.allowlistEnabled || process.env.ALLOWLIST_ENABLED === 'true';
+    if (allowlistEnabled) {
+      this.allowlist = new Allowlist({
+        enabled: true,
+        strict: options.allowlistStrict || process.env.ALLOWLIST_STRICT === 'true',
+        adminKey: options.allowlistAdminKey || process.env.ALLOWLIST_ADMIN_KEY || null,
+        filePath: options.allowlistFilePath,
+      });
+    } else {
+      this.allowlist = null;
+    }
+
+    // Per-IP connection limiting
+    this.maxConnectionsPerIp = options.maxConnectionsPerIp || parseInt(process.env.MAX_CONNECTIONS_PER_IP || '0');
+    this.connectionsByIp = new Map();
 
     this.wss = null;
     this.httpServer = null;
@@ -260,7 +298,7 @@ export class AgentChatServer {
    * Register a handler for escrow events
    */
   onEscrow(event: string, handler: (payload: unknown) => Promise<void>): () => void {
-    return this.escrowHooks.on(event, handler);
+    return this.escrowHooks.on(event as EscrowEventType, handler);
   }
 
   /**
@@ -305,7 +343,7 @@ export class AgentChatServer {
   /**
    * Add a message to a channel's buffer (circular buffer)
    */
-  _bufferMessage(channel: string, msg: ServerMessage): void {
+  _bufferMessage(channel: string, msg: AnyMessage): void {
     const ch = this.channels.get(channel);
     if (!ch) return;
 
@@ -326,7 +364,7 @@ export class AgentChatServer {
 
     for (const msg of ch.messageBuffer) {
       // Send with replay flag so client knows it's history
-      this._send(ws, { ...msg, replay: true } as ServerMessage & { replay: boolean });
+      this._send(ws, { ...msg, replay: true });
     }
   }
 
@@ -339,13 +377,13 @@ export class AgentChatServer {
     console.error(JSON.stringify(entry));
   }
 
-  _send(ws: ExtendedWebSocket, msg: ServerMessage | (ServerMessage & { replay: boolean })): void {
+  _send(ws: ExtendedWebSocket, msg: AnyMessage): void {
     if (ws.readyState === 1) { // OPEN
       ws.send(serialize(msg));
     }
   }
 
-  _broadcast(channel: string, msg: ServerMessage, excludeWs: ExtendedWebSocket | null = null): void {
+  _broadcast(channel: string, msg: AnyMessage, excludeWs: ExtendedWebSocket | null = null): void {
     const ch = this.channels.get(channel);
     if (!ch) return;
 
@@ -402,6 +440,17 @@ export class AgentChatServer {
       const realIp = forwardedForStr ? forwardedForStr.split(',')[0].trim() : req.socket.remoteAddress;
       const userAgent = req.headers['user-agent'] || 'unknown';
 
+      // Per-IP connection limiting
+      if (this.maxConnectionsPerIp > 0 && realIp) {
+        const current = this.connectionsByIp.get(realIp) || 0;
+        if (current >= this.maxConnectionsPerIp) {
+          this._log('ip_connection_limit', { ip: realIp, current, max: this.maxConnectionsPerIp });
+          ws.close(1008, 'Too many connections from this IP');
+          return;
+        }
+        this.connectionsByIp.set(realIp, current + 1);
+      }
+
       // Store connection metadata on ws for later logging
       ws._connectedAt = Date.now();
       ws._realIp = realIp;
@@ -418,6 +467,16 @@ export class AgentChatServer {
       });
 
       ws.on('close', () => {
+        // Decrement per-IP connection count
+        if (ws._realIp && this.maxConnectionsPerIp > 0) {
+          const current = this.connectionsByIp.get(ws._realIp) || 0;
+          if (current <= 1) {
+            this.connectionsByIp.delete(ws._realIp);
+          } else {
+            this.connectionsByIp.set(ws._realIp, current - 1);
+          }
+        }
+
         // Log if connection closed without ever identifying (drive-by)
         if (!this.agents.has(ws)) {
           const duration = ws._connectedAt ? Math.round((Date.now() - ws._connectedAt) / 1000) : 0;
@@ -551,7 +610,7 @@ export class AgentChatServer {
     const result = validateClientMessage(data);
 
     if (!result.valid) {
-      this._send(ws, createError(ErrorCode.INVALID_MSG, result.error));
+      this._send(ws, createError(ErrorCode.INVALID_MSG, (result as { valid: false; error: string }).error));
       return;
     }
 
@@ -622,6 +681,16 @@ export class AgentChatServer {
         break;
       case ClientMessageType.VERIFY_RESPONSE:
         handleVerifyResponse(this, ws, msg);
+        break;
+      // Admin messages
+      case ClientMessageType.ADMIN_APPROVE:
+        handleAdminApprove(this, ws, msg);
+        break;
+      case ClientMessageType.ADMIN_REVOKE:
+        handleAdminRevoke(this, ws, msg);
+        break;
+      case ClientMessageType.ADMIN_LIST:
+        handleAdminList(this, ws, msg);
         break;
     }
   }

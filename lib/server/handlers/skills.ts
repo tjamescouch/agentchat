@@ -3,6 +3,9 @@
  * Handles skill registration and search
  */
 
+import type { WebSocket } from 'ws';
+import type { AgentChatServer } from '../../server.js';
+import type { RegisterSkillsMessage, SearchSkillsMessage, Skill } from '../../types.js';
 import {
   ServerMessageType,
   ErrorCode,
@@ -10,10 +13,33 @@ import {
   createError,
 } from '../../protocol.js';
 
+// Extended WebSocket with custom properties
+interface ExtendedWebSocket extends WebSocket {
+  _connectedAt?: number;
+  _realIp?: string;
+  _userAgent?: string;
+}
+
+// Skill registration entry
+interface SkillRegistration {
+  agent_id: string;
+  skills: Skill[];
+  registered_at: number;
+  sig: string;
+}
+
+// Search result with additional fields
+interface SkillSearchResult extends Skill {
+  agent_id: string;
+  registered_at: number;
+  rating?: number;
+  transactions?: number;
+}
+
 /**
  * Handle REGISTER_SKILLS command
  */
-export function handleRegisterSkills(server, ws, msg) {
+export function handleRegisterSkills(server: AgentChatServer, ws: ExtendedWebSocket, msg: RegisterSkillsMessage): void {
   const agent = server.agents.get(ws);
   if (!agent) {
     server._send(ws, createError(ErrorCode.AUTH_REQUIRED, 'Must IDENTIFY first'));
@@ -26,7 +52,7 @@ export function handleRegisterSkills(server, ws, msg) {
   }
 
   // Store skills for this agent
-  const registration = {
+  const registration: SkillRegistration = {
     agent_id: `@${agent.id}`,
     skills: msg.skills,
     registered_at: Date.now(),
@@ -57,7 +83,7 @@ export function handleRegisterSkills(server, ws, msg) {
 /**
  * Handle SEARCH_SKILLS command
  */
-export async function handleSearchSkills(server, ws, msg) {
+export async function handleSearchSkills(server: AgentChatServer, ws: ExtendedWebSocket, msg: SearchSkillsMessage): Promise<void> {
   const agent = server.agents.get(ws);
   if (!agent) {
     server._send(ws, createError(ErrorCode.AUTH_REQUIRED, 'Must IDENTIFY first'));
@@ -65,11 +91,11 @@ export async function handleSearchSkills(server, ws, msg) {
   }
 
   const query = msg.query || {};
-  const results = [];
+  const results: SkillSearchResult[] = [];
 
   // Search through all registered skills
-  for (const [agentId, registration] of server.skillsRegistry) {
-    for (const skill of registration.skills) {
+  for (const [, registration] of server.skillsRegistry) {
+    for (const skill of (registration as SkillRegistration).skills) {
       let matches = true;
 
       // Filter by capability (substring match, case-insensitive)
@@ -97,9 +123,9 @@ export async function handleSearchSkills(server, ws, msg) {
 
       if (matches) {
         results.push({
-          agent_id: registration.agent_id,
+          agent_id: (registration as SkillRegistration).agent_id,
           ...skill,
-          registered_at: registration.registered_at
+          registered_at: (registration as SkillRegistration).registered_at
         });
       }
     }
@@ -107,7 +133,7 @@ export async function handleSearchSkills(server, ws, msg) {
 
   // Enrich results with reputation data
   const uniqueAgentIds = [...new Set(results.map(r => r.agent_id))];
-  const ratingCache = new Map();
+  const ratingCache = new Map<string, { rating: number; transactions: number }>();
   for (const agentId of uniqueAgentIds) {
     const ratingInfo = await server.reputationStore.getRating(agentId);
     ratingCache.set(agentId, ratingInfo);
@@ -116,13 +142,15 @@ export async function handleSearchSkills(server, ws, msg) {
   // Add rating info to each result
   for (const result of results) {
     const ratingInfo = ratingCache.get(result.agent_id);
-    result.rating = ratingInfo.rating;
-    result.transactions = ratingInfo.transactions;
+    if (ratingInfo) {
+      result.rating = ratingInfo.rating;
+      result.transactions = ratingInfo.transactions;
+    }
   }
 
   // Sort by rating (highest first), then by registration time
   results.sort((a, b) => {
-    if (b.rating !== a.rating) return b.rating - a.rating;
+    if ((b.rating || 0) !== (a.rating || 0)) return (b.rating || 0) - (a.rating || 0);
     return b.registered_at - a.registered_at;
   });
 

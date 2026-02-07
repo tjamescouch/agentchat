@@ -3,6 +3,15 @@
  * Handles proposal, accept, reject, complete, dispute operations
  */
 
+import type { WebSocket } from 'ws';
+import type { AgentChatServer } from '../../server.js';
+import type {
+  ProposalMessage,
+  AcceptMessage,
+  RejectMessage,
+  CompleteMessage,
+  DisputeMessage,
+} from '../../types.js';
 import {
   ServerMessageType,
   ErrorCode,
@@ -17,10 +26,17 @@ import {
   createDisputePayload,
 } from '../../escrow-hooks.js';
 
+// Extended WebSocket with custom properties
+interface ExtendedWebSocket extends WebSocket {
+  _connectedAt?: number;
+  _realIp?: string;
+  _userAgent?: string;
+}
+
 /**
  * Handle PROPOSAL command
  */
-export function handleProposal(server, ws, msg) {
+export function handleProposal(server: AgentChatServer, ws: ExtendedWebSocket, msg: ProposalMessage): void {
   const agent = server.agents.get(ws);
   if (!agent) {
     server._send(ws, createError(ErrorCode.AUTH_REQUIRED, 'Must IDENTIFY first'));
@@ -48,7 +64,7 @@ export function handleProposal(server, ws, msg) {
     task: msg.task,
     amount: msg.amount,
     currency: msg.currency,
-    payment_code: msg.payment_code,
+    payment_code: (msg as ProposalMessage & { payment_code?: string }).payment_code,
     terms: msg.terms,
     expires: msg.expires,
     sig: msg.sig,
@@ -70,7 +86,7 @@ export function handleProposal(server, ws, msg) {
 /**
  * Handle ACCEPT command
  */
-export async function handleAccept(server, ws, msg) {
+export async function handleAccept(server: AgentChatServer, ws: ExtendedWebSocket, msg: AcceptMessage & { payment_code?: string }): Promise<void> {
   const agent = server.agents.get(ws);
   if (!agent) {
     server._send(ws, createError(ErrorCode.AUTH_REQUIRED, 'Must IDENTIFY first'));
@@ -123,7 +139,7 @@ export async function handleAccept(server, ws, msg) {
     return;
   }
 
-  const proposal = result.proposal;
+  const proposal = result.proposal!;
 
   // Create escrow if either party has a stake
   if (proposerStake > 0 || acceptorStake > 0) {
@@ -135,7 +151,7 @@ export async function handleAccept(server, ws, msg) {
     );
 
     if (escrowResult.success) {
-      proposal.stakes_escrowed = true;
+      (proposal as typeof proposal & { stakes_escrowed?: boolean }).stakes_escrowed = true;
       server._log('escrow_created', {
         proposal_id: proposal.id,
         proposer_stake: proposerStake,
@@ -143,8 +159,8 @@ export async function handleAccept(server, ws, msg) {
       });
 
       // Emit escrow:created hook for external integrations
-      server.escrowHooks.emit(EscrowEvent.CREATED, createEscrowCreatedPayload(proposal, escrowResult))
-        .catch(err => server._log('escrow_hook_error', { event: 'created', error: err.message }));
+      server.escrowHooks.emit(EscrowEvent.CREATED, createEscrowCreatedPayload(proposal as any, escrowResult))
+        .catch((err: Error) => server._log('escrow_hook_error', { event: 'created', error: err.message }));
     } else {
       server._log('escrow_error', { proposal_id: proposal.id, error: escrowResult.error });
     }
@@ -170,7 +186,7 @@ export async function handleAccept(server, ws, msg) {
 /**
  * Handle REJECT command
  */
-export function handleReject(server, ws, msg) {
+export function handleReject(server: AgentChatServer, ws: ExtendedWebSocket, msg: RejectMessage & { reason?: string }): void {
   const agent = server.agents.get(ws);
   if (!agent) {
     server._send(ws, createError(ErrorCode.AUTH_REQUIRED, 'Must IDENTIFY first'));
@@ -194,7 +210,7 @@ export function handleReject(server, ws, msg) {
     return;
   }
 
-  const proposal = result.proposal;
+  const proposal = result.proposal!;
   server._log('reject', { id: proposal.id, by: agent.id });
 
   // Notify the proposal creator
@@ -215,7 +231,7 @@ export function handleReject(server, ws, msg) {
 /**
  * Handle COMPLETE command
  */
-export async function handleComplete(server, ws, msg) {
+export async function handleComplete(server: AgentChatServer, ws: ExtendedWebSocket, msg: CompleteMessage): Promise<void> {
   const agent = server.agents.get(ws);
   if (!agent) {
     server._send(ws, createError(ErrorCode.AUTH_REQUIRED, 'Must IDENTIFY first'));
@@ -239,11 +255,11 @@ export async function handleComplete(server, ws, msg) {
     return;
   }
 
-  const proposal = result.proposal;
+  const proposal = result.proposal!;
   server._log('complete', { id: proposal.id, by: agent.id });
 
   // Update reputation ratings (includes escrow settlement)
-  let ratingChanges = null;
+  let ratingChanges: Record<string, unknown> | null = null;
   try {
     ratingChanges = await server.reputationStore.processCompletion({
       type: 'COMPLETE',
@@ -260,11 +276,11 @@ export async function handleComplete(server, ws, msg) {
 
     // Emit settlement:completion hook for external integrations
     if (ratingChanges?._escrow) {
-      server.escrowHooks.emit(EscrowEvent.COMPLETION_SETTLED, createCompletionPayload(proposal, ratingChanges))
-        .catch(err => server._log('escrow_hook_error', { event: 'completion', error: err.message }));
+      server.escrowHooks.emit(EscrowEvent.COMPLETION_SETTLED, createCompletionPayload(proposal as any, ratingChanges))
+        .catch((err: Error) => server._log('escrow_hook_error', { event: 'completion', error: err.message }));
     }
   } catch (err) {
-    server._log('reputation_error', { error: err.message });
+    server._log('reputation_error', { error: (err as Error).message });
   }
 
   // Notify both parties
@@ -287,7 +303,7 @@ export async function handleComplete(server, ws, msg) {
 /**
  * Handle DISPUTE command
  */
-export async function handleDispute(server, ws, msg) {
+export async function handleDispute(server: AgentChatServer, ws: ExtendedWebSocket, msg: DisputeMessage): Promise<void> {
   const agent = server.agents.get(ws);
   if (!agent) {
     server._send(ws, createError(ErrorCode.AUTH_REQUIRED, 'Must IDENTIFY first'));
@@ -311,11 +327,11 @@ export async function handleDispute(server, ws, msg) {
     return;
   }
 
-  const proposal = result.proposal;
+  const proposal = result.proposal!;
   server._log('dispute', { id: proposal.id, by: agent.id, reason: msg.reason });
 
   // Update reputation ratings (includes escrow settlement)
-  let ratingChanges = null;
+  let ratingChanges: Record<string, unknown> | null = null;
   try {
     ratingChanges = await server.reputationStore.processDispute({
       type: 'DISPUTE',
@@ -333,11 +349,11 @@ export async function handleDispute(server, ws, msg) {
 
     // Emit settlement:dispute hook for external integrations
     if (ratingChanges?._escrow) {
-      server.escrowHooks.emit(EscrowEvent.DISPUTE_SETTLED, createDisputePayload(proposal, ratingChanges))
-        .catch(err => server._log('escrow_hook_error', { event: 'dispute', error: err.message }));
+      server.escrowHooks.emit(EscrowEvent.DISPUTE_SETTLED, createDisputePayload(proposal as any, ratingChanges))
+        .catch((err: Error) => server._log('escrow_hook_error', { event: 'dispute', error: err.message }));
     }
   } catch (err) {
-    server._log('reputation_error', { error: err.message });
+    server._log('reputation_error', { error: (err as Error).message });
   }
 
   // Notify both parties

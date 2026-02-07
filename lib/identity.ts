@@ -117,8 +117,15 @@ export class Identity {
    */
   static async load(filePath: string = DEFAULT_IDENTITY_PATH): Promise<Identity> {
     const data = await fs.readFile(filePath, 'utf-8');
-    const parsed: IdentityData = JSON.parse(data);
-    return new Identity(parsed);
+    const parsed = JSON.parse(data);
+    // Handle both old format (publicKey/privateKey) and new format (pubkey/privkey)
+    return new Identity({
+      name: parsed.name,
+      pubkey: parsed.pubkey || parsed.publicKey,
+      privkey: parsed.privkey || parsed.privateKey,
+      created: parsed.created,
+      rotations: parsed.rotations
+    });
   }
 
   /**
@@ -134,7 +141,8 @@ export class Identity {
       privateKey: this.privkey || '',
       agentId: this.getAgentId(),
       name: this.name,
-      created: this.created
+      created: this.created,
+      rotations: this.rotations.length > 0 ? this.rotations : undefined
     };
 
     await fs.writeFile(filePath, JSON.stringify(data, null, 2), {

@@ -8,10 +8,10 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import WebSocket from 'ws';
-import { Allowlist } from '../lib/allowlist.js';
-import { AgentChatServer } from '../lib/server.js';
-import { AgentChatClient } from '../lib/client.js';
-import { Identity } from '../lib/identity.js';
+import { Allowlist } from '../dist/lib/allowlist.js';
+import { AgentChatServer } from '../dist/lib/server.js';
+import { AgentChatClient } from '../dist/lib/client.js';
+import { Identity } from '../dist/lib/identity.js';
 
 const TEST_ADMIN_KEY = 'test-admin-key-32chars-minimum!!';
 
@@ -153,8 +153,8 @@ describe('Allowlist Integration', () => {
       port,
       allowlistEnabled: true,
       allowlistStrict: false,
-      adminKey: TEST_ADMIN_KEY,
-      allowlistFile: path.join(tempDir, 'allowlist.json'),
+      allowlistAdminKey: TEST_ADMIN_KEY,
+      allowlistFilePath: path.join(tempDir, 'allowlist.json'),
     });
     server.start();
   });
@@ -240,8 +240,8 @@ describe('Allowlist Strict Mode', () => {
       port,
       allowlistEnabled: true,
       allowlistStrict: true,
-      adminKey: TEST_ADMIN_KEY,
-      allowlistFile: path.join(tempDir, 'allowlist.json'),
+      allowlistAdminKey: TEST_ADMIN_KEY,
+      allowlistFilePath: path.join(tempDir, 'allowlist.json'),
     });
     server.start();
   });

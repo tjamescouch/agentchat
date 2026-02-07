@@ -4,7 +4,7 @@
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert';
-import { Identity } from '../lib/identity.js';
+import { Identity } from '../dist/lib/identity.js';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';

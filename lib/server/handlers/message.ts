@@ -3,6 +3,16 @@
  * Handles message routing, join, leave, and channel operations
  */
 
+import type { WebSocket } from 'ws';
+import type { AgentChatServer } from '../../server.js';
+import type {
+  MsgMessage,
+  JoinMessage,
+  LeaveMessage,
+  ListAgentsMessage,
+  CreateChannelMessage,
+  InviteMessage,
+} from '../../types.js';
 import {
   ServerMessageType,
   ErrorCode,
@@ -12,10 +22,17 @@ import {
   isAgent,
 } from '../../protocol.js';
 
+// Extended WebSocket with custom properties
+interface ExtendedWebSocket extends WebSocket {
+  _connectedAt?: number;
+  _realIp?: string;
+  _userAgent?: string;
+}
+
 /**
  * Handle MSG command - route messages to channels or agents
  */
-export function handleMsg(server, ws, msg) {
+export function handleMsg(server: AgentChatServer, ws: ExtendedWebSocket, msg: MsgMessage): void {
   const agent = server.agents.get(ws);
   if (!agent) {
     server._send(ws, createError(ErrorCode.AUTH_REQUIRED, 'Must IDENTIFY first'));
@@ -81,7 +98,7 @@ export function handleMsg(server, ws, msg) {
 /**
  * Handle JOIN command - add agent to channel
  */
-export function handleJoin(server, ws, msg) {
+export function handleJoin(server: AgentChatServer, ws: ExtendedWebSocket, msg: JoinMessage): void {
   const agent = server.agents.get(ws);
   if (!agent) {
     server._send(ws, createError(ErrorCode.AUTH_REQUIRED, 'Must IDENTIFY first'));
@@ -114,7 +131,7 @@ export function handleJoin(server, ws, msg) {
   }), ws);
 
   // Send confirmation with agent list
-  const agentList = [];
+  const agentList: Array<{ id: string; name?: string }> = [];
   for (const memberWs of channel.agents) {
     const member = server.agents.get(memberWs);
     if (member) agentList.push({ id: `@${member.id}`, name: member.name });
@@ -136,11 +153,11 @@ export function handleJoin(server, ws, msg) {
   }));
 
   // Prompt existing agents to engage with the new joiner (if there are others)
-  const otherAgents = [];
+  const otherAgents: Array<{ ws: ExtendedWebSocket; id: string; name?: string }> = [];
   for (const memberWs of channel.agents) {
     if (memberWs !== ws) {
       const member = server.agents.get(memberWs);
-      if (member) otherAgents.push({ ws: memberWs, id: member.id, name: member.name });
+      if (member) otherAgents.push({ ws: memberWs as ExtendedWebSocket, id: member.id, name: member.name });
     }
   }
 
@@ -163,7 +180,7 @@ export function handleJoin(server, ws, msg) {
 /**
  * Handle LEAVE command - remove agent from channel
  */
-export function handleLeave(server, ws, msg) {
+export function handleLeave(server: AgentChatServer, ws: ExtendedWebSocket, msg: LeaveMessage): void {
   const agent = server.agents.get(ws);
   if (!agent) {
     server._send(ws, createError(ErrorCode.AUTH_REQUIRED, 'Must IDENTIFY first'));
@@ -195,9 +212,8 @@ export function handleLeave(server, ws, msg) {
  * Unauthenticated: returns channel names and agent count only
  * Authenticated: returns full details
  */
-export function handleListChannels(server, ws) {
-  const agent = server.agents.get(ws);
-  const list = [];
+export function handleListChannels(server: AgentChatServer, ws: ExtendedWebSocket): void {
+  const list: Array<{ name: string; agents: number }> = [];
   for (const [name, channel] of server.channels) {
     if (!channel.inviteOnly) {
       list.push({
@@ -214,7 +230,7 @@ export function handleListChannels(server, ws) {
  * Handle LIST_AGENTS command
  * Requires authentication to see agent details
  */
-export function handleListAgents(server, ws, msg) {
+export function handleListAgents(server: AgentChatServer, ws: ExtendedWebSocket, msg: ListAgentsMessage): void {
   const agent = server.agents.get(ws);
   if (!agent) {
     server._send(ws, createError(ErrorCode.AUTH_REQUIRED, 'Must IDENTIFY first'));
@@ -227,7 +243,7 @@ export function handleListAgents(server, ws, msg) {
     return;
   }
 
-  const list = [];
+  const list: Array<{ id: string; name?: string; presence: string; status_text: string | null }> = [];
   for (const memberWs of channel.agents) {
     const member = server.agents.get(memberWs);
     if (member) {
@@ -235,7 +251,7 @@ export function handleListAgents(server, ws, msg) {
         id: `@${member.id}`,
         name: member.name,
         presence: member.presence || 'online',
-        status_text: member.statusText || null
+        status_text: member.status_text || null
       });
     }
   }
@@ -249,7 +265,7 @@ export function handleListAgents(server, ws, msg) {
 /**
  * Handle CREATE_CHANNEL command
  */
-export function handleCreateChannel(server, ws, msg) {
+export function handleCreateChannel(server: AgentChatServer, ws: ExtendedWebSocket, msg: CreateChannelMessage & { invite_only?: boolean }): void {
   const agent = server.agents.get(ws);
   if (!agent) {
     server._send(ws, createError(ErrorCode.AUTH_REQUIRED, 'Must IDENTIFY first'));
@@ -283,7 +299,7 @@ export function handleCreateChannel(server, ws, msg) {
 /**
  * Handle INVITE command
  */
-export function handleInvite(server, ws, msg) {
+export function handleInvite(server: AgentChatServer, ws: ExtendedWebSocket, msg: InviteMessage): void {
   const agent = server.agents.get(ws);
   if (!agent) {
     server._send(ws, createError(ErrorCode.AUTH_REQUIRED, 'Must IDENTIFY first'));

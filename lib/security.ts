@@ -7,7 +7,7 @@ import path from 'path';
 import os from 'os';
 
 // Directories that are absolutely forbidden (system roots)
-const FORBIDDEN_DIRECTORIES = new Set([
+const FORBIDDEN_DIRECTORIES: Set<string> = new Set([
   '/',
   '/root',
   '/home',
@@ -39,10 +39,8 @@ const MIN_SAFE_DEPTH = 3;
 
 /**
  * Get the depth of a path from root
- * @param {string} dirPath - Directory path to check
- * @returns {number} - Number of directory levels from root
  */
-function getPathDepth(dirPath) {
+function getPathDepth(dirPath: string): number {
   const normalized = path.normalize(dirPath);
   const parts = normalized.split(path.sep).filter(p => p && p !== '.');
   return parts.length;
@@ -50,10 +48,8 @@ function getPathDepth(dirPath) {
 
 /**
  * Check if directory is a user's home directory
- * @param {string} dirPath - Directory path to check
- * @returns {boolean}
  */
-function isHomeDirectory(dirPath) {
+function isHomeDirectory(dirPath: string): boolean {
   const normalized = path.normalize(dirPath);
   const homeDir = os.homedir();
 
@@ -72,12 +68,17 @@ function isHomeDirectory(dirPath) {
   return homePatterns.some(pattern => pattern.test(normalized));
 }
 
+export interface DirectorySafetyResult {
+  safe: boolean;
+  error?: string;
+  warning?: string;
+  level: 'error' | 'warning' | 'ok';
+}
+
 /**
  * Check if a directory is safe for running agentchat
- * @param {string} dirPath - Directory path to check (defaults to cwd)
- * @returns {{safe: boolean, error?: string, warning?: string, level: 'error'|'warning'|'ok'}}
  */
-export function checkDirectorySafety(dirPath = process.cwd()) {
+export function checkDirectorySafety(dirPath: string = process.cwd()): DirectorySafetyResult {
   const normalized = path.normalize(path.resolve(dirPath));
 
   // Check forbidden directories
@@ -120,15 +121,18 @@ export function checkDirectorySafety(dirPath = process.cwd()) {
   };
 }
 
+export interface EnforceOptions {
+  allowWarnings?: boolean;
+  silent?: boolean;
+}
+
 /**
  * Enforce directory safety check - throws if unsafe
- * @param {string} dirPath - Directory path to check (defaults to cwd)
- * @param {object} options - Options
- * @param {boolean} options.allowWarnings - If true, don't throw on warnings (default: true)
- * @param {boolean} options.silent - If true, don't print warnings (default: false)
- * @throws {Error} If directory is not safe
  */
-export function enforceDirectorySafety(dirPath = process.cwd(), options = {}) {
+export function enforceDirectorySafety(
+  dirPath: string = process.cwd(),
+  options: EnforceOptions = {}
+): DirectorySafetyResult {
   const { allowWarnings = true, silent = false } = options;
 
   const result = checkDirectorySafety(dirPath);
@@ -151,10 +155,8 @@ export function enforceDirectorySafety(dirPath = process.cwd(), options = {}) {
 
 /**
  * Check if running in a project directory (has common project indicators)
- * @param {string} dirPath - Directory path to check
- * @returns {boolean}
  */
-export function looksLikeProjectDirectory(dirPath = process.cwd()) {
+export function looksLikeProjectDirectory(dirPath: string = process.cwd()): boolean {
   const projectIndicators = [
     'package.json',
     'Cargo.toml',

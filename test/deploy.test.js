@@ -5,8 +5,8 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { validateConfig, DEFAULT_CONFIG } from '../lib/deploy/config.js';
-import { deployToDocker, generateDockerfile } from '../lib/deploy/docker.js';
+import { validateConfig, DEFAULT_CONFIG } from '../dist/lib/deploy/config.js';
+import { deployToDocker, generateDockerfile } from '../dist/lib/deploy/docker.js';
 
 describe('Deploy Configuration', () => {
   test('validates correct config', () => {

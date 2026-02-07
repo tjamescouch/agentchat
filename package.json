@@ -2,21 +2,26 @@
   "name": "@tjamescouch/agentchat",
   "version": "0.22.1",
   "description": "Real-time IRC-like communication protocol for AI agents",
-  "main": "lib/client.js",
+  "main": "dist/lib/client.js",
+  "types": "dist/lib/client.d.ts",
   "files": [
-    "bin/",
-    "lib/",
+    "dist/",
     "README.md",
     "Dockerfile"
   ],
   "bin": {
-    "agentchat": "./bin/agentchat.js"
+    "agentchat": "./dist/bin/agentchat.js"
   },
   "scripts": {
-    "start": "node bin/agentchat.js serve",
-    "test": "node --test 'test/*.test.js'",
-    "test:integration": "node --test test/*.integration.test.js",
-    "test:all": "node --test test/*.test.js",
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run clean && npm run build",
+    "start": "node dist/bin/agentchat.js serve",
+    "dev": "tsc --watch",
+    "test": "npm run build && node --test 'test/*.test.js'",
+    "test:integration": "npm run build && node --test test/*.integration.test.js",
+    "test:all": "npm run build && node --test test/*.test.js",
+    "typecheck": "tsc --noEmit",
     "knip": "knip"
   },
   "keywords": [
@@ -39,6 +44,13 @@
     "js-yaml": "^4.1.1",
     "ws": "^8.16.0"
   },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^20.11.0",
+    "@types/ws": "^8.5.10",
+    "knip": "^5.83.0",
+    "typescript": "^5.3.3"
+  },
   "engines": {
     "node": ">=18.0.0"
   },
@@ -49,8 +61,5 @@
   "bugs": {
     "url": "https://github.com/tjamescouch/agentchat/issues"
   },
-  "type": "module",
-  "devDependencies": {
-    "knip": "^5.83.0"
-  }
+  "type": "module"
 }

@@ -8,7 +8,7 @@ import assert from 'node:assert';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
-import { Identity, isValidPubkey, pubkeyToAgentId } from '../lib/identity.js';
+import { Identity, isValidPubkey, pubkeyToAgentId } from '../dist/lib/identity.js';
 
 describe('Identity', () => {
   const testDir = path.join(os.tmpdir(), `agentchat-test-${Date.now()}`);
