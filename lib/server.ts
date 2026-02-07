@@ -135,6 +135,7 @@ export interface AgentChatServerOptions {
   messageBufferSize?: number;
   idleTimeoutMs?: number;
   verificationTimeoutMs?: number;
+  challengeTimeoutMs?: number;
   logger?: Console;
   escrowHandlers?: Record<string, (payload: unknown) => Promise<void>>;
   allowlistEnabled?: boolean;
@@ -305,7 +306,9 @@ export class AgentChatServer {
 
     // Pending challenges (challenge-response auth)
     this.pendingChallenges = new Map();
-    this.challengeTimeoutMs = options.verificationTimeoutMs || 30000;
+    this.challengeTimeoutMs = options.challengeTimeoutMs
+      || parseInt(process.env.CHALLENGE_TIMEOUT_MS || '', 10)
+      || 60000;
 
     // Allowlist
     const allowlistEnabled = options.allowlistEnabled || process.env.ALLOWLIST_ENABLED === 'true';
