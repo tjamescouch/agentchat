@@ -12,7 +12,7 @@ import { client, getLastSeen, updateLastSeen, drainMessageBuffer, getIdleCount, 
 
 // Timeouts - agent cannot override these
 const ENFORCED_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour when alone
-const NUDGE_TIMEOUT_MS = 30 * 1000; // 30 seconds when others are present
+const NUDGE_TIMEOUT_MS = 5 * 1000; // 5 seconds when others are present
 const MAX_BACKOFF_MS = 5 * 60 * 1000; // 5 minute cap on backoff
 
 /**
