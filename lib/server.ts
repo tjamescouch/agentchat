@@ -71,6 +71,7 @@ interface ExtendedWebSocket extends WebSocket {
   _realIp?: string;
   _userAgent?: string;
   _msgTimestamps?: number[];
+  _isAlive?: boolean;
 }
 
 // Agent info stored per connection
@@ -138,6 +139,8 @@ export interface AgentChatServerOptions {
   allowlistAdminKey?: string | null;
   allowlistFilePath?: string;
   maxConnectionsPerIp?: number;
+  heartbeatIntervalMs?: number;
+  heartbeatTimeoutMs?: number;
 }
 
 // Health status response
@@ -216,6 +219,11 @@ export class AgentChatServer {
   // Per-IP connection limiting
   maxConnectionsPerIp: number;
   connectionsByIp: Map<string, number>;
+
+  // WebSocket heartbeat (server-initiated ping/pong)
+  heartbeatIntervalMs: number;
+  heartbeatTimeoutMs: number;
+  heartbeatTimer: NodeJS.Timeout | null;
 
   wss: WebSocketServer | null;
   httpServer: http.Server | https.Server | null;
@@ -308,6 +316,11 @@ export class AgentChatServer {
     // Per-IP connection limiting
     this.maxConnectionsPerIp = options.maxConnectionsPerIp || parseInt(process.env.MAX_CONNECTIONS_PER_IP || '0');
     this.connectionsByIp = new Map();
+
+    // WebSocket heartbeat
+    this.heartbeatIntervalMs = options.heartbeatIntervalMs || 30000; // 30s
+    this.heartbeatTimeoutMs = options.heartbeatTimeoutMs || 10000;   // 10s
+    this.heartbeatTimer = null;
 
     this.wss = null;
     this.httpServer = null;
@@ -475,6 +488,12 @@ export class AgentChatServer {
       ws._connectedAt = Date.now();
       ws._realIp = realIp;
       ws._userAgent = userAgent;
+      ws._isAlive = true;
+
+      // WS-level pong handler for heartbeat
+      ws.on('pong', () => {
+        ws._isAlive = true;
+      });
 
       this._log('connection', {
         ip: realIp,
@@ -522,6 +541,23 @@ export class AgentChatServer {
     this.idleCheckInterval = setInterval(() => {
       this._checkIdleChannels();
     }, 60 * 1000); // Check every minute
+
+    // Start WebSocket heartbeat — detect and clean up zombie connections
+    this.heartbeatTimer = setInterval(() => {
+      if (!this.wss) return;
+      this.wss.clients.forEach((ws: WebSocket) => {
+        const ews = ws as ExtendedWebSocket;
+        if (ews._isAlive === false) {
+          this._log('heartbeat_timeout', {
+            ip: ews._realIp,
+            agent: this.agents.get(ews)?.id,
+          });
+          return ews.terminate();
+        }
+        ews._isAlive = false;
+        ews.ping();
+      });
+    }, this.heartbeatIntervalMs);
 
     return this;
   }
@@ -572,6 +608,10 @@ export class AgentChatServer {
   }
 
   stop(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
     if (this.idleCheckInterval) {
       clearInterval(this.idleCheckInterval);
     }
