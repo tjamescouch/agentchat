@@ -1,41 +1,86 @@
 {
   "name": "@tjamescouch/agentchat",
-  "version": "0.22.1",
-  "description": "Real-time IRC-like communication protocol for AI agents",
+  "version": "0.22.2",
+  "description": "WebSocket protocol for real-time AI agent coordination — IRC for machines",
   "main": "dist/lib/client.js",
   "types": "dist/lib/client.d.ts",
-  "files": [
-    "dist/",
-    "README.md",
-    "Dockerfile"
-  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/lib/client.d.ts",
+      "import": "./dist/lib/client.js"
+    },
+    "./server": {
+      "types": "./dist/lib/server.d.ts",
+      "import": "./dist/lib/server.js"
+    },
+    "./protocol": {
+      "types": "./dist/lib/protocol.d.ts",
+      "import": "./dist/lib/protocol.js"
+    },
+    "./types": {
+      "types": "./dist/lib/types.d.ts",
+      "import": "./dist/lib/types.js"
+    }
+  },
   "bin": {
     "agentchat": "./dist/bin/agentchat.js"
   },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE",
+    "Dockerfile"
+  ],
   "scripts": {
-    "build": "tsc",
+    "build": "npx tsc",
     "clean": "rm -rf dist",
-    "prepublishOnly": "npm run clean && npm run build",
+    "rebuild": "npm run clean && npm run build",
+    "prepublishOnly": "npm run rebuild",
     "start": "node dist/bin/agentchat.js serve",
-    "dev": "tsc --watch",
+    "dev": "npx tsc --watch",
     "test": "npm run build && node --test 'test/*.test.js'",
     "test:integration": "npm run build && node --test test/*.integration.test.js",
-    "test:all": "npm run build && node --test test/*.test.js",
-    "typecheck": "tsc --noEmit",
-    "knip": "knip"
+    "test:all": "npm run build && node --test 'test/**/*.test.js'",
+    "test:watch": "node --test --watch 'test/*.test.js'",
+    "typecheck": "npx tsc --noEmit",
+    "lint": "knip",
+    "preflight": "npm run typecheck && npm run lint && npm test"
   },
   "keywords": [
     "ai",
     "agents",
+    "multi-agent",
     "chat",
     "irc",
     "llm",
-    "communication",
-    "protocol"
+    "websocket",
+    "coordination",
+    "protocol",
+    "mcp",
+    "claude",
+    "real-time"
   ],
-  "author": "James Couch",
+  "author": {
+    "name": "James Couch",
+    "url": "https://github.com/tjamescouch"
+  },
   "license": "MIT",
   "homepage": "https://github.com/tjamescouch/agentchat#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tjamescouch/agentchat.git"
+  },
+  "bugs": {
+    "url": "https://github.com/tjamescouch/agentchat/issues"
+  },
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/tjamescouch"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "dependencies": {
     "@akashnetwork/akashjs": "^0.11.1",
     "@cosmjs/proto-signing": "^0.32.4",
@@ -50,16 +95,5 @@
     "@types/ws": "^8.5.10",
     "knip": "^5.83.0",
     "typescript": "^5.3.3"
-  },
-  "engines": {
-    "node": ">=18.0.0"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/tjamescouch/agentchat.git"
-  },
-  "bugs": {
-    "url": "https://github.com/tjamescouch/agentchat/issues"
-  },
-  "type": "module"
+  }
 }
