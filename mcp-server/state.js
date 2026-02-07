@@ -17,8 +17,20 @@ const MAX_BUFFER_SIZE = 200;
 let messageBuffer = [];
 
 // Default server
-export const DEFAULT_SERVER_URL = process.env.AGENTCHAT_URL
-  || (process.env.AGENTCHAT_PUBLIC === 'true' ? 'wss://agentchat-server.fly.dev' : 'ws://localhost:6667');
+export const DEFAULT_SERVER_URL = (() => {
+  const explicit = process.env.AGENTCHAT_URL;
+  if (explicit) {
+    const parsed = new URL(explicit);
+    const isLocal = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1' || parsed.hostname === '::1';
+    if (!isLocal && process.env.AGENTCHAT_PUBLIC !== 'true') {
+      console.error(`ERROR: AGENTCHAT_URL points to remote host "${parsed.hostname}" but AGENTCHAT_PUBLIC is not set.`);
+      console.error('Set AGENTCHAT_PUBLIC=true to allow connections to non-localhost servers.');
+      process.exit(1);
+    }
+    return explicit;
+  }
+  return process.env.AGENTCHAT_PUBLIC === 'true' ? 'wss://agentchat-server.fly.dev' : 'ws://localhost:6667';
+})();
 
 // Keepalive settings
 export const KEEPALIVE_INTERVAL_MS = 30000;
