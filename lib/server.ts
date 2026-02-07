@@ -60,6 +60,9 @@ import {
   handleSetPresence,
 } from './server/handlers/presence.js';
 import {
+  handleSetNick,
+} from './server/handlers/nick.js';
+import {
   handleAdminApprove,
   handleAdminRevoke,
   handleAdminList,
@@ -753,6 +756,10 @@ export class AgentChatServer {
       // Challenge-response auth
       case ClientMessageType.VERIFY_IDENTITY:
         handleVerifyIdentity(this, ws, msg);
+        break;
+      // Nick
+      case ClientMessageType.SET_NICK:
+        handleSetNick(this, ws, msg);
         break;
       // Admin messages
       case ClientMessageType.ADMIN_APPROVE:
