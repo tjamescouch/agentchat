@@ -51,11 +51,10 @@ export function registerListenTool(server) {
         };
         client.on('message', replayHandler);
 
-        // Join channels (replay messages arrive here)
+        // Join/rejoin channels (replay messages arrive here)
+        // Always rejoin to get fresh replay — server handles rejoin idempotently
         for (const channel of channels) {
-          if (!client.channels.has(channel)) {
-            await client.join(channel);
-          }
+          await client.join(channel);
         }
 
         // Done collecting replays

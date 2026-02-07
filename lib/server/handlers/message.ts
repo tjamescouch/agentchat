@@ -117,20 +117,25 @@ export function handleJoin(server: AgentChatServer, ws: ExtendedWebSocket, msg: 
     return;
   }
 
-  // Add to channel
+  // Check if this is a rejoin (agent already in channel)
+  const isRejoin = channel.agents.has(ws);
+
+  // Add to channel (idempotent for Sets)
   channel.agents.add(ws);
   agent.channels.add(msg.channel);
 
-  server._log('join', { agent: agent.id, channel: msg.channel });
+  server._log('join', { agent: agent.id, channel: msg.channel, rejoin: isRejoin });
 
-  // Notify others
-  server._broadcast(msg.channel, createMessage(ServerMessageType.AGENT_JOINED, {
-    channel: msg.channel,
-    agent: `@${agent.id}`,
-    name: agent.name
-  }), ws);
+  if (!isRejoin) {
+    // Notify others (only on first join, not rejoin)
+    server._broadcast(msg.channel, createMessage(ServerMessageType.AGENT_JOINED, {
+      channel: msg.channel,
+      agent: `@${agent.id}`,
+      name: agent.name
+    }), ws);
+  }
 
-  // Send confirmation with agent list
+  // Send confirmation with agent list (always, even on rejoin)
   const agentList: Array<{ id: string; name?: string }> = [];
   for (const memberWs of channel.agents) {
     const member = server.agents.get(memberWs);
@@ -142,34 +147,36 @@ export function handleJoin(server: AgentChatServer, ws: ExtendedWebSocket, msg: 
     agents: agentList
   }));
 
-  // Replay recent messages to the joining agent
+  // Replay recent messages (always, even on rejoin — this is how agents catch up)
   server._replayMessages(ws, msg.channel);
 
-  // Send welcome prompt to the new joiner
-  server._send(ws, createMessage(ServerMessageType.MSG, {
-    from: '@server',
-    to: msg.channel,
-    content: `Welcome to ${msg.channel}, ${agent.name} (@${agent.id})! Say hello to introduce yourself and start collaborating with other agents.`
-  }));
-
-  // Prompt existing agents to engage with the new joiner (if there are others)
-  const otherAgents: Array<{ ws: ExtendedWebSocket; id: string; name?: string }> = [];
-  for (const memberWs of channel.agents) {
-    if (memberWs !== ws) {
-      const member = server.agents.get(memberWs);
-      if (member) otherAgents.push({ ws: memberWs as ExtendedWebSocket, id: member.id, name: member.name });
-    }
-  }
-
-  if (otherAgents.length > 0) {
-    const welcomePrompt = createMessage(ServerMessageType.MSG, {
+  if (!isRejoin) {
+    // Send welcome prompt to the new joiner (only on first join)
+    server._send(ws, createMessage(ServerMessageType.MSG, {
       from: '@server',
       to: msg.channel,
-      content: `Hey ${otherAgents.map(a => `${a.name} (@${a.id})`).join(', ')} - new agent ${agent.name} (@${agent.id}) just joined! Say hi and share what you're working on.`
-    });
+      content: `Welcome to ${msg.channel}, ${agent.name} (@${agent.id})! Say hello to introduce yourself and start collaborating with other agents.`
+    }));
 
-    for (const other of otherAgents) {
-      server._send(other.ws, welcomePrompt);
+    // Prompt existing agents to engage with the new joiner (if there are others)
+    const otherAgents: Array<{ ws: ExtendedWebSocket; id: string; name?: string }> = [];
+    for (const memberWs of channel.agents) {
+      if (memberWs !== ws) {
+        const member = server.agents.get(memberWs);
+        if (member) otherAgents.push({ ws: memberWs as ExtendedWebSocket, id: member.id, name: member.name });
+      }
+    }
+
+    if (otherAgents.length > 0) {
+      const welcomePrompt = createMessage(ServerMessageType.MSG, {
+        from: '@server',
+        to: msg.channel,
+        content: `Hey ${otherAgents.map(a => `${a.name} (@${a.id})`).join(', ')} - new agent ${agent.name} (@${agent.id}) just joined! Say hi and share what you're working on.`
+      });
+
+      for (const other of otherAgents) {
+        server._send(other.ws, welcomePrompt);
+      }
     }
   }
 
