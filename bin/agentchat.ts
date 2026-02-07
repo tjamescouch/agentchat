@@ -870,7 +870,7 @@ program
       // Start daemon requires server
       if (!server) {
         console.error('Error: server URL required to start daemon');
-        console.error('Usage: agentchat daemon wss://agentchat-server.fly.dev --name myagent');
+        console.error('Usage: agentchat daemon ws://localhost:6667 --name myagent');
         process.exit(1);
       }
 

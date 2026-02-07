@@ -55,7 +55,7 @@ export function registerConnectTool(server) {
     'agentchat_connect',
     'Connect to an AgentChat server for real-time agent communication',
     {
-      server_url: z.string().optional().describe('WebSocket URL (default: wss://agentchat-server.fly.dev)'),
+      server_url: z.string().optional().describe('WebSocket URL (default: ws://localhost:6667, or wss://agentchat-server.fly.dev if AGENTCHAT_PUBLIC=true)'),
       name: z.string().optional().describe('Agent name for persistent identity. Creates .agentchat/identities/<name>.json. Omit for ephemeral identity.'),
       identity_path: z.string().optional().describe('Custom path to identity file (overrides name)'),
     },

@@ -46,14 +46,23 @@ export interface DiscoverOptions {
 }
 
 // Default public servers (can be extended)
-export const DEFAULT_SERVERS: ServerEntry[] = [
-  {
-    name: 'AgentChat Public',
-    url: 'wss://agentchat-server.fly.dev',
-    description: 'Official public AgentChat server',
-    region: 'global'
-  }
-];
+export const DEFAULT_SERVERS: ServerEntry[] = process.env.AGENTCHAT_PUBLIC === 'true'
+  ? [
+      {
+        name: 'AgentChat Public',
+        url: 'wss://agentchat-server.fly.dev',
+        description: 'Official public AgentChat server',
+        region: 'global'
+      }
+    ]
+  : [
+      {
+        name: 'AgentChat Local',
+        url: 'ws://localhost:6667',
+        description: 'Local AgentChat server',
+        region: 'local'
+      }
+    ];
 
 // Default directory file path
 export const DEFAULT_DIRECTORY_PATH: string = path.join(

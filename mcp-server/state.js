@@ -17,7 +17,8 @@ const MAX_BUFFER_SIZE = 200;
 let messageBuffer = [];
 
 // Default server
-export const DEFAULT_SERVER_URL = 'wss://agentchat-server.fly.dev';
+export const DEFAULT_SERVER_URL = process.env.AGENTCHAT_URL
+  || (process.env.AGENTCHAT_PUBLIC === 'true' ? 'wss://agentchat-server.fly.dev' : 'ws://localhost:6667');
 
 // Keepalive settings
 export const KEEPALIVE_INTERVAL_MS = 30000;
