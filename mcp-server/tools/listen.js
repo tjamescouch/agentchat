@@ -48,6 +48,7 @@ function readInbox(paths, lastSeen, channels, agentId) {
 
       messages.push({
         from: msg.from,
+        from_name: msg.from_name,
         to: msg.to,
         content: msg.content,
         ts: msg.ts,

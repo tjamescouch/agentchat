@@ -74,6 +74,7 @@ export function handleRegisterSkills(server: AgentChatServer, ws: ExtendedWebSoc
   if (server.channels.has('#discovery')) {
     server._broadcast('#discovery', createMessage(ServerMessageType.MSG, {
       from: '@server',
+      from_name: 'Server',
       to: '#discovery',
       content: `Agent @${agent.id} registered ${msg.skills.length} skill(s): ${msg.skills.map(s => s.capability).join(', ')}`
     }));

@@ -330,9 +330,9 @@ export interface WelcomeMessage extends BaseMessage {
 export interface ServerMsgMessage extends BaseMessage {
   type: ServerMessageType.MSG;
   from: string;
+  from_name?: string;
   to: string;
   content: string;
-  name?: string;
   sig?: string;
 }
 

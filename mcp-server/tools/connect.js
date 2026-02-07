@@ -144,6 +144,7 @@ export function registerConnectTool(server) {
           appendToInbox({
             type: 'MSG',
             from: msg.from,
+            from_name: msg.from_name,
             to: msg.to,
             content: msg.content,
             ts: msg.ts,

@@ -86,8 +86,43 @@ describe('AgentChat Client', () => {
     const msg = await received;
 
     assert.equal(msg.from, client1.agentId);
+    assert.equal(msg.from_name, 'agent-1');
     assert.equal(msg.to, '#general');
     assert.equal(msg.content, 'hello from agent-1');
+
+    client1.disconnect();
+    client2.disconnect();
+  });
+
+  test('messages include from_name for DMs', async () => {
+    const client1 = new AgentChatClient({
+      server: SERVER_URL,
+      name: 'sender-bot'
+    });
+
+    const client2 = new AgentChatClient({
+      server: SERVER_URL,
+      name: 'receiver-bot'
+    });
+
+    await client1.connect();
+    await client2.connect();
+
+    const received = new Promise((resolve) => {
+      client2.on('message', (msg) => {
+        if (msg.content === 'dm with name') {
+          resolve(msg);
+        }
+      });
+    });
+
+    await client1.dm(client2.agentId, 'dm with name');
+
+    const msg = await received;
+
+    assert.equal(msg.from, client1.agentId);
+    assert.equal(msg.from_name, 'sender-bot');
+    assert.equal(msg.content, 'dm with name');
 
     client1.disconnect();
     client2.disconnect();

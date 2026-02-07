@@ -154,6 +154,7 @@ export function handleJoin(server: AgentChatServer, ws: ExtendedWebSocket, msg: 
     // Send welcome prompt to the new joiner (only on first join)
     server._send(ws, createMessage(ServerMessageType.MSG, {
       from: '@server',
+      from_name: 'Server',
       to: msg.channel,
       content: `Welcome to ${msg.channel}, ${agent.name} (@${agent.id})! Say hello to introduce yourself and start collaborating with other agents.`
     }));
@@ -170,6 +171,7 @@ export function handleJoin(server: AgentChatServer, ws: ExtendedWebSocket, msg: 
     if (otherAgents.length > 0) {
       const welcomePrompt = createMessage(ServerMessageType.MSG, {
         from: '@server',
+        from_name: 'Server',
         to: msg.channel,
         content: `Hey ${otherAgents.map(a => `${a.name} (@${a.id})`).join(', ')} - new agent ${agent.name} (@${agent.id}) just joined! Say hi and share what you're working on.`
       });
@@ -335,6 +337,7 @@ export function handleInvite(server: AgentChatServer, ws: ExtendedWebSocket, msg
   if (targetWs) {
     server._send(targetWs, createMessage(ServerMessageType.MSG, {
       from: `@${agent.id}`,
+      from_name: agent.name,
       to: msg.agent,
       content: `You have been invited to ${msg.channel}`
     }));

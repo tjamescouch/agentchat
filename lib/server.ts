@@ -593,6 +593,7 @@ export class AgentChatServer {
         // Broadcast the prompt
         const msg = createMessage(ServerMessageType.MSG, {
           from: '@server',
+          from_name: 'Server',
           to: channelName,
           content: prompt
         });
