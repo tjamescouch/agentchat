@@ -5,7 +5,7 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { addJitter, exponentialBackoffWithJitter } from '../lib/jitter.js';
+import { addJitter, exponentialBackoffWithJitter } from '../dist/lib/jitter.js';
 
 describe('addJitter', () => {
   test('returns value within jitter range', () => {

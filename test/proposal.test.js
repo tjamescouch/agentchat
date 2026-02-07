@@ -4,9 +4,9 @@
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert';
-import { AgentChatServer } from '../lib/server.js';
-import { AgentChatClient } from '../lib/client.js';
-import { Identity } from '../lib/identity.js';
+import { AgentChatServer } from '../dist/lib/server.js';
+import { AgentChatClient } from '../dist/lib/client.js';
+import { Identity } from '../dist/lib/identity.js';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';

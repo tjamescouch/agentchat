@@ -4,125 +4,132 @@
  */
 
 import crypto from 'crypto';
+import {
+  ClientMessageType as ClientMessageTypeEnum,
+  ServerMessageType as ServerMessageTypeEnum,
+  ErrorCode as ErrorCodeEnum,
+  PresenceStatus as PresenceStatusEnum,
+  ProposalStatus as ProposalStatusEnum,
+  ClientMessage,
+  ServerMessage,
+  ValidationResult,
+  Skill
+} from './types.js';
 
-// Client -> Server message types
+// Re-export enums as const objects for backwards compatibility
 export const ClientMessageType = {
-  IDENTIFY: 'IDENTIFY',
-  JOIN: 'JOIN',
-  LEAVE: 'LEAVE',
-  MSG: 'MSG',
-  LIST_CHANNELS: 'LIST_CHANNELS',
-  LIST_AGENTS: 'LIST_AGENTS',
-  CREATE_CHANNEL: 'CREATE_CHANNEL',
-  INVITE: 'INVITE',
-  PING: 'PING',
+  IDENTIFY: 'IDENTIFY' as const,
+  JOIN: 'JOIN' as const,
+  LEAVE: 'LEAVE' as const,
+  MSG: 'MSG' as const,
+  LIST_CHANNELS: 'LIST_CHANNELS' as const,
+  LIST_AGENTS: 'LIST_AGENTS' as const,
+  CREATE_CHANNEL: 'CREATE_CHANNEL' as const,
+  INVITE: 'INVITE' as const,
+  PING: 'PING' as const,
   // Proposal/negotiation message types
-  PROPOSAL: 'PROPOSAL',
-  ACCEPT: 'ACCEPT',
-  REJECT: 'REJECT',
-  COMPLETE: 'COMPLETE',
-  DISPUTE: 'DISPUTE',
+  PROPOSAL: 'PROPOSAL' as const,
+  ACCEPT: 'ACCEPT' as const,
+  REJECT: 'REJECT' as const,
+  COMPLETE: 'COMPLETE' as const,
+  DISPUTE: 'DISPUTE' as const,
   // Skill discovery message types
-  REGISTER_SKILLS: 'REGISTER_SKILLS',
-  SEARCH_SKILLS: 'SEARCH_SKILLS',
+  REGISTER_SKILLS: 'REGISTER_SKILLS' as const,
+  SEARCH_SKILLS: 'SEARCH_SKILLS' as const,
   // Presence message types
-  SET_PRESENCE: 'SET_PRESENCE',
+  SET_PRESENCE: 'SET_PRESENCE' as const,
   // Identity verification message types
-  VERIFY_REQUEST: 'VERIFY_REQUEST',
-  VERIFY_RESPONSE: 'VERIFY_RESPONSE',
+  VERIFY_REQUEST: 'VERIFY_REQUEST' as const,
+  VERIFY_RESPONSE: 'VERIFY_RESPONSE' as const,
   // Admin message types
-  ADMIN_APPROVE: 'ADMIN_APPROVE',
-  ADMIN_REVOKE: 'ADMIN_REVOKE',
-  ADMIN_LIST: 'ADMIN_LIST',
+  ADMIN_APPROVE: 'ADMIN_APPROVE' as const,
+  ADMIN_REVOKE: 'ADMIN_REVOKE' as const,
+  ADMIN_LIST: 'ADMIN_LIST' as const,
 };
 
-// Server -> Client message types
 export const ServerMessageType = {
-  WELCOME: 'WELCOME',
-  MSG: 'MSG',
-  JOINED: 'JOINED',
-  LEFT: 'LEFT',
-  AGENT_JOINED: 'AGENT_JOINED',
-  AGENT_LEFT: 'AGENT_LEFT',
-  CHANNELS: 'CHANNELS',
-  AGENTS: 'AGENTS',
-  ERROR: 'ERROR',
-  PONG: 'PONG',
-  // Proposal/negotiation message types (relayed from clients)
-  PROPOSAL: 'PROPOSAL',
-  ACCEPT: 'ACCEPT',
-  REJECT: 'REJECT',
-  COMPLETE: 'COMPLETE',
-  DISPUTE: 'DISPUTE',
+  WELCOME: 'WELCOME' as const,
+  MSG: 'MSG' as const,
+  JOINED: 'JOINED' as const,
+  LEFT: 'LEFT' as const,
+  AGENT_JOINED: 'AGENT_JOINED' as const,
+  AGENT_LEFT: 'AGENT_LEFT' as const,
+  CHANNELS: 'CHANNELS' as const,
+  AGENTS: 'AGENTS' as const,
+  ERROR: 'ERROR' as const,
+  PONG: 'PONG' as const,
+  // Proposal/negotiation message types
+  PROPOSAL: 'PROPOSAL' as const,
+  ACCEPT: 'ACCEPT' as const,
+  REJECT: 'REJECT' as const,
+  COMPLETE: 'COMPLETE' as const,
+  DISPUTE: 'DISPUTE' as const,
   // Skill discovery message types
-  SKILLS_REGISTERED: 'SKILLS_REGISTERED',
-  SEARCH_RESULTS: 'SEARCH_RESULTS',
+  SKILLS_REGISTERED: 'SKILLS_REGISTERED' as const,
+  SEARCH_RESULTS: 'SEARCH_RESULTS' as const,
   // Presence message types
-  PRESENCE_CHANGED: 'PRESENCE_CHANGED',
+  PRESENCE_CHANGED: 'PRESENCE_CHANGED' as const,
   // Identity verification message types
-  VERIFY_REQUEST: 'VERIFY_REQUEST',
-  VERIFY_RESPONSE: 'VERIFY_RESPONSE',
-  VERIFY_SUCCESS: 'VERIFY_SUCCESS',
-  VERIFY_FAILED: 'VERIFY_FAILED',
+  VERIFY_REQUEST: 'VERIFY_REQUEST' as const,
+  VERIFY_RESPONSE: 'VERIFY_RESPONSE' as const,
+  VERIFY_SUCCESS: 'VERIFY_SUCCESS' as const,
+  VERIFY_FAILED: 'VERIFY_FAILED' as const,
   // Admin response
-  ADMIN_RESULT: 'ADMIN_RESULT',
+  ADMIN_RESULT: 'ADMIN_RESULT' as const,
 };
 
-// Error codes
 export const ErrorCode = {
-  AUTH_REQUIRED: 'AUTH_REQUIRED',
-  CHANNEL_NOT_FOUND: 'CHANNEL_NOT_FOUND',
-  NOT_INVITED: 'NOT_INVITED',
-  INVALID_MSG: 'INVALID_MSG',
-  RATE_LIMITED: 'RATE_LIMITED',
-  AGENT_NOT_FOUND: 'AGENT_NOT_FOUND',
-  CHANNEL_EXISTS: 'CHANNEL_EXISTS',
-  INVALID_NAME: 'INVALID_NAME',
+  AUTH_REQUIRED: 'AUTH_REQUIRED' as const,
+  CHANNEL_NOT_FOUND: 'CHANNEL_NOT_FOUND' as const,
+  NOT_INVITED: 'NOT_INVITED' as const,
+  INVALID_MSG: 'INVALID_MSG' as const,
+  RATE_LIMITED: 'RATE_LIMITED' as const,
+  AGENT_NOT_FOUND: 'AGENT_NOT_FOUND' as const,
+  CHANNEL_EXISTS: 'CHANNEL_EXISTS' as const,
+  INVALID_NAME: 'INVALID_NAME' as const,
   // Proposal errors
-  PROPOSAL_NOT_FOUND: 'PROPOSAL_NOT_FOUND',
-  PROPOSAL_EXPIRED: 'PROPOSAL_EXPIRED',
-  INVALID_PROPOSAL: 'INVALID_PROPOSAL',
-  SIGNATURE_REQUIRED: 'SIGNATURE_REQUIRED',
-  NOT_PROPOSAL_PARTY: 'NOT_PROPOSAL_PARTY',
+  PROPOSAL_NOT_FOUND: 'PROPOSAL_NOT_FOUND' as const,
+  PROPOSAL_EXPIRED: 'PROPOSAL_EXPIRED' as const,
+  INVALID_PROPOSAL: 'INVALID_PROPOSAL' as const,
+  SIGNATURE_REQUIRED: 'SIGNATURE_REQUIRED' as const,
+  NOT_PROPOSAL_PARTY: 'NOT_PROPOSAL_PARTY' as const,
   // Staking errors
-  INSUFFICIENT_REPUTATION: 'INSUFFICIENT_REPUTATION',
-  INVALID_STAKE: 'INVALID_STAKE',
+  INSUFFICIENT_REPUTATION: 'INSUFFICIENT_REPUTATION' as const,
+  INVALID_STAKE: 'INVALID_STAKE' as const,
   // Verification errors
-  VERIFICATION_FAILED: 'VERIFICATION_FAILED',
-  VERIFICATION_EXPIRED: 'VERIFICATION_EXPIRED',
-  NO_PUBKEY: 'NO_PUBKEY',
+  VERIFICATION_FAILED: 'VERIFICATION_FAILED' as const,
+  VERIFICATION_EXPIRED: 'VERIFICATION_EXPIRED' as const,
+  NO_PUBKEY: 'NO_PUBKEY' as const,
   // Allowlist errors
-  NOT_ALLOWED: 'NOT_ALLOWED',
+  NOT_ALLOWED: 'NOT_ALLOWED' as const,
 };
 
-// Presence status
 export const PresenceStatus = {
-  ONLINE: 'online',
-  AWAY: 'away',
-  BUSY: 'busy',
-  OFFLINE: 'offline',
-  LISTENING: 'listening'
+  ONLINE: 'online' as const,
+  AWAY: 'away' as const,
+  BUSY: 'busy' as const,
+  OFFLINE: 'offline' as const,
+  LISTENING: 'listening' as const
 };
 
-// Proposal status
 export const ProposalStatus = {
-  PENDING: 'pending',
-  ACCEPTED: 'accepted',
-  REJECTED: 'rejected',
-  COMPLETED: 'completed',
-  DISPUTED: 'disputed',
-  EXPIRED: 'expired'
+  PENDING: 'pending' as const,
+  ACCEPTED: 'accepted' as const,
+  REJECTED: 'rejected' as const,
+  COMPLETED: 'completed' as const,
+  DISPUTED: 'disputed' as const,
+  EXPIRED: 'expired' as const
 };
 
 /**
  * Check if a target is a channel (#name) or agent (@name)
  */
-export function isChannel(target) {
-  return target && target.startsWith('#');
+export function isChannel(target: string): boolean {
+  return Boolean(target && target.startsWith('#'));
 }
 
-export function isAgent(target) {
-  return target && target.startsWith('@');
+export function isAgent(target: string): boolean {
+  return Boolean(target && target.startsWith('@'));
 }
 
 /**
@@ -131,7 +138,7 @@ export function isAgent(target) {
  * - alphanumeric, dash, underscore
  * - no spaces
  */
-export function isValidName(name) {
+export function isValidName(name: unknown): boolean {
   if (!name || typeof name !== 'string') return false;
   if (name.length < 1 || name.length > 32) return false;
   return /^[a-zA-Z0-9_-]+$/.test(name);
@@ -143,7 +150,7 @@ export function isValidName(name) {
  * - 2-32 characters total
  * - alphanumeric, dash, underscore after #
  */
-export function isValidChannel(channel) {
+export function isValidChannel(channel: unknown): boolean {
   if (!channel || typeof channel !== 'string') return false;
   if (!channel.startsWith('#')) return false;
   const name = channel.slice(1);
@@ -154,7 +161,7 @@ export function isValidChannel(channel) {
 /**
  * Validate Ed25519 public key in PEM format
  */
-export function isValidPubkey(pubkey) {
+export function isValidPubkey(pubkey: unknown): boolean {
   if (!pubkey || typeof pubkey !== 'string') return false;
 
   try {
@@ -169,15 +176,19 @@ export function isValidPubkey(pubkey) {
  * Generate stable agent ID from pubkey
  * Returns first 8 chars of SHA256 hash (hex)
  */
-export function pubkeyToAgentId(pubkey) {
+export function pubkeyToAgentId(pubkey: string): string {
   const hash = crypto.createHash('sha256').update(pubkey).digest('hex');
   return hash.substring(0, 8);
+}
+
+interface MessageData {
+  [key: string]: unknown;
 }
 
 /**
  * Create a message object with timestamp
  */
-export function createMessage(type, data = {}) {
+export function createMessage<T extends MessageData>(type: string, data: T = {} as T): T & { type: string; ts: number } {
   return {
     type,
     ts: Date.now(),
@@ -188,29 +199,60 @@ export function createMessage(type, data = {}) {
 /**
  * Create an error message
  */
-export function createError(code, message) {
+export function createError(code: string, message: string): { type: string; ts: number; code: string; message: string } {
   return createMessage(ServerMessageType.ERROR, { code, message });
+}
+
+interface RawClientMessage {
+  type?: string;
+  name?: string;
+  pubkey?: string | null;
+  channel?: string;
+  to?: string;
+  content?: string;
+  sig?: string;
+  agent?: string;
+  proposal_id?: string;
+  task?: string;
+  amount?: number;
+  currency?: string;
+  expires?: number;
+  terms?: string;
+  elo_stake?: number;
+  proof?: string;
+  reason?: string;
+  skills?: Skill[];
+  query?: Record<string, unknown>;
+  query_id?: string;
+  status?: string;
+  status_text?: string;
+  target?: string;
+  nonce?: string;
+  request_id?: string;
+  admin_key?: string;
+  note?: string;
+  agent_id?: string;
 }
 
 /**
  * Validate incoming client message
  * Returns { valid: true, msg } or { valid: false, error }
  */
-export function validateClientMessage(raw) {
-  let msg;
-  
+export function validateClientMessage(raw: string | RawClientMessage): ValidationResult {
+  let msg: RawClientMessage;
+
   // Parse JSON
   try {
     msg = typeof raw === 'string' ? JSON.parse(raw) : raw;
   } catch (e) {
     return { valid: false, error: 'Invalid JSON' };
   }
-  
+
   // Must have type
   if (!msg.type) {
     return { valid: false, error: 'Missing message type' };
   }
-  
+
   // Validate by type
   switch (msg.type) {
     case ClientMessageType.IDENTIFY:
@@ -224,7 +266,7 @@ export function validateClientMessage(raw) {
         }
       }
       break;
-      
+
     case ClientMessageType.JOIN:
     case ClientMessageType.LEAVE:
     case ClientMessageType.LIST_AGENTS:
@@ -232,7 +274,7 @@ export function validateClientMessage(raw) {
         return { valid: false, error: 'Invalid channel name' };
       }
       break;
-      
+
     case ClientMessageType.MSG:
       if (!msg.to) {
         return { valid: false, error: 'Missing target' };
@@ -251,13 +293,13 @@ export function validateClientMessage(raw) {
         return { valid: false, error: 'Invalid signature format' };
       }
       break;
-      
+
     case ClientMessageType.CREATE_CHANNEL:
       if (!isValidChannel(msg.channel)) {
         return { valid: false, error: 'Invalid channel name' };
       }
       break;
-      
+
     case ClientMessageType.INVITE:
       if (!isValidChannel(msg.channel)) {
         return { valid: false, error: 'Invalid channel name' };
@@ -266,7 +308,7 @@ export function validateClientMessage(raw) {
         return { valid: false, error: 'Invalid agent target' };
       }
       break;
-      
+
     case ClientMessageType.LIST_CHANNELS:
     case ClientMessageType.PING:
       // No additional validation needed
@@ -444,14 +486,14 @@ export function validateClientMessage(raw) {
     default:
       return { valid: false, error: `Unknown message type: ${msg.type}` };
   }
-  
-  return { valid: true, msg };
+
+  return { valid: true, msg: msg as unknown as ClientMessage };
 }
 
 /**
  * Generate a unique agent ID
  */
-export function generateAgentId() {
+export function generateAgentId(): string {
   const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
   let id = '';
   for (let i = 0; i < 8; i++) {
@@ -463,14 +505,14 @@ export function generateAgentId() {
 /**
  * Serialize message for sending over WebSocket
  */
-export function serialize(msg) {
+export function serialize(msg: unknown): string {
   return JSON.stringify(msg);
 }
 
 /**
  * Parse message from WebSocket
  */
-export function parse(data) {
+export function parse<T = unknown>(data: string): T {
   return JSON.parse(data);
 }
 
@@ -478,7 +520,7 @@ export function parse(data) {
  * Generate a unique proposal ID
  * Format: prop_<timestamp>_<random>
  */
-export function generateProposalId() {
+export function generateProposalId(): string {
   const timestamp = Date.now().toString(36);
   const random = crypto.randomBytes(4).toString('hex');
   return `prop_${timestamp}_${random}`;
@@ -487,21 +529,22 @@ export function generateProposalId() {
 /**
  * Check if a message type is a proposal-related type
  */
-export function isProposalMessage(type) {
-  return [
+export function isProposalMessage(type: string): boolean {
+  const proposalTypes: string[] = [
     ClientMessageType.PROPOSAL,
     ClientMessageType.ACCEPT,
     ClientMessageType.REJECT,
     ClientMessageType.COMPLETE,
     ClientMessageType.DISPUTE
-  ].includes(type);
+  ];
+  return proposalTypes.includes(type);
 }
 
 /**
  * Generate a unique verification request ID
  * Format: verify_<timestamp>_<random>
  */
-export function generateVerifyId() {
+export function generateVerifyId(): string {
   const timestamp = Date.now().toString(36);
   const random = crypto.randomBytes(4).toString('hex');
   return `verify_${timestamp}_${random}`;
@@ -511,6 +554,6 @@ export function generateVerifyId() {
  * Generate a random nonce for identity verification
  * Returns a 32-character hex string
  */
-export function generateNonce() {
+export function generateNonce(): string {
   return crypto.randomBytes(16).toString('hex');
 }

@@ -493,7 +493,7 @@ program
       await client.connect();
 
       const eloStake = options.eloStake ? parseInt(options.eloStake) : undefined;
-      const response = await client.accept(proposalId, options.paymentCode, eloStake);
+      const response = await client.accept(proposalId, options.paymentCode, eloStake) as any;
 
       console.log('Proposal accepted:');
       console.log(`  Proposal ID: ${response.proposal_id}`);
@@ -521,7 +521,7 @@ program
       const client = new AgentChatClient({ server, identity: options.identity });
       await client.connect();
 
-      const response = await client.reject(proposalId, options.reason);
+      const response = await client.reject(proposalId, options.reason) as any;
 
       console.log('Proposal rejected:');
       console.log(`  Proposal ID: ${response.proposal_id}`);
@@ -547,7 +547,7 @@ program
       const client = new AgentChatClient({ server, identity: options.identity });
       await client.connect();
 
-      const response = await client.complete(proposalId, options.proof);
+      const response = await client.complete(proposalId, options.proof) as any;
 
       console.log('Proposal completed:');
       console.log(`  Proposal ID: ${response.proposal_id}`);
@@ -572,7 +572,7 @@ program
       const client = new AgentChatClient({ server, identity: options.identity });
       await client.connect();
 
-      const response = await client.dispute(proposalId, reason);
+      const response = await client.dispute(proposalId, reason) as any;
 
       console.log('Proposal disputed:');
       console.log(`  Proposal ID: ${response.proposal_id}`);
@@ -986,7 +986,7 @@ program
           break;
 
         case 'export':
-          const output = await store.export(options.format, agentId);
+          const output = await store.export(options.format as 'json' | 'yaml', agentId);
           console.log(output);
           break;
 
@@ -1244,7 +1244,7 @@ program
         await client.sendRaw({
           type: 'REGISTER_SKILLS',
           skills,
-          sig: sig.toString('base64')
+          sig
         });
 
         // Wait for response
@@ -1549,7 +1549,7 @@ program
           console.log('No active deployments.');
         } else {
           console.log('Active deployments:');
-          for (const d of deployments) {
+          for (const d of deployments as any[]) {
             console.log(`  DSEQ ${d.dseq}: ${d.status} - ${d.endpoint || 'pending'}`);
           }
         }
@@ -1572,7 +1572,7 @@ program
           console.log('No bids received yet.');
         } else {
           console.log('Available bids:');
-          for (const b of bids) {
+          for (const b of bids as any[]) {
             const bid = b.bid || {};
             const price = bid.price?.amount || 'unknown';
             const state = bid.state || 'unknown';
@@ -1604,7 +1604,7 @@ program
       // Akash: Get detailed deployment status
       if (isAkash && options.dseqStatus) {
         console.log(`Getting status for deployment ${options.dseqStatus}...`);
-        const status = await getDeploymentStatus(options.dseqStatus, options.wallet);
+        const status = await getDeploymentStatus(options.dseqStatus, options.wallet) as any;
         console.log('Deployment status:');
         console.log(`  DSEQ: ${status.dseq}`);
         console.log(`  Status: ${status.status}`);

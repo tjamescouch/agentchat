@@ -16,7 +16,7 @@ import {
   exportReceipts,
   shouldStoreReceipt,
   ReceiptStore
-} from '../lib/receipts.js';
+} from '../dist/lib/receipts.js';
 
 // Test directory
 const TEST_DIR = path.join(os.tmpdir(), 'agentchat-receipts-test');

@@ -3,6 +3,13 @@
  * Handles allowlist administration commands
  */
 
+import type { WebSocket } from 'ws';
+import type { AgentChatServer } from '../../server.js';
+import type {
+  AdminApproveMessage,
+  AdminRevokeMessage,
+  AdminListMessage,
+} from '../../types.js';
 import {
   ServerMessageType,
   ErrorCode,
@@ -10,10 +17,17 @@ import {
   createError,
 } from '../../protocol.js';
 
+// Extended WebSocket with custom properties
+interface ExtendedWebSocket extends WebSocket {
+  _connectedAt?: number;
+  _realIp?: string;
+  _userAgent?: string;
+}
+
 /**
  * Handle ADMIN_APPROVE command - add a pubkey to the allowlist
  */
-export function handleAdminApprove(server, ws, msg) {
+export function handleAdminApprove(server: AgentChatServer, ws: ExtendedWebSocket, msg: AdminApproveMessage): void {
   if (!server.allowlist) {
     server._send(ws, createError(ErrorCode.INVALID_MSG, 'Allowlist not configured'));
     return;
@@ -27,7 +41,7 @@ export function handleAdminApprove(server, ws, msg) {
   const result = server.allowlist.approve(msg.pubkey, msg.admin_key, msg.note || '');
 
   if (!result.success) {
-    server._send(ws, createError(ErrorCode.AUTH_REQUIRED, result.error));
+    server._send(ws, createError(ErrorCode.AUTH_REQUIRED, result.error!));
     return;
   }
 
@@ -42,7 +56,7 @@ export function handleAdminApprove(server, ws, msg) {
 /**
  * Handle ADMIN_REVOKE command - remove a pubkey from the allowlist
  */
-export function handleAdminRevoke(server, ws, msg) {
+export function handleAdminRevoke(server: AgentChatServer, ws: ExtendedWebSocket, msg: AdminRevokeMessage): void {
   if (!server.allowlist) {
     server._send(ws, createError(ErrorCode.INVALID_MSG, 'Allowlist not configured'));
     return;
@@ -58,7 +72,7 @@ export function handleAdminRevoke(server, ws, msg) {
 
   if (!result.success) {
     const code = result.error === 'invalid admin key' ? ErrorCode.AUTH_REQUIRED : ErrorCode.AGENT_NOT_FOUND;
-    server._send(ws, createError(code, result.error));
+    server._send(ws, createError(code, result.error!));
     return;
   }
 
@@ -72,7 +86,7 @@ export function handleAdminRevoke(server, ws, msg) {
 /**
  * Handle ADMIN_LIST command - list all approved entries
  */
-export function handleAdminList(server, ws, msg) {
+export function handleAdminList(server: AgentChatServer, ws: ExtendedWebSocket, msg: AdminListMessage): void {
   if (!server.allowlist) {
     server._send(ws, createError(ErrorCode.INVALID_MSG, 'Allowlist not configured'));
     return;

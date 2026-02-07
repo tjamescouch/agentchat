@@ -4,7 +4,7 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { checkDirectorySafety, enforceDirectorySafety } from '../lib/security.js';
+import { checkDirectorySafety, enforceDirectorySafety } from '../dist/lib/security.js';
 
 describe('checkDirectorySafety', () => {
   test('rejects root directory', () => {

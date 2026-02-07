@@ -94,8 +94,7 @@ export interface EscrowSettlement {
 }
 
 export interface RatingChanges {
-  [agentId: string]: RatingChange;
-  _escrow?: EscrowSettlement;
+  [agentId: string]: RatingChange | EscrowSettlement | undefined;
 }
 
 export interface LeaderboardEntry {

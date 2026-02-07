@@ -6,8 +6,8 @@
 
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert';
-import { AgentChatServer } from '../lib/server.js';
-import { AgentChatClient } from '../lib/client.js';
+import { AgentChatServer } from '../dist/lib/server.js';
+import { AgentChatClient } from '../dist/lib/client.js';
 
 describe('AgentChat Client', () => {
   let server;

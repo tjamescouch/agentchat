@@ -4,6 +4,13 @@
  */
 
 import crypto from 'crypto';
+import type { WebSocket } from 'ws';
+import type { AgentChatServer } from '../../server.js';
+import type {
+  IdentifyMessage,
+  VerifyRequestMessage,
+  VerifyResponseMessage,
+} from '../../types.js';
 import {
   ServerMessageType,
   ErrorCode,
@@ -14,10 +21,27 @@ import {
   pubkeyToAgentId,
 } from '../../protocol.js';
 
+// Extended WebSocket with custom properties
+interface ExtendedWebSocket extends WebSocket {
+  _connectedAt?: number;
+  _realIp?: string;
+  _userAgent?: string;
+}
+
+// Pending verification request
+interface PendingVerification {
+  from: string;
+  fromWs: ExtendedWebSocket;
+  target: string;
+  targetPubkey: string;
+  nonce: string;
+  expires: number;
+}
+
 /**
  * Handle IDENTIFY command
  */
-export function handleIdentify(server, ws, msg) {
+export function handleIdentify(server: AgentChatServer, ws: ExtendedWebSocket, msg: IdentifyMessage): void {
   // Check if already identified
   if (server.agents.has(ws)) {
     server._send(ws, createError(ErrorCode.INVALID_MSG, 'Already identified'));
@@ -39,7 +63,7 @@ export function handleIdentify(server, ws, msg) {
     }
   }
 
-  let id;
+  let id: string;
 
   // Use pubkey-derived stable ID if pubkey provided
   if (msg.pubkey) {
@@ -57,11 +81,11 @@ export function handleIdentify(server, ws, msg) {
     // Check if this ID is currently in use by another connection
     if (server.agentById.has(id)) {
       // Kick the old connection instead of rejecting the new one
-      const oldWs = server.agentById.get(id);
+      const oldWs = server.agentById.get(id)!;
       server._log('identity-takeover', { id, reason: 'New connection with same identity' });
       server._send(oldWs, createError(ErrorCode.INVALID_MSG, 'Disconnected: Another connection claimed this identity'));
       server._handleDisconnect(oldWs);
-      oldWs.close(1000, 'Identity claimed by new connection');
+      (oldWs as WebSocket).close(1000, 'Identity claimed by new connection');
     }
   } else {
     // Ephemeral agent - generate random ID
@@ -72,10 +96,10 @@ export function handleIdentify(server, ws, msg) {
     id,
     name: msg.name,
     pubkey: msg.pubkey || null,
-    channels: new Set(),
+    channels: new Set<string>(),
     connectedAt: Date.now(),
-    presence: 'online',
-    statusText: null
+    presence: 'online' as const,
+    status_text: null as string | null
   };
 
   server.agents.set(ws, agent);
@@ -105,7 +129,7 @@ export function handleIdentify(server, ws, msg) {
 /**
  * Handle VERIFY_REQUEST command
  */
-export function handleVerifyRequest(server, ws, msg) {
+export function handleVerifyRequest(server: AgentChatServer, ws: ExtendedWebSocket, msg: VerifyRequestMessage): void {
   const agent = server.agents.get(ws);
   if (!agent) {
     server._send(ws, createError(ErrorCode.AUTH_REQUIRED, 'Must IDENTIFY first'));
@@ -124,7 +148,7 @@ export function handleVerifyRequest(server, ws, msg) {
   const targetAgent = server.agents.get(targetWs);
 
   // Target must have a pubkey for verification
-  if (!targetAgent.pubkey) {
+  if (!targetAgent?.pubkey) {
     server._send(ws, createError(ErrorCode.NO_PUBKEY, `Agent ${msg.target} has no persistent identity`));
     return;
   }
@@ -133,22 +157,24 @@ export function handleVerifyRequest(server, ws, msg) {
   const requestId = generateVerifyId();
   const expires = Date.now() + server.verificationTimeoutMs;
 
-  server.pendingVerifications.set(requestId, {
+  const pendingVerification: PendingVerification = {
     from: `@${agent.id}`,
     fromWs: ws,
     target: msg.target,
     targetPubkey: targetAgent.pubkey,
     nonce: msg.nonce,
     expires
-  });
+  };
+
+  server.pendingVerifications.set(requestId, pendingVerification);
 
   // Set timeout to clean up expired requests
   setTimeout(() => {
-    const request = server.pendingVerifications.get(requestId);
+    const request = server.pendingVerifications.get(requestId) as PendingVerification | undefined;
     if (request) {
       server.pendingVerifications.delete(requestId);
       // Notify requester of timeout
-      if (request.fromWs.readyState === 1) {
+      if ((request.fromWs as WebSocket).readyState === 1) {
         server._send(request.fromWs, createMessage(ServerMessageType.VERIFY_FAILED, {
           request_id: requestId,
           target: request.target,
@@ -178,7 +204,7 @@ export function handleVerifyRequest(server, ws, msg) {
 /**
  * Handle VERIFY_RESPONSE command
  */
-export function handleVerifyResponse(server, ws, msg) {
+export function handleVerifyResponse(server: AgentChatServer, ws: ExtendedWebSocket, msg: VerifyResponseMessage): void {
   const agent = server.agents.get(ws);
   if (!agent) {
     server._send(ws, createError(ErrorCode.AUTH_REQUIRED, 'Must IDENTIFY first'));
@@ -192,7 +218,7 @@ export function handleVerifyResponse(server, ws, msg) {
   }
 
   // Find the pending verification
-  const request = server.pendingVerifications.get(msg.request_id);
+  const request = server.pendingVerifications.get(msg.request_id) as PendingVerification | undefined;
   if (!request) {
     server._send(ws, createError(ErrorCode.VERIFICATION_EXPIRED, 'Verification request not found or expired'));
     return;
@@ -221,7 +247,7 @@ export function handleVerifyResponse(server, ws, msg) {
       Buffer.from(msg.sig, 'base64')
     );
   } catch (err) {
-    server._log('verify_error', { request_id: msg.request_id, error: err.message });
+    server._log('verify_error', { request_id: msg.request_id, error: (err as Error).message });
   }
 
   // Clean up the pending request
@@ -234,7 +260,7 @@ export function handleVerifyResponse(server, ws, msg) {
   });
 
   // Notify the original requester
-  if (request.fromWs.readyState === 1) {
+  if ((request.fromWs as WebSocket).readyState === 1) {
     if (verified) {
       server._send(request.fromWs, createMessage(ServerMessageType.VERIFY_SUCCESS, {
         request_id: msg.request_id,

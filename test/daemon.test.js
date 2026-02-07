@@ -8,8 +8,8 @@ import assert from 'node:assert';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
-import { AgentChatServer } from '../lib/server.js';
-import { Identity } from '../lib/identity.js';
+import { AgentChatServer } from '../dist/lib/server.js';
+import { Identity } from '../dist/lib/identity.js';
 import crypto from 'crypto';
 import {
   AgentChatDaemon,
@@ -17,7 +17,7 @@ import {
   stopDaemon,
   getDaemonStatus,
   getDaemonPaths
-} from '../lib/daemon.js';
+} from '../dist/lib/daemon.js';
 
 describe('Daemon', () => {
   let server;

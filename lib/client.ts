@@ -123,7 +123,7 @@ export class AgentChatClient extends EventEmitter {
           this._identity = Identity.generate(this.name);
           await this._identity.save(this.identityPath);
         }
-        this.name = this._identity.name;
+        this.name = this._identity.name || this.name;
         this.pubkey = this._identity.pubkey;
       } catch (err) {
         const error = err as Error;
@@ -356,8 +356,7 @@ export class AgentChatClient extends EventEmitter {
 
     const target = to.startsWith('@') ? to : `@${to}`;
 
-    const msg: Record<string, unknown> = {
-      type: ClientMessageType.PROPOSAL,
+    const proposalData = {
       to: target,
       task: proposal.task,
       amount: proposal.amount,
@@ -369,8 +368,13 @@ export class AgentChatClient extends EventEmitter {
     };
 
     // Sign the proposal
-    const sigContent = getProposalSigningContent(msg);
-    msg.sig = this._identity.sign(sigContent);
+    const sigContent = getProposalSigningContent(proposalData);
+
+    const msg: Record<string, unknown> = {
+      type: ClientMessageType.PROPOSAL,
+      ...proposalData,
+      sig: this._identity.sign(sigContent)
+    };
 
     this._send(msg);
 

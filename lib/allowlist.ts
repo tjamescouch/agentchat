@@ -9,13 +9,56 @@ import fs from 'fs';
 import path from 'path';
 import { pubkeyToAgentId } from './protocol.js';
 
+interface AllowlistEntry {
+  agentId: string;
+  approvedAt: string;
+  approvedBy: string;
+  note: string;
+}
+
+interface AllowlistOptions {
+  enabled?: boolean;
+  strict?: boolean;
+  adminKey?: string | null;
+  filePath?: string;
+}
+
+interface CheckResult {
+  allowed: boolean;
+  reason: string;
+}
+
+interface ApproveResult {
+  success: boolean;
+  error?: string;
+  agentId?: string;
+}
+
+interface RevokeResult {
+  success: boolean;
+  error?: string;
+}
+
+interface ListEntry {
+  agentId: string;
+  pubkeyPrefix: string;
+  approvedAt: string;
+  note: string;
+}
+
 export class Allowlist {
-  constructor(options = {}) {
+  enabled: boolean;
+  strict: boolean;
+  adminKey: string | null;
+  filePath: string;
+  entries: Map<string, AllowlistEntry>;
+
+  constructor(options: AllowlistOptions = {}) {
     this.enabled = options.enabled || false;
-    this.strict = options.strict || false; // Block ephemeral connections when true
+    this.strict = options.strict || false;
     this.adminKey = options.adminKey || null;
     this.filePath = options.filePath || path.join(process.cwd(), 'allowlist.json');
-    this.entries = new Map(); // pubkey -> { agentId, approvedAt, approvedBy, note }
+    this.entries = new Map();
 
     if (this.enabled) {
       this._load();
@@ -24,15 +67,13 @@ export class Allowlist {
 
   /**
    * Check if a pubkey is allowed to connect.
-   * Returns { allowed, reason }
    */
-  check(pubkey) {
+  check(pubkey: string | null): CheckResult {
     if (!this.enabled) {
       return { allowed: true, reason: 'allowlist disabled' };
     }
 
     if (!pubkey) {
-      // Ephemeral connection (no pubkey)
       if (this.strict) {
         return { allowed: false, reason: 'ephemeral connections blocked in strict mode' };
       }
@@ -50,7 +91,7 @@ export class Allowlist {
    * Approve a pubkey for connection.
    * Requires valid admin key.
    */
-  approve(pubkey, adminKey, note = '') {
+  approve(pubkey: string, adminKey: string, note: string = ''): ApproveResult {
     if (!this._validateAdminKey(adminKey)) {
       return { success: false, error: 'invalid admin key' };
     }
@@ -71,7 +112,7 @@ export class Allowlist {
    * Revoke a pubkey from the allowlist.
    * Can revoke by pubkey or agentId.
    */
-  revoke(identifier, adminKey) {
+  revoke(identifier: string, adminKey: string): RevokeResult {
     if (!this._validateAdminKey(adminKey)) {
       return { success: false, error: 'invalid admin key' };
     }
@@ -98,8 +139,8 @@ export class Allowlist {
   /**
    * List all approved entries.
    */
-  list() {
-    const result = [];
+  list(): ListEntry[] {
+    const result: ListEntry[] = [];
     for (const [pubkey, entry] of this.entries) {
       result.push({
         agentId: `@${entry.agentId}`,
@@ -115,7 +156,7 @@ export class Allowlist {
    * Validate admin key using timing-safe comparison.
    * Hash both values first to ensure equal length (avoids length timing oracle).
    */
-  _validateAdminKey(key) {
+  _validateAdminKey(key: string | null | undefined): boolean {
     if (!this.adminKey || !key) return false;
     if (typeof key !== 'string') return false;
 
@@ -127,7 +168,7 @@ export class Allowlist {
   /**
    * Load allowlist from disk.
    */
-  _load() {
+  _load(): void {
     try {
       if (fs.existsSync(this.filePath)) {
         const data = JSON.parse(fs.readFileSync(this.filePath, 'utf8'));
@@ -141,22 +182,22 @@ export class Allowlist {
         }
       }
     } catch (err) {
-      console.error(`Failed to load allowlist from ${this.filePath}: ${err.message}`);
+      console.error(`Failed to load allowlist from ${this.filePath}: ${(err as Error).message}`);
     }
   }
 
   /**
    * Save allowlist to disk.
    */
-  _save() {
+  _save(): void {
     try {
-      const data = [];
+      const data: Array<{ pubkey: string } & AllowlistEntry> = [];
       for (const [pubkey, entry] of this.entries) {
         data.push({ pubkey, ...entry });
       }
       fs.writeFileSync(this.filePath, JSON.stringify(data, null, 2));
     } catch (err) {
-      console.error(`Failed to save allowlist to ${this.filePath}: ${err.message}`);
+      console.error(`Failed to save allowlist to ${this.filePath}: ${(err as Error).message}`);
     }
   }
 }

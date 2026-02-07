@@ -7,9 +7,47 @@ import fs from 'fs/promises';
 import yaml from 'js-yaml';
 
 /**
+ * TLS configuration
+ */
+export interface TLSConfig {
+  cert: string;
+  key: string;
+}
+
+/**
+ * Deploy configuration object
+ */
+export interface DeployConfig {
+  provider: 'docker' | 'akash';
+  port: number;
+  host: string;
+  name: string;
+  logMessages: boolean;
+  volumes: boolean;
+  healthCheck: boolean;
+  tls: TLSConfig | null;
+  network: string | null;
+}
+
+/**
+ * Raw configuration from YAML (before validation)
+ */
+export interface RawDeployConfig {
+  provider?: string;
+  port?: number | string;
+  host?: string;
+  name?: string;
+  logMessages?: boolean;
+  volumes?: boolean;
+  healthCheck?: boolean;
+  tls?: TLSConfig | null;
+  network?: string | null;
+}
+
+/**
  * Default configuration values
  */
-export const DEFAULT_CONFIG = {
+export const DEFAULT_CONFIG: DeployConfig = {
   provider: 'docker',
   port: 6667,
   host: '0.0.0.0',
@@ -23,27 +61,28 @@ export const DEFAULT_CONFIG = {
 
 /**
  * Load and parse deploy.yaml configuration
- * @param {string} configPath - Path to configuration file
- * @returns {Promise<object>} Validated configuration object
+ * @param configPath - Path to configuration file
+ * @returns Validated configuration object
  */
-export async function loadConfig(configPath) {
+export async function loadConfig(configPath: string): Promise<DeployConfig> {
   const content = await fs.readFile(configPath, 'utf-8');
-  const parsed = yaml.load(content);
+  const parsed = yaml.load(content) as RawDeployConfig;
   return validateConfig(parsed);
 }
 
 /**
  * Validate configuration object
- * @param {object} config - Raw configuration object
- * @returns {object} Validated and merged configuration
- * @throws {Error} If configuration is invalid
+ * @param config - Raw configuration object
+ * @returns Validated and merged configuration
+ * @throws Error if configuration is invalid
  */
-export function validateConfig(config) {
+export function validateConfig(config: unknown): DeployConfig {
   if (!config || typeof config !== 'object') {
     throw new Error('Configuration must be an object');
   }
 
-  const result = { ...DEFAULT_CONFIG, ...config };
+  const rawConfig = config as RawDeployConfig;
+  const result: DeployConfig = { ...DEFAULT_CONFIG, ...rawConfig } as DeployConfig;
 
   // Validate provider
   if (!['docker', 'akash'].includes(result.provider)) {
@@ -51,7 +90,7 @@ export function validateConfig(config) {
   }
 
   // Validate port
-  const port = parseInt(result.port);
+  const port = parseInt(String(result.port));
   if (isNaN(port) || port < 1 || port > 65535) {
     throw new Error(`Invalid port: ${result.port}. Must be between 1 and 65535`);
   }
@@ -99,9 +138,9 @@ export function validateConfig(config) {
 
 /**
  * Generate example deploy.yaml content
- * @returns {string} Example YAML configuration
+ * @returns Example YAML configuration
  */
-export function generateExampleConfig() {
+export function generateExampleConfig(): string {
   return `# AgentChat deployment configuration
 provider: docker
 port: 6667

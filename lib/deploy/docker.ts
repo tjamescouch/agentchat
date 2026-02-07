@@ -4,14 +4,83 @@
  */
 
 import yaml from 'js-yaml';
+import type { TLSConfig } from './config.js';
+
+/**
+ * Docker deployment options
+ */
+export interface DockerDeployOptions {
+  port?: number;
+  host?: string;
+  name?: string;
+  logMessages?: boolean;
+  volumes?: boolean;
+  tls?: TLSConfig | null;
+  network?: string | null;
+  healthCheck?: boolean;
+}
+
+/**
+ * Internal Docker configuration
+ */
+interface DockerConfig {
+  port: number;
+  host: string;
+  name: string;
+  logMessages: boolean;
+  volumes: boolean;
+  tls: TLSConfig | null;
+  network: string | null;
+  healthCheck: boolean;
+}
+
+/**
+ * Docker Compose service definition
+ */
+interface DockerComposeService {
+  image: string;
+  build: string;
+  container_name: string;
+  ports: string[];
+  environment: string[];
+  restart: string;
+  healthcheck?: {
+    test: string[];
+    interval: string;
+    timeout: string;
+    retries: number;
+    start_period: string;
+  };
+  volumes?: string[];
+  networks?: string[];
+}
+
+/**
+ * Docker Compose file structure
+ */
+interface DockerCompose {
+  version: string;
+  services: {
+    agentchat: DockerComposeService;
+  };
+  volumes?: Record<string, object>;
+  networks?: Record<string, { driver: string }>;
+}
+
+/**
+ * Dockerfile generation options
+ */
+export interface DockerfileOptions {
+  tls?: boolean;
+}
 
 /**
  * Generate docker-compose.yml for self-hosting
- * @param {object} options - Configuration options
- * @returns {string} docker-compose.yml content
+ * @param options - Configuration options
+ * @returns docker-compose.yml content
  */
-export async function deployToDocker(options = {}) {
-  const config = {
+export async function deployToDocker(options: DockerDeployOptions = {}): Promise<string> {
+  const config: DockerConfig = {
     port: options.port || 6667,
     host: options.host || '0.0.0.0',
     name: options.name || 'agentchat',
@@ -23,7 +92,7 @@ export async function deployToDocker(options = {}) {
   };
 
   // Build compose object
-  const compose = {
+  const compose: DockerCompose = {
     version: '3.8',
     services: {
       agentchat: {
@@ -92,10 +161,10 @@ export async function deployToDocker(options = {}) {
 
 /**
  * Generate Dockerfile for agentchat server
- * @param {object} options - Configuration options
- * @returns {string} Dockerfile content
+ * @param options - Configuration options
+ * @returns Dockerfile content
  */
-export async function generateDockerfile(options = {}) {
+export async function generateDockerfile(options: DockerfileOptions = {}): Promise<string> {
   const tls = options.tls || false;
 
   return `FROM node:18-alpine

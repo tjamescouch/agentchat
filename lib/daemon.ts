@@ -68,7 +68,9 @@ export interface OutboxMessage {
   content: string;
 }
 
-export interface CompleteMessage extends ServerMessage {
+export interface DaemonCompleteMessage {
+  type: string;
+  ts?: number;
   proposal_id?: string;
   from?: string;
   to?: string;
@@ -217,7 +219,7 @@ export class AgentChatDaemon {
     }
   }
 
-  private async _saveReceiptIfParty(completeMsg: CompleteMessage): Promise<void> {
+  private async _saveReceiptIfParty(completeMsg: DaemonCompleteMessage): Promise<void> {
     try {
       // Get our agent ID
       const ourAgentId = this.client?.agentId;
@@ -357,8 +359,8 @@ export class AgentChatDaemon {
       await this._appendToInbox(msg);
     });
 
-    this.client.on('complete', async (msg: CompleteMessage) => {
-      await this._appendToInbox(msg);
+    this.client.on('complete', async (msg: DaemonCompleteMessage) => {
+      await this._appendToInbox(msg as unknown as ServerMessage);
       // Save receipt if we're a party to this completion
       await this._saveReceiptIfParty(msg);
     });
