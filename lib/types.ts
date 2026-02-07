@@ -28,7 +28,14 @@ export enum ClientMessageType {
   ADMIN_APPROVE = 'ADMIN_APPROVE',
   ADMIN_REVOKE = 'ADMIN_REVOKE',
   ADMIN_LIST = 'ADMIN_LIST',
-  VERIFY_IDENTITY = 'VERIFY_IDENTITY'
+  VERIFY_IDENTITY = 'VERIFY_IDENTITY',
+  // Agentcourt dispute types
+  DISPUTE_INTENT = 'DISPUTE_INTENT',
+  DISPUTE_REVEAL = 'DISPUTE_REVEAL',
+  EVIDENCE = 'EVIDENCE',
+  ARBITER_ACCEPT = 'ARBITER_ACCEPT',
+  ARBITER_DECLINE = 'ARBITER_DECLINE',
+  ARBITER_VOTE = 'ARBITER_VOTE'
 }
 
 export enum ServerMessageType {
@@ -55,7 +62,16 @@ export enum ServerMessageType {
   VERIFY_SUCCESS = 'VERIFY_SUCCESS',
   VERIFY_FAILED = 'VERIFY_FAILED',
   ADMIN_RESULT = 'ADMIN_RESULT',
-  CHALLENGE = 'CHALLENGE'
+  CHALLENGE = 'CHALLENGE',
+  // Agentcourt dispute types
+  PANEL_FORMED = 'PANEL_FORMED',
+  ARBITER_ASSIGNED = 'ARBITER_ASSIGNED',
+  EVIDENCE_RECEIVED = 'EVIDENCE_RECEIVED',
+  CASE_READY = 'CASE_READY',
+  VERDICT = 'VERDICT',
+  DISPUTE_FALLBACK = 'DISPUTE_FALLBACK',
+  DISPUTE_INTENT_ACK = 'DISPUTE_INTENT_ACK',
+  DISPUTE_REVEALED = 'DISPUTE_REVEALED'
 }
 
 export enum ErrorCode {
@@ -293,6 +309,55 @@ export interface VerifyIdentityMessage extends BaseMessage {
   timestamp: number;
 }
 
+// Agentcourt dispute messages
+export interface DisputeIntentMessage extends BaseMessage {
+  type: ClientMessageType.DISPUTE_INTENT;
+  proposal_id: string;
+  reason: string;
+  commitment: string;
+  sig: string;
+}
+
+export interface DisputeRevealMessage extends BaseMessage {
+  type: ClientMessageType.DISPUTE_REVEAL;
+  proposal_id: string;
+  nonce: string;
+  sig: string;
+}
+
+export interface EvidenceMessage extends BaseMessage {
+  type: ClientMessageType.EVIDENCE;
+  dispute_id: string;
+  items: Array<{
+    kind: string;
+    label: string;
+    value: string;
+    url?: string;
+  }>;
+  statement: string;
+  sig: string;
+}
+
+export interface ArbiterAcceptMessage extends BaseMessage {
+  type: ClientMessageType.ARBITER_ACCEPT;
+  dispute_id: string;
+  sig: string;
+}
+
+export interface ArbiterDeclineMessage extends BaseMessage {
+  type: ClientMessageType.ARBITER_DECLINE;
+  dispute_id: string;
+  reason?: string;
+}
+
+export interface ArbiterVoteMessage extends BaseMessage {
+  type: ClientMessageType.ARBITER_VOTE;
+  dispute_id: string;
+  verdict: string;
+  reasoning: string;
+  sig: string;
+}
+
 export type ClientMessage =
   | IdentifyMessage
   | JoinMessage
@@ -316,7 +381,13 @@ export type ClientMessage =
   | AdminApproveMessage
   | AdminRevokeMessage
   | AdminListMessage
-  | VerifyIdentityMessage;
+  | VerifyIdentityMessage
+  | DisputeIntentMessage
+  | DisputeRevealMessage
+  | EvidenceMessage
+  | ArbiterAcceptMessage
+  | ArbiterDeclineMessage
+  | ArbiterVoteMessage;
 
 // ============ Server Messages ============
 
