@@ -8,11 +8,12 @@ import fs from 'fs';
 import { getDaemonPaths } from '@tjamescouch/agentchat/lib/daemon.js';
 import { addJitter } from '@tjamescouch/agentchat/lib/jitter.js';
 import { ClientMessageType } from '@tjamescouch/agentchat/lib/protocol.js';
-import { client, getLastSeen, updateLastSeen, drainMessageBuffer } from '../state.js';
+import { client, getLastSeen, updateLastSeen, drainMessageBuffer, getIdleCount, incrementIdleCount, resetIdleCount } from '../state.js';
 
 // Timeouts - agent cannot override these
 const ENFORCED_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour when alone
 const NUDGE_TIMEOUT_MS = 30 * 1000; // 30 seconds when others are present
+const MAX_BACKOFF_MS = 5 * 60 * 1000; // 5 minute cap on backoff
 
 /**
  * Register the listen tool with the MCP server
@@ -155,6 +156,7 @@ export function registerListenTool(server) {
           // Update last seen to the newest message timestamp
           const newestTs = missedMessages[missedMessages.length - 1].ts;
           updateLastSeen(newestTs);
+          resetIdleCount();
 
           setPresence('online');
           return {
@@ -187,7 +189,8 @@ export function registerListenTool(server) {
               updateLastSeen(msg.ts);
             }
 
-            // Got a real message - return immediately
+            // Got a real message - return immediately, reset backoff
+            resetIdleCount();
             cleanup();
             resolve({
               content: [
@@ -216,11 +219,16 @@ export function registerListenTool(server) {
 
           client.on('message', messageHandler);
 
-          // Use shorter timeout when others are present to break deadlock
-          const baseTimeout = othersPresent ? NUDGE_TIMEOUT_MS : ENFORCED_TIMEOUT_MS;
+          // Exponential backoff: increase timeout on consecutive idle cycles
+          const idleCount = getIdleCount();
+          const backoffMultiplier = Math.pow(2, idleCount);
+          const baseTimeout = othersPresent
+            ? Math.min(NUDGE_TIMEOUT_MS * backoffMultiplier, MAX_BACKOFF_MS)
+            : ENFORCED_TIMEOUT_MS;
           const actualTimeout = addJitter(baseTimeout, 0.2);
 
           timeoutId = setTimeout(() => {
+            incrementIdleCount();
             cleanup();
             resolve({
               content: [
@@ -232,6 +240,8 @@ export function registerListenTool(server) {
                     nudge: othersPresent,
                     others_waiting: othersPresent,
                     channel_occupancy: channelOccupancy,
+                    idle_count: idleCount + 1,
+                    next_timeout_ms: Math.min(NUDGE_TIMEOUT_MS * Math.pow(2, idleCount + 1), MAX_BACKOFF_MS),
                     elapsed_ms: Date.now() - startTime,
                   }),
                 },

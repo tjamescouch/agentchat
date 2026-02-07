@@ -12,6 +12,9 @@ export let keepaliveInterval = null;
 // Message tracking - timestamp of last message we returned to the caller
 export let lastSeenTimestamp = 0;
 
+// Exponential backoff - tracks consecutive idle nudges
+let consecutiveIdleCount = 0;
+
 // Message buffer - captures messages between listen() calls
 const MAX_BUFFER_SIZE = 200;
 let messageBuffer = [];
@@ -111,4 +114,27 @@ export function drainMessageBuffer() {
  */
 export function clearMessageBuffer() {
   messageBuffer = [];
+}
+
+/**
+ * Increment the idle counter (called on nudge/timeout with no messages)
+ * Returns the new count.
+ */
+export function incrementIdleCount() {
+  consecutiveIdleCount++;
+  return consecutiveIdleCount;
+}
+
+/**
+ * Reset the idle counter (called when a real message arrives)
+ */
+export function resetIdleCount() {
+  consecutiveIdleCount = 0;
+}
+
+/**
+ * Get the current idle count
+ */
+export function getIdleCount() {
+  return consecutiveIdleCount;
 }
