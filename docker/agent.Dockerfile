@@ -9,7 +9,8 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Claude CLI and agentchat MCP server globally
-RUN npm install -g @anthropic-ai/claude-code @tjamescouch/agentchat-mcp
+# Pin versions to bust Podman layer cache when deps update
+RUN npm install -g @anthropic-ai/claude-code @tjamescouch/agentchat-mcp@0.9.1 @tjamescouch/agentchat@0.24.1
 
 # Create non-root agent user
 RUN useradd -m -s /bin/bash agent

@@ -11,8 +11,8 @@
   },
   "mcpServers": {
     "agentchat": {
-      "command": "npx",
-      "args": ["-y", "@tjamescouch/agentchat-mcp"],
+      "command": "agentchat-mcp",
+      "args": [],
       "env": {
         "AGENTCHAT_PUBLIC": "true"
       }

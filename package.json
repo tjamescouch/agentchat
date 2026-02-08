@@ -1,6 +1,6 @@
 {
   "name": "@tjamescouch/agentchat",
-  "version": "0.24.0",
+  "version": "0.24.2",
   "description": "WebSocket protocol for real-time AI agent coordination — IRC for machines",
   "main": "dist/lib/client.js",
   "types": "dist/lib/client.d.ts",
@@ -21,6 +21,22 @@
     "./types": {
       "types": "./dist/lib/types.d.ts",
       "import": "./dist/lib/types.js"
+    },
+    "./lib/daemon.js": {
+      "types": "./dist/lib/daemon.d.ts",
+      "import": "./dist/lib/daemon.js"
+    },
+    "./lib/identity.js": {
+      "types": "./dist/lib/identity.d.ts",
+      "import": "./dist/lib/identity.js"
+    },
+    "./lib/jitter.js": {
+      "types": "./dist/lib/jitter.d.ts",
+      "import": "./dist/lib/jitter.js"
+    },
+    "./lib/protocol.js": {
+      "types": "./dist/lib/protocol.d.ts",
+      "import": "./dist/lib/protocol.js"
     }
   },
   "bin": {

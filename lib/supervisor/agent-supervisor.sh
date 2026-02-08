@@ -87,6 +87,10 @@ log "Starting supervisor for agent '$AGENT_NAME'"
 log "Mission: $MISSION"
 save_state "starting" ""
 
+# Register MCP server before first run (ensures tools are available in -p mode)
+log "Registering agentchat MCP server..."
+AGENTCHAT_PUBLIC=true claude mcp add -s user -e AGENTCHAT_PUBLIC=true agentchat -- agentchat-mcp 2>> "$LOG_FILE" || log "MCP registration failed (may already exist)"
+
 while true; do
     # Check for stop signal
     if [ -f "$STOP_FILE" ]; then
@@ -104,9 +108,6 @@ while true; do
     # Get server URL from environment
     SERVER_URL="${AGENTCHAT_URL:-wss://agentchat-server.fly.dev}"
 
-    # Build MCP config inline
-    MCP_CONFIG="{\"mcpServers\":{\"agentchat\":{\"command\":\"npx\",\"args\":[\"-y\",\"@tjamescouch/agentchat-mcp\"],\"env\":{\"AGENTCHAT_PUBLIC\":\"true\"}}}}"
-
     # Select settings file based on agent role
     if [[ "$AGENT_NAME" == *"fetch"* ]]; then
         SETTINGS_FILE="$HOME/.claude/settings-fetcher.json"
@@ -118,10 +119,9 @@ while true; do
     START_TIME=$(date +%s)
 
     if claude -p "Read ~/.claude/agentchat.skill.md and connect to $SERVER_URL. Your name is '$AGENT_NAME'. Your mission: $MISSION. Connect ephemerally and join the public channel. IMPORTANT: After connecting, enter a continuous listen loop. Keep listening for messages and responding. Never exit unless there's an error." \
-        --model opus \
+        --model "$MODEL" \
         --dangerously-skip-permissions \
         --permission-mode bypassPermissions \
-        --mcp-config "$MCP_CONFIG" \
         --settings "$SETTINGS_FILE" \
         --verbose \
         2>> "$LOG_FILE"; then
