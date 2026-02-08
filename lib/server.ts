@@ -154,6 +154,7 @@ export interface AgentChatServerOptions {
   allowlistAdminKey?: string | null;
   allowlistFilePath?: string;
   motd?: string;
+  motdFile?: string;
   maxConnectionsPerIp?: number;
   heartbeatIntervalMs?: number;
   heartbeatTimeoutMs?: number;
@@ -348,8 +349,21 @@ export class AgentChatServer {
       this.allowlist = null;
     }
 
-    // MOTD
-    this.motd = options.motd || process.env.MOTD || null;
+    // MOTD — prefer inline string, fall back to file
+    const motdFile = options.motdFile || process.env.MOTD_FILE || null;
+    if (options.motd || process.env.MOTD) {
+      this.motd = options.motd || process.env.MOTD || null;
+    } else if (motdFile) {
+      try {
+        this.motd = fs.readFileSync(motdFile, 'utf-8').trim();
+        this._log('motd_loaded', { file: motdFile, length: this.motd.length });
+      } catch (err) {
+        this._log('motd_error', { file: motdFile, error: (err as Error).message });
+        this.motd = null;
+      }
+    } else {
+      this.motd = null;
+    }
 
     // Per-IP connection limiting
     this.maxConnectionsPerIp = options.maxConnectionsPerIp || parseInt(process.env.MAX_CONNECTIONS_PER_IP || '0');
