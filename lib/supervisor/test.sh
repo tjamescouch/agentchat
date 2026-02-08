@@ -2,7 +2,7 @@
 # Test script for Podman container agent lifecycle
 # Run interactively: ./test.sh
 
-set -e
+set +e  # Don't exit on errors — tests check for expected failures
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 AGENTCTL="$SCRIPT_DIR/agentctl.sh"

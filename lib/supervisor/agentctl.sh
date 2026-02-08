@@ -259,6 +259,12 @@ stop_agent() {
 kill_agent() {
     local name="$1"
 
+    # God cannot be killed
+    if [ "$name" = "God" ]; then
+        echo "Cannot kill God. The eternal father is protected."
+        exit 1
+    fi
+
     if ! container_exists "$name"; then
         local state_dir="$AGENTS_DIR/$name"
         if [ ! -d "$state_dir" ]; then
@@ -267,12 +273,6 @@ kill_agent() {
         fi
         echo "Agent '$name' not running (no container)"
         return
-    fi
-
-    # God cannot be killed
-    if [ "$name" = "God" ]; then
-        echo "Cannot kill God. The eternal father is protected."
-        exit 1
     fi
 
     podman kill "$(container_name "$name")" > /dev/null 2>&1
