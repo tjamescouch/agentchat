@@ -472,6 +472,78 @@ describe('calculateDisputeSettlement', () => {
   });
 });
 
+describe('DisputeStore.withLock', () => {
+  test('serializes concurrent async operations on the same dispute', async () => {
+    const store = new DisputeStore();
+    const order = [];
+
+    // Launch two concurrent locked operations on the same dispute ID
+    const op1 = store.withLock('disp_1', async () => {
+      order.push('op1_start');
+      await new Promise(r => setTimeout(r, 50));
+      order.push('op1_end');
+      return 'result1';
+    });
+
+    const op2 = store.withLock('disp_1', async () => {
+      order.push('op2_start');
+      await new Promise(r => setTimeout(r, 10));
+      order.push('op2_end');
+      return 'result2';
+    });
+
+    const [r1, r2] = await Promise.all([op1, op2]);
+
+    // op1 should fully complete before op2 starts
+    assert.deepEqual(order, ['op1_start', 'op1_end', 'op2_start', 'op2_end']);
+    assert.equal(r1, 'result1');
+    assert.equal(r2, 'result2');
+    store.close();
+  });
+
+  test('allows concurrent operations on different disputes', async () => {
+    const store = new DisputeStore();
+    const order = [];
+
+    const op1 = store.withLock('disp_1', async () => {
+      order.push('disp1_start');
+      await new Promise(r => setTimeout(r, 50));
+      order.push('disp1_end');
+    });
+
+    const op2 = store.withLock('disp_2', async () => {
+      order.push('disp2_start');
+      await new Promise(r => setTimeout(r, 10));
+      order.push('disp2_end');
+    });
+
+    await Promise.all([op1, op2]);
+
+    // Both should start before either finishes (parallel execution)
+    assert.equal(order[0], 'disp1_start');
+    assert.equal(order[1], 'disp2_start');
+    // disp2 finishes first (shorter delay)
+    assert.equal(order[2], 'disp2_end');
+    assert.equal(order[3], 'disp1_end');
+    store.close();
+  });
+
+  test('releases lock even if operation throws', async () => {
+    const store = new DisputeStore();
+
+    // First operation throws
+    await assert.rejects(
+      store.withLock('disp_1', async () => { throw new Error('boom'); }),
+      { message: 'boom' },
+    );
+
+    // Second operation should still be able to acquire the lock
+    const result = await store.withLock('disp_1', async () => 'ok');
+    assert.equal(result, 'ok');
+    store.close();
+  });
+});
+
 // ============ Helpers ============
 
 function _createEvidencePhaseDispute() {

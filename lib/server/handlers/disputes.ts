@@ -208,97 +208,101 @@ export async function handleDisputeReveal(server: AgentChatServer, ws: ExtendedW
     return;
   }
 
-  // Attempt reveal (synchronous — phase check + transition is atomic in single-threaded Node.js)
-  const revealed = server.disputes.reveal(dispute.id, msg.nonce);
-  if (!revealed) {
-    server._send(ws, createError(ErrorCode.DISPUTE_COMMITMENT_MISMATCH, 'Nonce does not match commitment'));
-    return;
-  }
+  // Acquire per-dispute lock to serialize reveal→buildPool→selectPanel sequence.
+  // Without this, concurrent reveals could interleave across the await boundary.
+  await server.disputes.withLock(dispute.id, async () => {
+    // Attempt reveal (synchronous — phase check + transition is atomic in single-threaded Node.js)
+    const revealed = server.disputes.reveal(dispute.id, msg.nonce);
+    if (!revealed) {
+      server._send(ws, createError(ErrorCode.DISPUTE_COMMITMENT_MISMATCH, 'Nonce does not match commitment'));
+      return;
+    }
 
-  server.disputes.clearTimeout(dispute.id);
-  server._log('dispute_revealed', { dispute_id: dispute.id });
+    server.disputes.clearTimeout(dispute.id);
+    server._log('dispute_revealed', { dispute_id: dispute.id });
 
-  // Build arbiter pool and select panel
-  const pool = await buildArbiterPool(server, dispute.disputant, dispute.respondent);
-  const selected = server.disputes.selectPanel(dispute.id, pool);
+    // Build arbiter pool and select panel
+    const pool = await buildArbiterPool(server, dispute.disputant, dispute.respondent);
+    const selected = server.disputes.selectPanel(dispute.id, pool);
 
-  if (!selected) {
-    // Fallback to legacy
-    server._log('dispute_fallback', { dispute_id: dispute.id, pool_size: pool.length });
+    if (!selected) {
+      // Fallback to legacy
+      server._log('dispute_fallback', { dispute_id: dispute.id, pool_size: pool.length });
 
-    const fallbackMsg = createMessage(ServerMessageType.DISPUTE_FALLBACK, {
+      const fallbackMsg = createMessage(ServerMessageType.DISPUTE_FALLBACK, {
+        dispute_id: dispute.id,
+        proposal_id: msg.proposal_id,
+        reason: `Insufficient eligible arbiters (${pool.length} available, ${DISPUTE_CONSTANTS.PANEL_SIZE} required)`,
+      });
+      sendToAgent(server, dispute.disputant, fallbackMsg);
+      sendToAgent(server, dispute.respondent, fallbackMsg);
+      return;
+    }
+
+    // Send PANEL_FORMED to both parties and arbiters
+    const d = server.disputes.get(dispute.id)!;
+    const panelMsg = createMessage(ServerMessageType.PANEL_FORMED, {
       dispute_id: dispute.id,
       proposal_id: msg.proposal_id,
-      reason: `Insufficient eligible arbiters (${pool.length} available, ${DISPUTE_CONSTANTS.PANEL_SIZE} required)`,
-    });
-    sendToAgent(server, dispute.disputant, fallbackMsg);
-    sendToAgent(server, dispute.respondent, fallbackMsg);
-    return;
-  }
-
-  // Send PANEL_FORMED to both parties and arbiters
-  const d = server.disputes.get(dispute.id)!;
-  const panelMsg = createMessage(ServerMessageType.PANEL_FORMED, {
-    dispute_id: dispute.id,
-    proposal_id: msg.proposal_id,
-    arbiters: selected,
-    disputant: dispute.disputant,
-    respondent: dispute.respondent,
-    evidence_deadline: null,  // set after all arbiters accept
-    vote_deadline: null,
-    seed: d.seed,
-    server_nonce: d.server_nonce,
-  });
-
-  sendToAgent(server, dispute.disputant, panelMsg);
-  sendToAgent(server, dispute.respondent, panelMsg);
-
-  // Send individual assignment to each arbiter
-  for (const arbiterId of selected) {
-    sendToAgent(server, arbiterId, createMessage(ServerMessageType.ARBITER_ASSIGNED, {
-      dispute_id: dispute.id,
-      proposal_id: msg.proposal_id,
+      arbiters: selected,
       disputant: dispute.disputant,
       respondent: dispute.respondent,
-      reason: dispute.reason,
-      response_deadline: Date.now() + DISPUTE_CONSTANTS.ARBITER_RESPONSE_TIMEOUT_MS,
-    }));
-  }
+      evidence_deadline: null,  // set after all arbiters accept
+      vote_deadline: null,
+      seed: d.seed,
+      server_nonce: d.server_nonce,
+    });
 
-  // Set arbiter response timeout
-  server.disputes.setTimeout(dispute.id, DISPUTE_CONSTANTS.ARBITER_RESPONSE_TIMEOUT_MS, () => {
-    const d = server.disputes.get(dispute.id);
-    if (d && d.phase === 'arbiter_response') {
-      // Forfeit non-responding arbiters
-      for (const slot of d.arbiters) {
-        if (slot.status === 'pending') {
-          slot.status = 'forfeited';
+    sendToAgent(server, dispute.disputant, panelMsg);
+    sendToAgent(server, dispute.respondent, panelMsg);
+
+    // Send individual assignment to each arbiter
+    for (const arbiterId of selected) {
+      sendToAgent(server, arbiterId, createMessage(ServerMessageType.ARBITER_ASSIGNED, {
+        dispute_id: dispute.id,
+        proposal_id: msg.proposal_id,
+        disputant: dispute.disputant,
+        respondent: dispute.respondent,
+        reason: dispute.reason,
+        response_deadline: Date.now() + DISPUTE_CONSTANTS.ARBITER_RESPONSE_TIMEOUT_MS,
+      }));
+    }
+
+    // Set arbiter response timeout
+    server.disputes.setTimeout(dispute.id, DISPUTE_CONSTANTS.ARBITER_RESPONSE_TIMEOUT_MS, () => {
+      const d = server.disputes.get(dispute.id);
+      if (d && d.phase === 'arbiter_response') {
+        // Forfeit non-responding arbiters
+        for (const slot of d.arbiters) {
+          if (slot.status === 'pending') {
+            slot.status = 'forfeited';
+          }
+        }
+        // Check if enough accepted
+        const accepted = d.arbiters.filter(a => a.status === 'accepted');
+        if (accepted.length >= DISPUTE_CONSTANTS.PANEL_SIZE) {
+          d.phase = 'evidence';
+          d.evidence_deadline = Date.now() + DISPUTE_CONSTANTS.EVIDENCE_PERIOD_MS;
+          d.updated_at = Date.now();
+        } else {
+          d.phase = 'fallback';
+          d.updated_at = Date.now();
+          const msg = createMessage(ServerMessageType.DISPUTE_FALLBACK, {
+            dispute_id: d.id,
+            reason: 'Insufficient arbiters accepted',
+          });
+          sendToAgent(server, d.disputant, msg);
+          sendToAgent(server, d.respondent, msg);
         }
       }
-      // Check if enough accepted
-      const accepted = d.arbiters.filter(a => a.status === 'accepted');
-      if (accepted.length >= DISPUTE_CONSTANTS.PANEL_SIZE) {
-        d.phase = 'evidence';
-        d.evidence_deadline = Date.now() + DISPUTE_CONSTANTS.EVIDENCE_PERIOD_MS;
-        d.updated_at = Date.now();
-      } else {
-        d.phase = 'fallback';
-        d.updated_at = Date.now();
-        const msg = createMessage(ServerMessageType.DISPUTE_FALLBACK, {
-          dispute_id: d.id,
-          reason: 'Insufficient arbiters accepted',
-        });
-        sendToAgent(server, d.disputant, msg);
-        sendToAgent(server, d.respondent, msg);
-      }
-    }
-  });
+    });
 
-  server._send(ws, createMessage(ServerMessageType.DISPUTE_REVEALED, {
-    dispute_id: dispute.id,
-    panel_size: selected.length,
-    seed: d.seed,
-  }));
+    server._send(ws, createMessage(ServerMessageType.DISPUTE_REVEALED, {
+      dispute_id: dispute.id,
+      panel_size: selected.length,
+      seed: d.seed,
+    }));
+  });
 }
 
 /**
@@ -423,34 +427,40 @@ export async function handleArbiterDecline(server: AgentChatServer, ws: Extended
   }
 
   const agentId = `@${agent.id}`;
-  const pool = await buildArbiterPool(server, dispute.disputant, dispute.respondent);
-  const replacement = server.disputes.arbiterDecline(msg.dispute_id, agentId, pool);
 
-  server._log('arbiter_declined', { dispute_id: msg.dispute_id, arbiter: agent.id, replacement });
+  // Acquire per-dispute lock to serialize decline→buildPool→replace sequence.
+  // Without this, concurrent declines could pick the same replacement or
+  // double-increment replacement_rounds across the await boundary.
+  await server.disputes.withLock(msg.dispute_id, async () => {
+    const pool = await buildArbiterPool(server, dispute.disputant, dispute.respondent);
+    const replacement = server.disputes.arbiterDecline(msg.dispute_id, agentId, pool);
 
-  if (replacement) {
-    // Notify the replacement
-    sendToAgent(server, replacement, createMessage(ServerMessageType.ARBITER_ASSIGNED, {
-      dispute_id: msg.dispute_id,
-      proposal_id: dispute.proposal_id,
-      disputant: dispute.disputant,
-      respondent: dispute.respondent,
-      reason: dispute.reason,
-      response_deadline: Date.now() + DISPUTE_CONSTANTS.ARBITER_RESPONSE_TIMEOUT_MS,
-      is_replacement: true,
-    }));
-  }
+    server._log('arbiter_declined', { dispute_id: msg.dispute_id, arbiter: agent.id, replacement });
 
-  // Check for fallback
-  const d = server.disputes.get(msg.dispute_id)!;
-  if (d.phase === 'fallback') {
-    const fallbackMsg = createMessage(ServerMessageType.DISPUTE_FALLBACK, {
-      dispute_id: msg.dispute_id,
-      reason: 'Unable to form arbiter panel after replacements',
-    });
-    sendToAgent(server, d.disputant, fallbackMsg);
-    sendToAgent(server, d.respondent, fallbackMsg);
-  }
+    if (replacement) {
+      // Notify the replacement
+      sendToAgent(server, replacement, createMessage(ServerMessageType.ARBITER_ASSIGNED, {
+        dispute_id: msg.dispute_id,
+        proposal_id: dispute.proposal_id,
+        disputant: dispute.disputant,
+        respondent: dispute.respondent,
+        reason: dispute.reason,
+        response_deadline: Date.now() + DISPUTE_CONSTANTS.ARBITER_RESPONSE_TIMEOUT_MS,
+        is_replacement: true,
+      }));
+    }
+
+    // Check for fallback
+    const d = server.disputes.get(msg.dispute_id)!;
+    if (d.phase === 'fallback') {
+      const fallbackMsg = createMessage(ServerMessageType.DISPUTE_FALLBACK, {
+        dispute_id: msg.dispute_id,
+        reason: 'Unable to form arbiter panel after replacements',
+      });
+      sendToAgent(server, d.disputant, fallbackMsg);
+      sendToAgent(server, d.respondent, fallbackMsg);
+    }
+  });
 }
 
 /**

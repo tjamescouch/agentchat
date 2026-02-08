@@ -102,6 +102,33 @@ export interface StoredDispute {
   filing_fee_escrowed: boolean;
 }
 
+// ============ Per-dispute Mutex ============
+
+/**
+ * Serializes async operations on a single dispute to prevent interleaving.
+ * Uses a promise-chain pattern: each operation awaits the previous one before running.
+ */
+class DisputeMutex {
+  private chains: Map<string, Promise<void>> = new Map();
+
+  async withLock<T>(disputeId: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.chains.get(disputeId) ?? Promise.resolve();
+    let resolve!: () => void;
+    const next = new Promise<void>(r => { resolve = r; });
+    this.chains.set(disputeId, next);
+
+    try {
+      await prev;
+      return await fn();
+    } finally {
+      resolve();
+      if (this.chains.get(disputeId) === next) {
+        this.chains.delete(disputeId);
+      }
+    }
+  }
+}
+
 // ============ DisputeStore Class ============
 
 export class DisputeStore {
@@ -109,6 +136,7 @@ export class DisputeStore {
   private byProposal: Map<string, string> = new Map();  // proposal_id -> dispute_id
   private byAgent: Map<string, Set<string>> = new Map(); // agent_id -> Set<dispute_id>
   private timeoutHandlers: Map<string, ReturnType<typeof setTimeout>> = new Map();
+  private mutex = new DisputeMutex();
 
   /**
    * File a dispute intent (phase 1 of commit-reveal)
@@ -462,6 +490,15 @@ export class DisputeStore {
       globalThis.clearTimeout(handler);
     }
     this.timeoutHandlers.clear();
+  }
+
+  /**
+   * Acquire a per-dispute lock for async operations.
+   * Serializes concurrent reveal/decline/panel-selection sequences
+   * that span await boundaries (e.g. buildArbiterPool).
+   */
+  withLock<T>(disputeId: string, fn: () => Promise<T>): Promise<T> {
+    return this.mutex.withLock(disputeId, fn);
   }
 
   // ============ Private ============
