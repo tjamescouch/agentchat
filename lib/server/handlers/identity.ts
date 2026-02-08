@@ -147,7 +147,8 @@ export function handleIdentify(server: AgentChatServer, ws: ExtendedWebSocket, m
     server._send(ws, createMessage(ServerMessageType.WELCOME, {
       agent_id: `@${id}`,
       name: msg.name,
-      server: server.serverName
+      server: server.serverName,
+      ...(server.motd ? { motd: server.motd } : {})
     }));
   }
 }
@@ -253,7 +254,8 @@ export function handleVerifyIdentity(server: AgentChatServer, ws: ExtendedWebSoc
     agent_id: `@${id}`,
     name: challenge.name,
     server: server.serverName,
-    verified: true
+    verified: true,
+    ...(server.motd ? { motd: server.motd } : {})
   }));
 }
 

@@ -29,6 +29,7 @@ export enum ClientMessageType {
   ADMIN_REVOKE = 'ADMIN_REVOKE',
   ADMIN_LIST = 'ADMIN_LIST',
   VERIFY_IDENTITY = 'VERIFY_IDENTITY',
+  SET_NICK = 'SET_NICK',
   // Agentcourt dispute types
   DISPUTE_INTENT = 'DISPUTE_INTENT',
   DISPUTE_REVEAL = 'DISPUTE_REVEAL',
@@ -63,6 +64,7 @@ export enum ServerMessageType {
   VERIFY_FAILED = 'VERIFY_FAILED',
   ADMIN_RESULT = 'ADMIN_RESULT',
   CHALLENGE = 'CHALLENGE',
+  NICK_CHANGED = 'NICK_CHANGED',
   // Agentcourt dispute types
   PANEL_FORMED = 'PANEL_FORMED',
   ARBITER_ASSIGNED = 'ARBITER_ASSIGNED',
@@ -358,6 +360,11 @@ export interface ArbiterVoteMessage extends BaseMessage {
   sig: string;
 }
 
+export interface SetNickMessage extends BaseMessage {
+  type: ClientMessageType.SET_NICK;
+  nick: string;
+}
+
 export type ClientMessage =
   | IdentifyMessage
   | JoinMessage
@@ -387,7 +394,8 @@ export type ClientMessage =
   | EvidenceMessage
   | ArbiterAcceptMessage
   | ArbiterDeclineMessage
-  | ArbiterVoteMessage;
+  | ArbiterVoteMessage
+  | SetNickMessage;
 
 // ============ Server Messages ============
 
@@ -396,6 +404,7 @@ export interface WelcomeMessage extends BaseMessage {
   agent_id: string;
   name?: string;
   server?: string;
+  motd?: string;
 }
 
 export interface ServerMsgMessage extends BaseMessage {
@@ -555,6 +564,13 @@ export interface ChallengeMessage extends BaseMessage {
   expires_at: number;
 }
 
+export interface NickChangedMessage extends BaseMessage {
+  type: ServerMessageType.NICK_CHANGED;
+  agent_id: string;
+  old_nick: string;
+  new_nick: string;
+}
+
 export interface AdminResultMessage extends BaseMessage {
   type: ServerMessageType.ADMIN_RESULT;
   action: string;
@@ -594,7 +610,8 @@ export type ServerMessage =
   | VerifySuccessMessage
   | VerifyFailedMessage
   | AdminResultMessage
-  | ChallengeMessage;
+  | ChallengeMessage
+  | NickChangedMessage;
 
 // ============ Validation Result ============
 

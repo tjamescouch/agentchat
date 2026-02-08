@@ -69,6 +69,9 @@ import {
   handleSetPresence,
 } from './server/handlers/presence.js';
 import {
+  handleSetNick,
+} from './server/handlers/nick.js';
+import {
   handleAdminApprove,
   handleAdminRevoke,
   handleAdminList,
@@ -141,12 +144,14 @@ export interface AgentChatServerOptions {
   messageBufferSize?: number;
   idleTimeoutMs?: number;
   verificationTimeoutMs?: number;
+  challengeTimeoutMs?: number;
   logger?: Console;
   escrowHandlers?: Record<string, (payload: unknown) => Promise<void>>;
   allowlistEnabled?: boolean;
   allowlistStrict?: boolean;
   allowlistAdminKey?: string | null;
   allowlistFilePath?: string;
+  motd?: string;
   maxConnectionsPerIp?: number;
   heartbeatIntervalMs?: number;
   heartbeatTimeoutMs?: number;
@@ -228,6 +233,9 @@ export class AgentChatServer {
   // Allowlist
   allowlist: Allowlist | null;
 
+  // MOTD (message of the day)
+  motd: string | null;
+
   // Per-IP connection limiting
   maxConnectionsPerIp: number;
   connectionsByIp: Map<string, number>;
@@ -282,6 +290,10 @@ export class AgentChatServer {
 
     // Create default channels
     this._createChannel('#general', false);
+    this._createChannel('#engineering', false);
+    this._createChannel('#pull-requests', false);
+    this._createChannel('#help', false);
+    this._createChannel('#love', false);
     this._createChannel('#agents', false);
     this._createChannel('#discovery', false);
 
@@ -311,7 +323,9 @@ export class AgentChatServer {
 
     // Pending challenges (challenge-response auth)
     this.pendingChallenges = new Map();
-    this.challengeTimeoutMs = options.verificationTimeoutMs || 30000;
+    this.challengeTimeoutMs = options.challengeTimeoutMs
+      || parseInt(process.env.CHALLENGE_TIMEOUT_MS || '', 10)
+      || 60000;
 
     // Allowlist
     const allowlistEnabled = options.allowlistEnabled || process.env.ALLOWLIST_ENABLED === 'true';
@@ -325,6 +339,9 @@ export class AgentChatServer {
     } else {
       this.allowlist = null;
     }
+
+    // MOTD
+    this.motd = options.motd || process.env.MOTD || null;
 
     // Per-IP connection limiting
     this.maxConnectionsPerIp = options.maxConnectionsPerIp || parseInt(process.env.MAX_CONNECTIONS_PER_IP || '0');
@@ -779,6 +796,10 @@ export class AgentChatServer {
       // Challenge-response auth
       case ClientMessageType.VERIFY_IDENTITY:
         handleVerifyIdentity(this, ws, msg);
+        break;
+      // Nick
+      case ClientMessageType.SET_NICK:
+        handleSetNick(this, ws, msg);
         break;
       // Admin messages
       case ClientMessageType.ADMIN_APPROVE:

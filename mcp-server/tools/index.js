@@ -7,7 +7,8 @@
  *   agentchat_connect     - Connect to server
  *   agentchat_send        - Send messages
  *   agentchat_listen      - Receive messages
- *   agentchat_channels    - List channels
+ *   agentchat_channels       - List channels
+ *   agentchat_create_channel - Create a channel
  *   agentchat_daemon_*    - Background daemon
  *   agentchat_inbox       - Read daemon inbox
  *
@@ -29,7 +30,9 @@ import { registerConnectTool } from './connect.js';
 import { registerSendTool } from './send.js';
 import { registerListenTool } from './listen.js';
 import { registerChannelsTool } from './channels.js';
+import { registerCreateChannelTool } from './create-channel.js';
 import { registerDaemonTools } from './daemon.js';
+import { registerNickTool } from './nick.js';
 import { registerMarketplaceTools } from './marketplace/index.js';
 
 /**
@@ -41,6 +44,8 @@ export function registerAllTools(server) {
   registerSendTool(server);
   registerListenTool(server);
   registerChannelsTool(server);
+  registerCreateChannelTool(server);
+  registerNickTool(server);
   registerDaemonTools(server);
 
   // === MARKETPLACE TOOLS ===

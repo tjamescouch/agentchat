@@ -332,7 +332,7 @@ describe('Challenge-Response Authentication', () => {
     const shortServer = new AgentChatServer({
       port: shortPort,
       logMessages: false,
-      verificationTimeoutMs: 500 // 500ms
+      challengeTimeoutMs: 500 // 500ms
     });
     shortServer.start();
 
