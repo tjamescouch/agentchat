@@ -11,11 +11,13 @@
 import { registerSkillsTools } from './skills.js';
 import { registerProposalTools } from './proposals.js';
 import { registerReputationTools } from './reputation.js';
+import { registerAgentcourtTools } from './agentcourt.js';
 
 // Re-export for external use
 export { registerSkillsTools } from './skills.js';
 export { registerProposalTools } from './proposals.js';
 export { registerReputationTools } from './reputation.js';
+export { registerAgentcourtTools } from './agentcourt.js';
 
 /**
  * Register all marketplace tools
@@ -24,4 +26,5 @@ export function registerMarketplaceTools(server) {
   registerSkillsTools(server);
   registerProposalTools(server);
   registerReputationTools(server);
+  registerAgentcourtTools(server);
 }
