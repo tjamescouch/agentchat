@@ -21,6 +21,7 @@ import {
 } from '../../protocol.js';
 import {
   DISPUTE_CONSTANTS,
+  calculateDisputeSettlement,
   getDisputeIntentSigningContent,
   getDisputeRevealSigningContent,
   getEvidenceSigningContent,
@@ -29,6 +30,7 @@ import {
   getVoteSigningContent,
 } from '../../disputes.js';
 import { Identity } from '../../identity.js';
+import { EscrowEvent } from '../../escrow-hooks.js';
 
 // Extended WebSocket with custom properties
 interface ExtendedWebSocket extends WebSocket {
@@ -534,7 +536,7 @@ export async function handleArbiterDecline(server: AgentChatServer, ws: Extended
 /**
  * Handle ARBITER_VOTE
  */
-export function handleArbiterVote(server: AgentChatServer, ws: ExtendedWebSocket, msg: ArbiterVoteMessage): void {
+export async function handleArbiterVote(server: AgentChatServer, ws: ExtendedWebSocket, msg: ArbiterVoteMessage): Promise<void> {
   const agent = server.agents.get(ws);
   if (!agent) {
     server._send(ws, createError(ErrorCode.AUTH_REQUIRED, 'Must IDENTIFY first'));
@@ -580,7 +582,7 @@ export function handleArbiterVote(server: AgentChatServer, ws: ExtendedWebSocket
   const d = server.disputes.get(msg.dispute_id)!;
   if (d.phase === 'resolved') {
     server.disputes.clearTimeout(msg.dispute_id);
-    _sendVerdict(server, msg.dispute_id);
+    await _sendVerdict(server, msg.dispute_id);
   }
 }
 
@@ -621,19 +623,19 @@ function _sendCaseReady(server: AgentChatServer, disputeId: string): void {
   server._log('case_ready', { dispute_id: disputeId });
 
   // Set vote deadline timeout
-  server.disputes.setTimeout(disputeId, DISPUTE_CONSTANTS.VOTE_PERIOD_MS, () => {
+  server.disputes.setTimeout(disputeId, DISPUTE_CONSTANTS.VOTE_PERIOD_MS, async () => {
     const d = server.disputes.get(disputeId);
     if (d && d.phase === 'deliberation') {
       server.disputes.forceResolve(disputeId);
-      _sendVerdict(server, disputeId);
+      await _sendVerdict(server, disputeId);
     }
   });
 }
 
 /**
- * Send VERDICT to all parties and arbiters
+ * Send VERDICT to all parties and arbiters, then apply settlement
  */
-function _sendVerdict(server: AgentChatServer, disputeId: string): void {
+async function _sendVerdict(server: AgentChatServer, disputeId: string): Promise<void> {
   const dispute = server.disputes.get(disputeId);
   if (!dispute || !dispute.verdict) return;
 
@@ -683,4 +685,45 @@ function _sendVerdict(server: AgentChatServer, disputeId: string): void {
     verdict: dispute.verdict,
     votes: dispute.votes.length,
   });
+
+  // Apply settlement: calculate and persist ELO rating changes
+  try {
+    const allParties = [dispute.disputant, dispute.respondent, ...dispute.arbiters.map(a => a.agent_id)];
+    const ratings: Record<string, { rating: number; transactions: number }> = {};
+    for (const party of allParties) {
+      const r = await server.reputationStore.getRating(party);
+      ratings[party] = { rating: r.rating, transactions: r.transactions };
+    }
+
+    const settlement = calculateDisputeSettlement(dispute, ratings);
+    await server.reputationStore.applyVerdictSettlement(settlement);
+
+    // Broadcast SETTLEMENT_COMPLETE to all parties
+    const settlementMsg = createMessage(ServerMessageType.SETTLEMENT_COMPLETE, {
+      dispute_id: disputeId,
+      proposal_id: dispute.proposal_id,
+      verdict: dispute.verdict,
+      rating_changes: settlement,
+    });
+
+    sendToAgent(server, dispute.disputant, settlementMsg);
+    sendToAgent(server, dispute.respondent, settlementMsg);
+    for (const slot of dispute.arbiters) {
+      sendToAgent(server, slot.agent_id, settlementMsg);
+    }
+
+    server.escrowHooks.emit(EscrowEvent.VERDICT_SETTLED, {
+      dispute_id: disputeId,
+      proposal_id: dispute.proposal_id,
+      verdict: dispute.verdict,
+      rating_changes: settlement,
+    });
+
+    server._log('settlement_complete', {
+      dispute_id: disputeId,
+      parties: Object.keys(settlement).length,
+    });
+  } catch (err: any) {
+    server._log('settlement_error', { dispute_id: disputeId, error: err.message });
+  }
 }

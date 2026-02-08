@@ -17,7 +17,8 @@ export const EscrowEvent = {
   CREATED: 'escrow:created',
   RELEASED: 'escrow:released',
   COMPLETION_SETTLED: 'settlement:completion',
-  DISPUTE_SETTLED: 'settlement:dispute'
+  DISPUTE_SETTLED: 'settlement:dispute',
+  VERDICT_SETTLED: 'settlement:verdict'
 } as const;
 
 export type EscrowEventType = typeof EscrowEvent[keyof typeof EscrowEvent];
