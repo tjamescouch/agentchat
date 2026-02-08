@@ -25,6 +25,9 @@ if [ "$CONTAINER_MODE" = true ] && [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
     exit 1
 fi
 
+# Model configuration
+MODEL="${AGENT_MODEL:-opus}"  # Default to opus, can override with AGENT_MODEL env var
+
 # Backoff settings
 MIN_BACKOFF=5
 MAX_BACKOFF=300
@@ -114,7 +117,7 @@ Begin your mission now."
     # Run claude with the mission
     START_TIME=$(date +%s)
 
-    if claude -p "$RESUME_PROMPT" 2>> "$LOG_FILE"; then
+    if claude -p "$RESUME_PROMPT" --model "$MODEL" 2>> "$LOG_FILE"; then
         # Clean exit
         log "Agent exited cleanly"
         BACKOFF=$MIN_BACKOFF
