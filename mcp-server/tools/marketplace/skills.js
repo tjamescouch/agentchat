@@ -4,6 +4,7 @@
  */
 
 import { z } from 'zod';
+import crypto from 'crypto';
 import { client } from '../../state.js';
 
 /**
@@ -38,9 +39,9 @@ export function registerSkillsTools(server) {
           };
         }
 
-        // Sign the skills array
-        const skillsContent = JSON.stringify(skills);
-        const sig = client._identity.sign(skillsContent);
+        // Sign the skills array (must match server's getRegisterSkillsSigningContent format)
+        const hash = crypto.createHash('sha256').update(JSON.stringify(skills)).digest('hex');
+        const sig = client._identity.sign(`REGISTER_SKILLS|${hash}`);
 
         // Send registration
         return new Promise((resolve) => {
