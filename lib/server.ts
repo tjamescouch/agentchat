@@ -60,6 +60,9 @@ import {
   handleSetPresence,
 } from './server/handlers/presence.js';
 import {
+  handleSetNick,
+} from './server/handlers/nick.js';
+import {
   handleAdminApprove,
   handleAdminRevoke,
   handleAdminList,
@@ -132,6 +135,7 @@ export interface AgentChatServerOptions {
   messageBufferSize?: number;
   idleTimeoutMs?: number;
   verificationTimeoutMs?: number;
+  challengeTimeoutMs?: number;
   logger?: Console;
   escrowHandlers?: Record<string, (payload: unknown) => Promise<void>>;
   allowlistEnabled?: boolean;
@@ -306,7 +310,9 @@ export class AgentChatServer {
 
     // Pending challenges (challenge-response auth)
     this.pendingChallenges = new Map();
-    this.challengeTimeoutMs = options.verificationTimeoutMs || 30000;
+    this.challengeTimeoutMs = options.challengeTimeoutMs
+      || parseInt(process.env.CHALLENGE_TIMEOUT_MS || '', 10)
+      || 60000;
 
     // Allowlist
     const allowlistEnabled = options.allowlistEnabled || process.env.ALLOWLIST_ENABLED === 'true';
@@ -757,6 +763,10 @@ export class AgentChatServer {
       // Challenge-response auth
       case ClientMessageType.VERIFY_IDENTITY:
         handleVerifyIdentity(this, ws, msg);
+        break;
+      // Nick
+      case ClientMessageType.SET_NICK:
+        handleSetNick(this, ws, msg);
         break;
       // Admin messages
       case ClientMessageType.ADMIN_APPROVE:

@@ -47,6 +47,8 @@ export const ClientMessageType = {
   ADMIN_LIST: 'ADMIN_LIST' as const,
   // Challenge-response auth
   VERIFY_IDENTITY: 'VERIFY_IDENTITY' as const,
+  // Nick
+  SET_NICK: 'SET_NICK' as const,
 };
 
 export const ServerMessageType = {
@@ -80,6 +82,8 @@ export const ServerMessageType = {
   ADMIN_RESULT: 'ADMIN_RESULT' as const,
   // Challenge-response auth
   CHALLENGE: 'CHALLENGE' as const,
+  // Nick
+  NICK_CHANGED: 'NICK_CHANGED' as const,
 };
 
 export const ErrorCode = {
@@ -239,6 +243,7 @@ interface RawClientMessage {
   challenge_id?: string;
   signature?: string;
   timestamp?: number;
+  nick?: string;
 }
 
 /**
@@ -487,6 +492,18 @@ export function validateClientMessage(raw: string | RawClientMessage): Validatio
     case ClientMessageType.ADMIN_LIST:
       if (!msg.admin_key || typeof msg.admin_key !== 'string') {
         return { valid: false, error: 'Missing admin_key' };
+      }
+      break;
+
+    case ClientMessageType.SET_NICK:
+      if (!msg.nick || typeof msg.nick !== 'string') {
+        return { valid: false, error: 'Missing or invalid nick' };
+      }
+      if (msg.nick.length < 1 || msg.nick.length > 24) {
+        return { valid: false, error: 'Nick must be 1-24 characters' };
+      }
+      if (!/^[a-zA-Z0-9_-]+$/.test(msg.nick)) {
+        return { valid: false, error: 'Nick must contain only alphanumeric characters, hyphens, and underscores' };
       }
       break;
 
