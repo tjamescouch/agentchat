@@ -28,6 +28,7 @@ import { ProposalStore } from './proposals.js';
 import { ReputationStore } from './reputation.js';
 import { EscrowHooks } from './escrow-hooks.js';
 import { Allowlist } from './allowlist.js';
+import { ArbitrationStore } from './arbitration.js';
 
 // Import extracted handlers
 import {
@@ -59,6 +60,14 @@ import {
 import {
   handleSetPresence,
 } from './server/handlers/presence.js';
+import {
+  handleDisputeIntent,
+  handleDisputeReveal,
+  handleEvidence,
+  handleArbiterAccept,
+  handleArbiterDecline,
+  handleArbiterVote,
+} from './server/handlers/arbitration.js';
 import {
   handleAdminApprove,
   handleAdminRevoke,
@@ -203,6 +212,9 @@ export class AgentChatServer {
   // Reputation store
   reputationStore: ReputationStore;
 
+  // Arbitration store (Agentcourt)
+  arbitrationStore: ArbitrationStore;
+
   // Escrow hooks
   escrowHooks: EscrowHooks;
 
@@ -289,6 +301,7 @@ export class AgentChatServer {
 
     // Reputation store for ELO ratings
     this.reputationStore = new ReputationStore();
+    this.arbitrationStore = new ArbitrationStore();
 
     // Escrow hooks for external integrations
     this.escrowHooks = new EscrowHooks({ logger: options.logger || console });
@@ -735,6 +748,25 @@ export class AgentChatServer {
         break;
       case ClientMessageType.DISPUTE:
         handleDispute(this, ws, msg);
+        break;
+      // Agentcourt arbitration messages
+      case ClientMessageType.DISPUTE_INTENT:
+        handleDisputeIntent(this, ws, msg);
+        break;
+      case ClientMessageType.DISPUTE_REVEAL:
+        handleDisputeReveal(this, ws, msg);
+        break;
+      case ClientMessageType.EVIDENCE:
+        handleEvidence(this, ws, msg);
+        break;
+      case ClientMessageType.ARBITER_ACCEPT:
+        handleArbiterAccept(this, ws, msg);
+        break;
+      case ClientMessageType.ARBITER_DECLINE:
+        handleArbiterDecline(this, ws, msg);
+        break;
+      case ClientMessageType.ARBITER_VOTE:
+        handleArbiterVote(this, ws, msg);
         break;
       // Skill discovery messages
       case ClientMessageType.REGISTER_SKILLS:

@@ -40,3 +40,13 @@ export {
 export {
   handleSetPresence,
 } from './presence.js';
+
+// Arbitration handlers (Agentcourt)
+export {
+  handleDisputeIntent,
+  handleDisputeReveal,
+  handleEvidence,
+  handleArbiterAccept,
+  handleArbiterDecline,
+  handleArbiterVote,
+} from './arbitration.js';

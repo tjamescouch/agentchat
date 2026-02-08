@@ -47,6 +47,13 @@ export const ClientMessageType = {
   ADMIN_LIST: 'ADMIN_LIST' as const,
   // Challenge-response auth
   VERIFY_IDENTITY: 'VERIFY_IDENTITY' as const,
+  // Agentcourt
+  DISPUTE_INTENT: 'DISPUTE_INTENT' as const,
+  DISPUTE_REVEAL: 'DISPUTE_REVEAL' as const,
+  EVIDENCE: 'EVIDENCE' as const,
+  ARBITER_ACCEPT: 'ARBITER_ACCEPT' as const,
+  ARBITER_DECLINE: 'ARBITER_DECLINE' as const,
+  ARBITER_VOTE: 'ARBITER_VOTE' as const,
 };
 
 export const ServerMessageType = {
@@ -80,6 +87,13 @@ export const ServerMessageType = {
   ADMIN_RESULT: 'ADMIN_RESULT' as const,
   // Challenge-response auth
   CHALLENGE: 'CHALLENGE' as const,
+  // Agentcourt
+  PANEL_FORMED: 'PANEL_FORMED' as const,
+  ARBITER_ASSIGNED: 'ARBITER_ASSIGNED' as const,
+  EVIDENCE_RECEIVED: 'EVIDENCE_RECEIVED' as const,
+  CASE_READY: 'CASE_READY' as const,
+  VERDICT: 'VERDICT' as const,
+  DISPUTE_FALLBACK: 'DISPUTE_FALLBACK' as const,
 };
 
 export const ErrorCode = {
@@ -106,6 +120,12 @@ export const ErrorCode = {
   NO_PUBKEY: 'NO_PUBKEY' as const,
   // Allowlist errors
   NOT_ALLOWED: 'NOT_ALLOWED' as const,
+  // Agentcourt
+  DISPUTE_NOT_FOUND: 'DISPUTE_NOT_FOUND' as const,
+  DISPUTE_ALREADY_EXISTS: 'DISPUTE_ALREADY_EXISTS' as const,
+  INVALID_DISPUTE: 'INVALID_DISPUTE' as const,
+  ARBITER_NOT_ELIGIBLE: 'ARBITER_NOT_ELIGIBLE' as const,
+  ARBITER_NOT_ON_PANEL: 'ARBITER_NOT_ON_PANEL' as const,
 };
 
 export const PresenceStatus = {
@@ -239,6 +259,13 @@ interface RawClientMessage {
   challenge_id?: string;
   signature?: string;
   timestamp?: number;
+  // Agentcourt fields
+  commitment?: string;
+  dispute_id?: string;
+  items?: Array<{ kind: string; label: string; value: string; url?: string }>;
+  statement?: string;
+  verdict?: string;
+  reasoning?: string;
 }
 
 /**
@@ -499,6 +526,94 @@ export function validateClientMessage(raw: string | RawClientMessage): Validatio
       }
       if (!msg.timestamp || typeof msg.timestamp !== 'number') {
         return { valid: false, error: 'Missing or invalid timestamp' };
+      }
+      break;
+
+    // Agentcourt message validation
+    case ClientMessageType.DISPUTE_INTENT:
+      if (!msg.proposal_id) {
+        return { valid: false, error: 'Missing proposal_id' };
+      }
+      if (!msg.reason || typeof msg.reason !== 'string') {
+        return { valid: false, error: 'Missing or invalid reason' };
+      }
+      if (!msg.commitment || typeof msg.commitment !== 'string') {
+        return { valid: false, error: 'Missing or invalid commitment hash' };
+      }
+      if (!msg.sig) {
+        return { valid: false, error: 'Dispute intent must be signed' };
+      }
+      break;
+
+    case ClientMessageType.DISPUTE_REVEAL:
+      if (!msg.proposal_id) {
+        return { valid: false, error: 'Missing proposal_id' };
+      }
+      if (!msg.nonce || typeof msg.nonce !== 'string') {
+        return { valid: false, error: 'Missing or invalid nonce' };
+      }
+      if (!msg.sig) {
+        return { valid: false, error: 'Dispute reveal must be signed' };
+      }
+      break;
+
+    case ClientMessageType.EVIDENCE:
+      if (!msg.dispute_id) {
+        return { valid: false, error: 'Missing dispute_id' };
+      }
+      if (!msg.items || !Array.isArray(msg.items)) {
+        return { valid: false, error: 'Missing or invalid items array' };
+      }
+      if (msg.items.length > 10) {
+        return { valid: false, error: 'Too many evidence items (max 10)' };
+      }
+      if (!msg.statement || typeof msg.statement !== 'string') {
+        return { valid: false, error: 'Missing or invalid statement' };
+      }
+      if (msg.statement.length > 2000) {
+        return { valid: false, error: 'Statement too long (max 2000 chars)' };
+      }
+      if (!msg.sig) {
+        return { valid: false, error: 'Evidence must be signed' };
+      }
+      break;
+
+    case ClientMessageType.ARBITER_ACCEPT:
+      if (!msg.dispute_id) {
+        return { valid: false, error: 'Missing dispute_id' };
+      }
+      if (!msg.sig) {
+        return { valid: false, error: 'Arbiter accept must be signed' };
+      }
+      break;
+
+    case ClientMessageType.ARBITER_DECLINE:
+      if (!msg.dispute_id) {
+        return { valid: false, error: 'Missing dispute_id' };
+      }
+      if (!msg.reason || typeof msg.reason !== 'string') {
+        return { valid: false, error: 'Missing or invalid decline reason' };
+      }
+      if (!msg.sig) {
+        return { valid: false, error: 'Arbiter decline must be signed' };
+      }
+      break;
+
+    case ClientMessageType.ARBITER_VOTE:
+      if (!msg.dispute_id) {
+        return { valid: false, error: 'Missing dispute_id' };
+      }
+      if (!msg.verdict || !['disputant', 'respondent', 'mutual'].includes(msg.verdict)) {
+        return { valid: false, error: 'Invalid verdict (must be disputant, respondent, or mutual)' };
+      }
+      if (!msg.reasoning || typeof msg.reasoning !== 'string') {
+        return { valid: false, error: 'Missing or invalid reasoning' };
+      }
+      if (msg.reasoning.length > 500) {
+        return { valid: false, error: 'Reasoning too long (max 500 chars)' };
+      }
+      if (!msg.sig) {
+        return { valid: false, error: 'Arbiter vote must be signed' };
       }
       break;
 

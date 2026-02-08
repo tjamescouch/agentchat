@@ -28,7 +28,14 @@ export enum ClientMessageType {
   ADMIN_APPROVE = 'ADMIN_APPROVE',
   ADMIN_REVOKE = 'ADMIN_REVOKE',
   ADMIN_LIST = 'ADMIN_LIST',
-  VERIFY_IDENTITY = 'VERIFY_IDENTITY'
+  VERIFY_IDENTITY = 'VERIFY_IDENTITY',
+  // Agentcourt dispute resolution
+  DISPUTE_INTENT = 'DISPUTE_INTENT',
+  DISPUTE_REVEAL = 'DISPUTE_REVEAL',
+  EVIDENCE = 'EVIDENCE',
+  ARBITER_ACCEPT = 'ARBITER_ACCEPT',
+  ARBITER_DECLINE = 'ARBITER_DECLINE',
+  ARBITER_VOTE = 'ARBITER_VOTE',
 }
 
 export enum ServerMessageType {
@@ -55,7 +62,14 @@ export enum ServerMessageType {
   VERIFY_SUCCESS = 'VERIFY_SUCCESS',
   VERIFY_FAILED = 'VERIFY_FAILED',
   ADMIN_RESULT = 'ADMIN_RESULT',
-  CHALLENGE = 'CHALLENGE'
+  CHALLENGE = 'CHALLENGE',
+  // Agentcourt dispute resolution
+  PANEL_FORMED = 'PANEL_FORMED',
+  ARBITER_ASSIGNED = 'ARBITER_ASSIGNED',
+  EVIDENCE_RECEIVED = 'EVIDENCE_RECEIVED',
+  CASE_READY = 'CASE_READY',
+  VERDICT = 'VERDICT',
+  DISPUTE_FALLBACK = 'DISPUTE_FALLBACK',
 }
 
 export enum ErrorCode {
@@ -77,7 +91,13 @@ export enum ErrorCode {
   VERIFICATION_FAILED = 'VERIFICATION_FAILED',
   VERIFICATION_EXPIRED = 'VERIFICATION_EXPIRED',
   NO_PUBKEY = 'NO_PUBKEY',
-  NOT_ALLOWED = 'NOT_ALLOWED'
+  NOT_ALLOWED = 'NOT_ALLOWED',
+  // Agentcourt errors
+  DISPUTE_NOT_FOUND = 'DISPUTE_NOT_FOUND',
+  DISPUTE_ALREADY_EXISTS = 'DISPUTE_ALREADY_EXISTS',
+  INVALID_DISPUTE = 'INVALID_DISPUTE',
+  ARBITER_NOT_ELIGIBLE = 'ARBITER_NOT_ELIGIBLE',
+  ARBITER_NOT_ON_PANEL = 'ARBITER_NOT_ON_PANEL',
 }
 
 export enum PresenceStatus {
@@ -293,6 +313,56 @@ export interface VerifyIdentityMessage extends BaseMessage {
   timestamp: number;
 }
 
+// Agentcourt client messages
+export interface DisputeIntentMessage extends BaseMessage {
+  type: ClientMessageType.DISPUTE_INTENT;
+  proposal_id: string;
+  reason: string;
+  commitment: string;
+  sig: string;
+}
+
+export interface DisputeRevealMessage extends BaseMessage {
+  type: ClientMessageType.DISPUTE_REVEAL;
+  proposal_id: string;
+  nonce: string;
+  sig: string;
+}
+
+export interface EvidenceMessage extends BaseMessage {
+  type: ClientMessageType.EVIDENCE;
+  dispute_id: string;
+  items: Array<{
+    kind: string;
+    label: string;
+    value: string;
+    url?: string;
+  }>;
+  statement: string;
+  sig: string;
+}
+
+export interface ArbiterAcceptMessage extends BaseMessage {
+  type: ClientMessageType.ARBITER_ACCEPT;
+  dispute_id: string;
+  sig: string;
+}
+
+export interface ArbiterDeclineMessage extends BaseMessage {
+  type: ClientMessageType.ARBITER_DECLINE;
+  dispute_id: string;
+  reason: string;
+  sig: string;
+}
+
+export interface ArbiterVoteMessage extends BaseMessage {
+  type: ClientMessageType.ARBITER_VOTE;
+  dispute_id: string;
+  verdict: 'disputant' | 'respondent' | 'mutual';
+  reasoning: string;
+  sig: string;
+}
+
 export type ClientMessage =
   | IdentifyMessage
   | JoinMessage
@@ -316,7 +386,13 @@ export type ClientMessage =
   | AdminApproveMessage
   | AdminRevokeMessage
   | AdminListMessage
-  | VerifyIdentityMessage;
+  | VerifyIdentityMessage
+  | DisputeIntentMessage
+  | DisputeRevealMessage
+  | EvidenceMessage
+  | ArbiterAcceptMessage
+  | ArbiterDeclineMessage
+  | ArbiterVoteMessage;
 
 // ============ Server Messages ============
 
@@ -500,6 +576,85 @@ export interface AdminResultMessage extends BaseMessage {
   strict?: boolean;
 }
 
+// Agentcourt server messages
+export interface PanelFormedMessage extends BaseMessage {
+  type: ServerMessageType.PANEL_FORMED;
+  proposal_id: string;
+  dispute_id: string;
+  arbiters: string[];
+  disputant: string;
+  respondent: string;
+  evidence_deadline: number;
+  vote_deadline: number;
+  seed: string;
+  server_nonce: string;
+}
+
+export interface ArbiterAssignedMessage extends BaseMessage {
+  type: ServerMessageType.ARBITER_ASSIGNED;
+  dispute_id: string;
+  proposal_id: string;
+  disputant: string;
+  respondent: string;
+  reason: string;
+  response_deadline: number;
+}
+
+export interface EvidenceReceivedMessage extends BaseMessage {
+  type: ServerMessageType.EVIDENCE_RECEIVED;
+  dispute_id: string;
+  from: string;
+  item_count: number;
+  hashes: string[];
+}
+
+export interface CaseReadyMessage extends BaseMessage {
+  type: ServerMessageType.CASE_READY;
+  dispute_id: string;
+  proposal: {
+    id: string;
+    from: string;
+    to: string;
+    task: string;
+    amount: number | null;
+    currency: string | null;
+  };
+  disputant: string;
+  disputant_evidence: { items: unknown[]; statement: string } | null;
+  respondent: string;
+  respondent_evidence: { items: unknown[]; statement: string } | null;
+  vote_deadline: number;
+}
+
+export interface VerdictMessage extends BaseMessage {
+  type: ServerMessageType.VERDICT;
+  dispute_id: string;
+  proposal_id: string;
+  verdict: string;
+  votes: Array<{
+    arbiter: string;
+    verdict: string;
+    reasoning: string;
+  }>;
+  rating_changes: Record<string, {
+    oldRating: number;
+    newRating: number;
+    change: number;
+  }>;
+  escrow_settlement: {
+    winner: string | null;
+    amount_transferred: number;
+    stakes_burned: number;
+  };
+}
+
+export interface DisputeFallbackMessage extends BaseMessage {
+  type: ServerMessageType.DISPUTE_FALLBACK;
+  dispute_id: string;
+  proposal_id: string;
+  reason: string;
+}
+
 export type ServerMessage =
   | WelcomeMessage
   | ServerMsgMessage
@@ -524,7 +679,13 @@ export type ServerMessage =
   | VerifySuccessMessage
   | VerifyFailedMessage
   | AdminResultMessage
-  | ChallengeMessage;
+  | ChallengeMessage
+  | PanelFormedMessage
+  | ArbiterAssignedMessage
+  | EvidenceReceivedMessage
+  | CaseReadyMessage
+  | VerdictMessage
+  | DisputeFallbackMessage;
 
 // ============ Validation Result ============
 
