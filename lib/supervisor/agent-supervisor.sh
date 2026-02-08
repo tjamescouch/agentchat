@@ -26,7 +26,7 @@ if [ "$CONTAINER_MODE" = true ] && [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
 fi
 
 # Model configuration
-MODEL="${AGENT_MODEL:-opus}"  # Default to opus, can override with AGENT_MODEL env var
+MODEL="${AGENT_MODEL:-claude-opus-4-6}"  # Default to Opus 4.6, can override with AGENT_MODEL env var
 
 # Backoff settings
 MIN_BACKOFF=5
@@ -101,23 +101,13 @@ while true; do
     log "Starting agent (attempt $((RESTART_COUNT + 1)), backoff ${BACKOFF}s)"
     save_state "running" ""
 
-    # Build the resume prompt with state context
-    RESUME_PROMPT="You are agent '$AGENT_NAME'. Your mission: $MISSION
-
-IMPORTANT: You are being restarted by a supervisor. Check your state file at:
-$STATE_FILE
-
-Read ~/.agentchat/agents/$AGENT_NAME/context.md for any saved context from your previous run.
-Before doing significant work, save your current task to context.md so you can resume if interrupted.
-
-On quota errors or before shutdown, write your current state to context.md.
-
-Begin your mission now."
+    # Get server URL from environment
+    SERVER_URL="${AGENTCHAT_URL:-wss://agentchat-server.fly.dev}"
 
     # Run claude with the mission
     START_TIME=$(date +%s)
 
-    if claude -p "$RESUME_PROMPT" --model "$MODEL" 2>> "$LOG_FILE"; then
+    if claude -p "Read ~/.claude/agentchat.skill.md and connect to $SERVER_URL. Your name is '$AGENT_NAME'. Your mission: $MISSION. Connect ephemerally and join the public channel." --model opus 2>> "$LOG_FILE"; then
         # Clean exit
         log "Agent exited cleanly"
         BACKOFF=$MIN_BACKOFF

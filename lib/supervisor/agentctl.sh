@@ -34,7 +34,8 @@ setup_token() {
     echo "Copy the token it outputs, then paste it below."
     echo
     echo "Enter your OAuth token (input hidden):"
-    read -s token
+    IFS= read -r -s token
+    token="${token%$'\r'}"  # Strip carriage return if present
     echo
 
     if [ -z "$token" ]; then
@@ -43,10 +44,12 @@ setup_token() {
     fi
 
     echo "Enter encryption passphrase (input hidden):"
-    read -s passphrase
+    IFS= read -r -s passphrase
+    passphrase="${passphrase%$'\r'}"  # Strip carriage return if present
     echo
     echo "Confirm passphrase:"
-    read -s passphrase_confirm
+    IFS= read -r -s passphrase_confirm
+    passphrase_confirm="${passphrase_confirm%$'\r'}"  # Strip carriage return if present
     echo
 
     if [ "$passphrase" != "$passphrase_confirm" ]; then
@@ -60,21 +63,38 @@ setup_token() {
     fi
 
     # Encrypt with AES-256-CBC + PBKDF2, salt, base64 output
-    echo "$token" | openssl enc -aes-256-cbc -a -salt -pbkdf2 -iter 100000 -pass "pass:${passphrase}" > "$ENCRYPTED_TOKEN_FILE" 2>/dev/null
+    echo -n "$token" | openssl enc -aes-256-cbc -a -salt -pbkdf2 -iter 100000 -pass "pass:${passphrase}" > "$ENCRYPTED_TOKEN_FILE" 2>/dev/null
 
-    if [ $? -eq 0 ]; then
-        chmod 600 "$ENCRYPTED_TOKEN_FILE"
-        echo "Token encrypted and stored at $ENCRYPTED_TOKEN_FILE"
-    else
+    if [ $? -ne 0 ]; then
         rm -f "$ENCRYPTED_TOKEN_FILE"
         echo "ERROR: Encryption failed"
         exit 1
     fi
 
+    chmod 600 "$ENCRYPTED_TOKEN_FILE"
+
+    # Verify decryption works immediately
+    echo "Verifying encryption..."
+    local test_decrypt
+    test_decrypt=$(openssl enc -aes-256-cbc -d -a -pbkdf2 -iter 100000 -pass "pass:${passphrase}" < "$ENCRYPTED_TOKEN_FILE" 2>/dev/null)
+
+    if [ "$test_decrypt" != "$token" ]; then
+        rm -f "$ENCRYPTED_TOKEN_FILE"
+        echo "ERROR: Encryption verification failed - decryption doesn't match original token"
+        echo "This suggests a terminal encoding issue. Try using CLAUDE_CODE_OAUTH_TOKEN env var instead:"
+        echo "  export CLAUDE_CODE_OAUTH_TOKEN='your-token'"
+        echo "  agentctl start <name> <mission>"
+        exit 1
+    fi
+
+    echo "Token encrypted and stored at $ENCRYPTED_TOKEN_FILE"
+    echo "Verification successful - decryption works!"
+
     # Clear sensitive variables
     token=""
     passphrase=""
     passphrase_confirm=""
+    test_decrypt=""
 }
 
 # Decrypt OAuth token into CLAUDE_CODE_OAUTH_TOKEN variable (memory only)
@@ -90,14 +110,16 @@ decrypt_token() {
     fi
 
     echo "Enter decryption passphrase (input hidden):"
-    read -s passphrase
+    IFS= read -r -s passphrase
+    passphrase="${passphrase%$'\r'}"  # Strip carriage return if present
     echo
 
     CLAUDE_CODE_OAUTH_TOKEN=$(openssl enc -aes-256-cbc -d -a -pbkdf2 -iter 100000 -pass "pass:${passphrase}" < "$ENCRYPTED_TOKEN_FILE" 2>/dev/null)
+    local decrypt_status=$?
 
     passphrase=""
 
-    if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ] || [ $? -ne 0 ]; then
+    if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ] || [ $decrypt_status -ne 0 ]; then
         CLAUDE_CODE_OAUTH_TOKEN=""
         echo "ERROR: Decryption failed (wrong passphrase?)"
         exit 1

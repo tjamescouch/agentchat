@@ -64,4 +64,4 @@ echo "Starting controller agent..."
 echo "Context file: $CONTEXT_FILE"
 echo "---"
 
-claude -p "$PROMPT"
+claude -p "$PROMPT" --model claude-opus-4-6

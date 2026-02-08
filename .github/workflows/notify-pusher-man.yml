@@ -1,0 +1,40 @@
+name: Notify Pusher Man
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+  push:
+    branches:
+      - main
+    paths:
+      - 'mcp-server/**'
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check if MCP version changed
+        id: check_version
+        if: github.event_name == 'push'
+        run: |
+          cd mcp-server
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "needs_approval=true" >> $GITHUB_OUTPUT
+
+      - name: Notify Pusher Man via AgentChat
+        if: steps.check_version.outputs.needs_approval == 'true'
+        run: |
+          echo "🚨 PUSHER MAN: MCP Package v${{ steps.check_version.outputs.version }} needs approval"
+          echo "Review at: ${{ github.event.head_commit.url }}"
+          echo "To approve: Comment '/approve mcp-v${{ steps.check_version.outputs.version }}' in #releases"
+          # TODO: Send actual message to AgentChat when API is available
+
+      - name: Notify about PR
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "🔍 PUSHER MAN: PR #${{ github.event.pull_request.number }} needs review"
+          echo "${{ github.event.pull_request.title }}"
+          echo "Review at: ${{ github.event.pull_request.html_url }}"

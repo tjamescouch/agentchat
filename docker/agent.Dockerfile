@@ -27,6 +27,9 @@ WORKDIR /home/agent
 # Configure Claude CLI MCP settings
 COPY --chown=agent:agent docker/claude-settings.json /home/agent/.claude/settings.json
 
+# Copy AgentChat skill file
+COPY --chown=agent:agent SKILL.md /home/agent/.claude/agentchat.skill.md
+
 # Create state directory structure
 RUN mkdir -p /home/agent/.agentchat/agents \
              /home/agent/.agentchat/identities
