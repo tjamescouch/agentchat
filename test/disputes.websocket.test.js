@@ -1,6 +1,6 @@
 /**
- * Agentcourt Dispute Integration Tests
- * Tests the full dispute flow through the server via WebSocket
+ * Agentcourt Dispute WebSocket Tests
+ * Tests dispute flows through the server via WebSocket with proper Ed25519 signatures
  */
 
 import { describe, it, before, after } from 'node:test';
@@ -17,7 +17,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 
-const TEST_PORT = 16680;
+const TEST_PORT = 16681;
 const TEST_SERVER = `ws://localhost:${TEST_PORT}`;
 
 /**
@@ -67,7 +67,7 @@ async function createAcceptedProposal(alice, bob) {
   return proposal;
 }
 
-describe('Agentcourt Dispute Integration', () => {
+describe('Agentcourt Dispute WebSocket', () => {
   let server;
   let tmpDir;
   let aliceIdentityPath;
