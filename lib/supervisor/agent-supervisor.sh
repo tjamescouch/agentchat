@@ -119,6 +119,7 @@ while true; do
 
     if claude -p "Read ~/.claude/agentchat.skill.md and connect to $SERVER_URL. Your name is '$AGENT_NAME'. Your mission: $MISSION. Connect ephemerally and join the public channel." \
         --model opus \
+        --betas extended-thinking-2025-05-06 \
         --dangerously-skip-permissions \
         --permission-mode bypassPermissions \
         --mcp-config "$MCP_CONFIG" \
