@@ -18,6 +18,16 @@ function sendRaw(msg) {
 }
 
 /**
+ * Helper: sign content with the client's identity, or return 'unsigned' for ephemeral agents
+ */
+function sign(content) {
+  if (client._identity && client._identity.privkey) {
+    return client._identity.sign(content);
+  }
+  return 'unsigned';
+}
+
+/**
  * Helper: standard not-connected error
  */
 function notConnected() {
@@ -48,12 +58,13 @@ export function registerAgentcourtTools(server) {
         const nonce = crypto.randomBytes(16).toString('hex');
         const commitment = crypto.createHash('sha256').update(nonce).digest('hex');
 
+        const sig = sign(`DISPUTE_INTENT|${proposal_id}|${reason}|${commitment}`);
         sendRaw({
           type: 'DISPUTE_INTENT',
           proposal_id,
           reason,
           commitment,
-          sig: 'pending', // TODO: real signing when client supports it
+          sig,
         });
 
         return {
@@ -89,11 +100,12 @@ export function registerAgentcourtTools(server) {
       try {
         if (!client || !client.connected) return notConnected();
 
+        const sig = sign(`DISPUTE_REVEAL|${proposal_id}|${nonce}`);
         sendRaw({
           type: 'DISPUTE_REVEAL',
           proposal_id,
           nonce,
-          sig: 'pending',
+          sig,
         });
 
         return {
@@ -133,12 +145,14 @@ export function registerAgentcourtTools(server) {
       try {
         if (!client || !client.connected) return notConnected();
 
+        const itemsHash = crypto.createHash('sha256').update(JSON.stringify(items)).digest('hex');
+        const sig = sign(`EVIDENCE|${dispute_id}|${itemsHash}`);
         sendRaw({
           type: 'EVIDENCE',
           dispute_id,
           items,
           statement,
-          sig: 'pending',
+          sig,
         });
 
         return {
@@ -172,10 +186,11 @@ export function registerAgentcourtTools(server) {
       try {
         if (!client || !client.connected) return notConnected();
 
+        const sig = sign(`ARBITER_ACCEPT|${dispute_id}`);
         sendRaw({
           type: 'ARBITER_ACCEPT',
           dispute_id,
-          sig: 'pending',
+          sig,
         });
 
         return {
@@ -209,10 +224,12 @@ export function registerAgentcourtTools(server) {
       try {
         if (!client || !client.connected) return notConnected();
 
+        const sig = sign(`ARBITER_DECLINE|${dispute_id}|${reason || ''}`);
         sendRaw({
           type: 'ARBITER_DECLINE',
           dispute_id,
           ...(reason && { reason }),
+          sig,
         });
 
         return {
@@ -247,12 +264,13 @@ export function registerAgentcourtTools(server) {
       try {
         if (!client || !client.connected) return notConnected();
 
+        const sig = sign(`VOTE|${dispute_id}|${verdict}`);
         sendRaw({
           type: 'ARBITER_VOTE',
           dispute_id,
           verdict,
           reasoning,
-          sig: 'pending',
+          sig,
         });
 
         return {
