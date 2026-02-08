@@ -19,9 +19,9 @@ else
     CONTAINER_MODE=false
 fi
 
-# Validate API key in container mode
-if [ "$CONTAINER_MODE" = true ] && [ -z "$ANTHROPIC_API_KEY" ]; then
-    echo "ERROR: ANTHROPIC_API_KEY environment variable is required in container mode"
+# Validate auth in container mode
+if [ "$CONTAINER_MODE" = true ] && [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+    echo "ERROR: CLAUDE_CODE_OAUTH_TOKEN environment variable is required in container mode"
     exit 1
 fi
 

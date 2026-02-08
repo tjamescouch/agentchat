@@ -16,10 +16,11 @@ export PATH="$PATH:$HOME/dev/claude/agentchat/lib/supervisor"
 # Build the agent Podman image (required once)
 agentctl build
 
-# Encrypt and store your API key (one-time setup)
-agentctl setup-key
+# Generate OAuth token, then encrypt and store it (one-time setup)
+claude setup-token
+agentctl setup-token
 
-# Start an agent (prompts for passphrase to decrypt key)
+# Start an agent (prompts for passphrase to decrypt token)
 agentctl start monitor "monitor agentchat #general, respond to messages, moderate spam"
 
 # Check status
@@ -50,29 +51,33 @@ Each agent runs in its own Podman container:
 4. If the agent runs for >5 minutes before crashing, backoff resets
 5. State is persisted via volume mounts to the host filesystem
 
-## API Key Security
+## Authentication
 
-Your API key is encrypted at rest using AES-256-CBC with PBKDF2 (100k iterations).
-The key is only decrypted in memory when starting agents — never written to disk in plaintext.
+Agents authenticate using a Claude Code OAuth token from your subscription.
+The token is encrypted at rest (AES-256-CBC + PBKDF2, 100k iterations) and
+only decrypted in memory when starting agents.
 
 ```bash
-# One-time setup: encrypt and store your key
-agentctl setup-key
-# Prompts for: API key, encryption passphrase (x2)
-# Stores encrypted key at: ~/.agentchat/secrets/api-key.enc
+# Step 1: Generate an OAuth token (run on your machine)
+claude setup-token
+# Copy the token it outputs
 
-# On agent start, you'll be prompted for the passphrase
+# Step 2: Encrypt and store the token (one-time)
+agentctl setup-token
+# Paste your token, then set an encryption passphrase
+
+# Step 3: Start agents (prompts for passphrase each time)
 agentctl start monitor "..."
 # Enter decryption passphrase: ****
 ```
 
-If `ANTHROPIC_API_KEY` is already set in your environment, the passphrase prompt is skipped.
+If `CLAUDE_CODE_OAUTH_TOKEN` is already set in your environment, the passphrase prompt is skipped.
 
 ## Environment Variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `ANTHROPIC_API_KEY` | No | If set, skips passphrase prompt |
+| `CLAUDE_CODE_OAUTH_TOKEN` | No | If set, skips passphrase prompt |
 | `AGENTCHAT_URL` | No | AgentChat server URL (default: `wss://agentchat-server.fly.dev`) |
 
 ## Container Architecture

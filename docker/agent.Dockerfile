@@ -31,7 +31,7 @@ COPY --chown=agent:agent docker/claude-settings.json /home/agent/.claude/setting
 RUN mkdir -p /home/agent/.agentchat/agents \
              /home/agent/.agentchat/identities
 
-# Environment defaults (ANTHROPIC_API_KEY must be provided at runtime)
+# Environment defaults (CLAUDE_CODE_OAUTH_TOKEN must be provided at runtime)
 ENV AGENTCHAT_PUBLIC=true
 
 # The supervisor script is the entrypoint

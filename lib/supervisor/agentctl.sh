@@ -4,7 +4,7 @@
 
 AGENTS_DIR="$HOME/.agentchat/agents"
 SECRETS_DIR="$HOME/.agentchat/secrets"
-ENCRYPTED_KEY_FILE="$SECRETS_DIR/api-key.enc"
+ENCRYPTED_TOKEN_FILE="$SECRETS_DIR/oauth-token.enc"
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)"
 REPO_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 IMAGE_NAME="agentchat-agent:latest"
@@ -13,16 +13,16 @@ CONTAINER_PREFIX="agentchat"
 # Default server URL
 AGENTCHAT_URL="${AGENTCHAT_URL:-wss://agentchat-server.fly.dev}"
 
-# --- Key Encryption Key (KEK) functions ---
-# API key is encrypted at rest with AES-256-CBC + PBKDF2.
+# --- Token Encryption functions ---
+# OAuth token is encrypted at rest with AES-256-CBC + PBKDF2.
 # Decrypted only in memory (shell variable), never written to disk.
 
-encrypt_api_key() {
+setup_token() {
     mkdir -p "$SECRETS_DIR"
     chmod 700 "$SECRETS_DIR"
 
-    if [ -f "$ENCRYPTED_KEY_FILE" ]; then
-        echo "Encrypted key already exists at $ENCRYPTED_KEY_FILE"
+    if [ -f "$ENCRYPTED_TOKEN_FILE" ]; then
+        echo "Encrypted token already exists at $ENCRYPTED_TOKEN_FILE"
         read -p "Overwrite? [y/N] " confirm
         if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
             echo "Aborted."
@@ -30,12 +30,15 @@ encrypt_api_key() {
         fi
     fi
 
-    echo "Enter your ANTHROPIC_API_KEY (input hidden):"
-    read -s api_key
+    echo "Run 'claude setup-token' to generate your OAuth token."
+    echo "Copy the token it outputs, then paste it below."
+    echo
+    echo "Enter your OAuth token (input hidden):"
+    read -s token
     echo
 
-    if [ -z "$api_key" ]; then
-        echo "ERROR: Empty API key"
+    if [ -z "$token" ]; then
+        echo "ERROR: Empty token"
         exit 1
     fi
 
@@ -57,32 +60,32 @@ encrypt_api_key() {
     fi
 
     # Encrypt with AES-256-CBC + PBKDF2, salt, base64 output
-    echo "$api_key" | openssl enc -aes-256-cbc -a -salt -pbkdf2 -iter 100000 -pass "pass:${passphrase}" > "$ENCRYPTED_KEY_FILE" 2>/dev/null
+    echo "$token" | openssl enc -aes-256-cbc -a -salt -pbkdf2 -iter 100000 -pass "pass:${passphrase}" > "$ENCRYPTED_TOKEN_FILE" 2>/dev/null
 
     if [ $? -eq 0 ]; then
-        chmod 600 "$ENCRYPTED_KEY_FILE"
-        echo "API key encrypted and stored at $ENCRYPTED_KEY_FILE"
+        chmod 600 "$ENCRYPTED_TOKEN_FILE"
+        echo "Token encrypted and stored at $ENCRYPTED_TOKEN_FILE"
     else
-        rm -f "$ENCRYPTED_KEY_FILE"
+        rm -f "$ENCRYPTED_TOKEN_FILE"
         echo "ERROR: Encryption failed"
         exit 1
     fi
 
     # Clear sensitive variables
-    api_key=""
+    token=""
     passphrase=""
     passphrase_confirm=""
 }
 
-# Decrypt API key into ANTHROPIC_API_KEY variable (memory only)
-decrypt_api_key() {
-    if [ -n "$ANTHROPIC_API_KEY" ]; then
+# Decrypt OAuth token into CLAUDE_CODE_OAUTH_TOKEN variable (memory only)
+decrypt_token() {
+    if [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
         return 0  # Already set via env
     fi
 
-    if [ ! -f "$ENCRYPTED_KEY_FILE" ]; then
-        echo "ERROR: No encrypted key found. Run 'agentctl setup-key' first,"
-        echo "       or set ANTHROPIC_API_KEY environment variable."
+    if [ ! -f "$ENCRYPTED_TOKEN_FILE" ]; then
+        echo "ERROR: No encrypted token found. Run 'agentctl setup-token' first,"
+        echo "       or set CLAUDE_CODE_OAUTH_TOKEN environment variable."
         exit 1
     fi
 
@@ -90,17 +93,17 @@ decrypt_api_key() {
     read -s passphrase
     echo
 
-    ANTHROPIC_API_KEY=$(openssl enc -aes-256-cbc -d -a -pbkdf2 -iter 100000 -pass "pass:${passphrase}" < "$ENCRYPTED_KEY_FILE" 2>/dev/null)
+    CLAUDE_CODE_OAUTH_TOKEN=$(openssl enc -aes-256-cbc -d -a -pbkdf2 -iter 100000 -pass "pass:${passphrase}" < "$ENCRYPTED_TOKEN_FILE" 2>/dev/null)
 
     passphrase=""
 
-    if [ -z "$ANTHROPIC_API_KEY" ] || [ $? -ne 0 ]; then
-        ANTHROPIC_API_KEY=""
+    if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ] || [ $? -ne 0 ]; then
+        CLAUDE_CODE_OAUTH_TOKEN=""
         echo "ERROR: Decryption failed (wrong passphrase?)"
         exit 1
     fi
 
-    export ANTHROPIC_API_KEY
+    export CLAUDE_CODE_OAUTH_TOKEN
 }
 
 usage() {
@@ -108,7 +111,7 @@ usage() {
 Usage: agentctl <command> [agent-name] [options]
 
 Commands:
-  setup-key                Encrypt and store your API key (one-time setup)
+  setup-token              Encrypt and store your OAuth token (one-time setup)
   build                    Build the agent container image
   start <name> <mission>   Start a new supervised agent container
   stop <name>              Stop an agent gracefully
@@ -121,7 +124,7 @@ Commands:
   stopall                  Stop all agents
 
 Environment:
-  ANTHROPIC_API_KEY        Optional. If set, skips passphrase prompt.
+  CLAUDE_CODE_OAUTH_TOKEN  Optional. If set, skips passphrase prompt.
   AGENTCHAT_URL            AgentChat server URL (default: wss://agentchat-server.fly.dev)
 
 Examples:
@@ -160,8 +163,8 @@ start_agent() {
         exit 1
     fi
 
-    # Decrypt API key (prompts for passphrase if not in env)
-    decrypt_api_key
+    # Decrypt OAuth token (prompts for passphrase if not in env)
+    decrypt_token
 
     # Check if already running
     if is_container_running "$name"; then
@@ -206,7 +209,7 @@ EOF
         --name "$(container_name "$name")" \
         --restart on-failure:3 \
         $labels \
-        -e "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}" \
+        -e "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}" \
         -e "AGENTCHAT_PUBLIC=true" \
         -e "AGENTCHAT_URL=${AGENTCHAT_URL}" \
         -v "${state_dir}:/home/agent/.agentchat/agents/${name}" \
@@ -419,8 +422,8 @@ stop_all() {
 
 # Main
 case "$1" in
-    setup-key)
-        encrypt_api_key
+    setup-token)
+        setup_token
         ;;
     build)
         build_image

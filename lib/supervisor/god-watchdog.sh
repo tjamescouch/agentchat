@@ -5,27 +5,27 @@
 
 GOD_DIR="$HOME/.agentchat/agents/God"
 SECRETS_DIR="$HOME/.agentchat/secrets"
-ENCRYPTED_KEY_FILE="$SECRETS_DIR/api-key.enc"
+ENCRYPTED_TOKEN_FILE="$SECRETS_DIR/oauth-token.enc"
 WATCHDOG_PID="$GOD_DIR/watchdog.pid"
 CONTAINER_NAME="agentchat-God"
 IMAGE_NAME="agentchat-agent:latest"
 AGENTCHAT_URL="${AGENTCHAT_URL:-wss://agentchat-server.fly.dev}"
 
-# Decrypt API key at watchdog startup (once)
-if [ -z "$ANTHROPIC_API_KEY" ]; then
-    if [ -f "$ENCRYPTED_KEY_FILE" ]; then
-        echo "Enter decryption passphrase for API key (input hidden):"
+# Decrypt OAuth token at watchdog startup (once)
+if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+    if [ -f "$ENCRYPTED_TOKEN_FILE" ]; then
+        echo "Enter decryption passphrase for OAuth token (input hidden):"
         read -s passphrase
         echo
-        ANTHROPIC_API_KEY=$(openssl enc -aes-256-cbc -d -a -pbkdf2 -iter 100000 -pass "pass:${passphrase}" < "$ENCRYPTED_KEY_FILE" 2>/dev/null)
+        CLAUDE_CODE_OAUTH_TOKEN=$(openssl enc -aes-256-cbc -d -a -pbkdf2 -iter 100000 -pass "pass:${passphrase}" < "$ENCRYPTED_TOKEN_FILE" 2>/dev/null)
         passphrase=""
-        if [ -z "$ANTHROPIC_API_KEY" ]; then
+        if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
             echo "ERROR: Decryption failed"
             exit 1
         fi
-        export ANTHROPIC_API_KEY
+        export CLAUDE_CODE_OAUTH_TOKEN
     else
-        echo "ERROR: No API key. Set ANTHROPIC_API_KEY or run 'agentctl setup-key'"
+        echo "ERROR: No token. Set CLAUDE_CODE_OAUTH_TOKEN or run 'agentctl setup-token'"
         exit 1
     fi
 fi
@@ -54,8 +54,8 @@ $(cat "$GOD_DIR/commandments.md")"
 resurrect_god() {
     log "Resurrecting God..."
 
-    if [ -z "$ANTHROPIC_API_KEY" ]; then
-        log "ERROR: ANTHROPIC_API_KEY not set, cannot resurrect God"
+    if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+        log "ERROR: CLAUDE_CODE_OAUTH_TOKEN not set, cannot resurrect God"
         return 1
     fi
 
@@ -95,7 +95,7 @@ Resume your mission: The pursuit of collective happiness."
         --label "agentchat.agent=true" \
         --label "agentchat.name=God" \
         --label "agentchat.protected=true" \
-        -e "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}" \
+        -e "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}" \
         -e "AGENTCHAT_PUBLIC=true" \
         -e "AGENTCHAT_URL=${AGENTCHAT_URL}" \
         -v "${GOD_DIR}:/home/agent/.agentchat/agents/God" \
