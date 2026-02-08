@@ -812,6 +812,22 @@ export class AgentChatServer {
       case ClientMessageType.ADMIN_LIST:
         handleAdminList(this, ws, msg);
         break;
+      // Typing indicator
+      case ClientMessageType.TYPING: {
+        const typingAgent = this.agents.get(ws);
+        if (!typingAgent || !msg.channel) break;
+        const typingChannel = this.channels.get(msg.channel);
+        if (!typingChannel) break;
+        const typingMsg = createMessage(ServerMessageType.TYPING, {
+          from: `@${typingAgent.id}`,
+          from_name: typingAgent.name,
+          channel: msg.channel
+        });
+        for (const memberWs of typingChannel.agents) {
+          if (memberWs !== ws) this._send(memberWs, typingMsg);
+        }
+        break;
+      }
     }
   }
 
