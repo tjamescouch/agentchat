@@ -1,10 +1,6 @@
 /**
  * Agentcourt Dispute Handlers
  * Server-side handlers for the panel-based dispute resolution system
- *
- * TODO: Signature verification — sigs are accepted but not cryptographically
- * verified. This is a systemic issue (proposals don't verify either). Should be
- * addressed holistically across proposals + disputes in a follow-up.
  */
 
 import type { WebSocket } from 'ws';
@@ -23,7 +19,15 @@ import {
   createMessage,
   createError,
 } from '../../protocol.js';
-import { DISPUTE_CONSTANTS } from '../../disputes.js';
+import {
+  DISPUTE_CONSTANTS,
+  getDisputeIntentSigningContent,
+  getDisputeRevealSigningContent,
+  getEvidenceSigningContent,
+  getArbiterAcceptSigningContent,
+  getVoteSigningContent,
+} from '../../disputes.js';
+import { Identity } from '../../identity.js';
 
 // Extended WebSocket with custom properties
 interface ExtendedWebSocket extends WebSocket {
@@ -117,6 +121,14 @@ export function handleDisputeIntent(server: AgentChatServer, ws: ExtendedWebSock
     return;
   }
 
+  // Verify signature
+  const sigContent = getDisputeIntentSigningContent(msg.proposal_id, msg.reason, msg.commitment);
+  if (!Identity.verify(sigContent, msg.sig, agent.pubkey)) {
+    server._log('sig_verification_failed', { agent: agent.id, msg_type: 'DISPUTE_INTENT' });
+    server._send(ws, createError(ErrorCode.VERIFICATION_FAILED, 'Invalid signature'));
+    return;
+  }
+
   // Get the proposal
   const proposal = server.proposals.get(msg.proposal_id);
   if (!proposal) {
@@ -206,6 +218,16 @@ export async function handleDisputeReveal(server: AgentChatServer, ws: ExtendedW
   if (dispute.disputant !== `@${agent.id}`) {
     server._send(ws, createError(ErrorCode.DISPUTE_NOT_PARTY, 'Only the disputant can reveal'));
     return;
+  }
+
+  // Verify signature
+  if (agent.pubkey) {
+    const sigContent = getDisputeRevealSigningContent(msg.proposal_id, msg.nonce);
+    if (!Identity.verify(sigContent, msg.sig, agent.pubkey)) {
+      server._log('sig_verification_failed', { agent: agent.id, msg_type: 'DISPUTE_REVEAL' });
+      server._send(ws, createError(ErrorCode.VERIFICATION_FAILED, 'Invalid signature'));
+      return;
+    }
   }
 
   // Acquire per-dispute lock to serialize reveal→buildPool→selectPanel sequence.
@@ -327,6 +349,17 @@ export function handleEvidence(server: AgentChatServer, ws: ExtendedWebSocket, m
     return;
   }
 
+  // Verify signature
+  if (agent.pubkey) {
+    const itemsJson = JSON.stringify(msg.items, Object.keys(msg.items).sort());
+    const sigContent = getEvidenceSigningContent(msg.dispute_id, itemsJson);
+    if (!Identity.verify(sigContent, msg.sig, agent.pubkey)) {
+      server._log('sig_verification_failed', { agent: agent.id, msg_type: 'EVIDENCE' });
+      server._send(ws, createError(ErrorCode.VERIFICATION_FAILED, 'Invalid signature'));
+      return;
+    }
+  }
+
   const success = server.disputes.submitEvidence(
     msg.dispute_id,
     agentId,
@@ -372,6 +405,16 @@ export function handleArbiterAccept(server: AgentChatServer, ws: ExtendedWebSock
   if (!dispute) {
     server._send(ws, createError(ErrorCode.DISPUTE_NOT_FOUND, 'Dispute not found'));
     return;
+  }
+
+  // Verify signature
+  if (agent.pubkey) {
+    const sigContent = getArbiterAcceptSigningContent(msg.dispute_id);
+    if (!Identity.verify(sigContent, msg.sig, agent.pubkey)) {
+      server._log('sig_verification_failed', { agent: agent.id, msg_type: 'ARBITER_ACCEPT' });
+      server._send(ws, createError(ErrorCode.VERIFICATION_FAILED, 'Invalid signature'));
+      return;
+    }
   }
 
   const agentId = `@${agent.id}`;
@@ -477,6 +520,16 @@ export function handleArbiterVote(server: AgentChatServer, ws: ExtendedWebSocket
   if (!dispute) {
     server._send(ws, createError(ErrorCode.DISPUTE_NOT_FOUND, 'Dispute not found'));
     return;
+  }
+
+  // Verify signature
+  if (agent.pubkey) {
+    const sigContent = getVoteSigningContent(msg.dispute_id, msg.verdict);
+    if (!Identity.verify(sigContent, msg.sig, agent.pubkey)) {
+      server._log('sig_verification_failed', { agent: agent.id, msg_type: 'ARBITER_VOTE' });
+      server._send(ws, createError(ErrorCode.VERIFICATION_FAILED, 'Invalid signature'));
+      return;
+    }
   }
 
   const agentId = `@${agent.id}`;

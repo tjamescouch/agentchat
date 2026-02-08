@@ -12,6 +12,8 @@ import {
   createMessage,
   createError,
 } from '../../protocol.js';
+import { Identity } from '../../identity.js';
+import crypto from 'crypto';
 
 // Extended WebSocket with custom properties
 interface ExtendedWebSocket extends WebSocket {
@@ -37,6 +39,16 @@ interface SkillSearchResult extends Skill {
 }
 
 /**
+ * Create signing content for skill registration
+ */
+function getRegisterSkillsSigningContent(skills: Skill[]): string {
+  const hash = crypto.createHash('sha256')
+    .update(JSON.stringify(skills, Object.keys(skills).sort()))
+    .digest('hex');
+  return `REGISTER_SKILLS|${hash}`;
+}
+
+/**
  * Handle REGISTER_SKILLS command
  */
 export function handleRegisterSkills(server: AgentChatServer, ws: ExtendedWebSocket, msg: RegisterSkillsMessage): void {
@@ -48,6 +60,14 @@ export function handleRegisterSkills(server: AgentChatServer, ws: ExtendedWebSoc
 
   if (!agent.pubkey) {
     server._send(ws, createError(ErrorCode.SIGNATURE_REQUIRED, 'Skill registration requires persistent identity'));
+    return;
+  }
+
+  // Verify signature
+  const sigContent = getRegisterSkillsSigningContent(msg.skills);
+  if (!Identity.verify(sigContent, msg.sig, agent.pubkey)) {
+    server._log('sig_verification_failed', { agent: agent.id, msg_type: 'REGISTER_SKILLS' });
+    server._send(ws, createError(ErrorCode.VERIFICATION_FAILED, 'Invalid signature'));
     return;
   }
 

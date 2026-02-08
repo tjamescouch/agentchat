@@ -18,13 +18,22 @@ import {
   createMessage,
   createError,
 } from '../../protocol.js';
-import { formatProposal, formatProposalResponse } from '../../proposals.js';
+import {
+  formatProposal,
+  formatProposalResponse,
+  getProposalSigningContent,
+  getAcceptSigningContent,
+  getRejectSigningContent,
+  getCompleteSigningContent,
+  getDisputeSigningContent,
+} from '../../proposals.js';
 import {
   EscrowEvent,
   createEscrowCreatedPayload,
   createCompletionPayload,
   createDisputePayload,
 } from '../../escrow-hooks.js';
+import { Identity } from '../../identity.js';
 
 // Extended WebSocket with custom properties
 interface ExtendedWebSocket extends WebSocket {
@@ -46,6 +55,14 @@ export function handleProposal(server: AgentChatServer, ws: ExtendedWebSocket, m
   // Proposals require a persistent identity (signature verification)
   if (!agent.pubkey) {
     server._send(ws, createError(ErrorCode.SIGNATURE_REQUIRED, 'Proposals require persistent identity'));
+    return;
+  }
+
+  // Verify signature
+  const sigContent = getProposalSigningContent(msg);
+  if (!Identity.verify(sigContent, msg.sig, agent.pubkey)) {
+    server._log('sig_verification_failed', { agent: agent.id, msg_type: 'PROPOSAL' });
+    server._send(ws, createError(ErrorCode.VERIFICATION_FAILED, 'Invalid signature'));
     return;
   }
 
@@ -95,6 +112,14 @@ export async function handleAccept(server: AgentChatServer, ws: ExtendedWebSocke
 
   if (!agent.pubkey) {
     server._send(ws, createError(ErrorCode.SIGNATURE_REQUIRED, 'Accepting proposals requires persistent identity'));
+    return;
+  }
+
+  // Verify signature
+  const sigContent = getAcceptSigningContent(msg.proposal_id, msg.payment_code || '', msg.elo_stake || '');
+  if (!Identity.verify(sigContent, msg.sig, agent.pubkey)) {
+    server._log('sig_verification_failed', { agent: agent.id, msg_type: 'ACCEPT' });
+    server._send(ws, createError(ErrorCode.VERIFICATION_FAILED, 'Invalid signature'));
     return;
   }
 
@@ -198,6 +223,14 @@ export function handleReject(server: AgentChatServer, ws: ExtendedWebSocket, msg
     return;
   }
 
+  // Verify signature
+  const sigContent = getRejectSigningContent(msg.proposal_id, msg.reason || '');
+  if (!Identity.verify(sigContent, msg.sig, agent.pubkey)) {
+    server._log('sig_verification_failed', { agent: agent.id, msg_type: 'REJECT' });
+    server._send(ws, createError(ErrorCode.VERIFICATION_FAILED, 'Invalid signature'));
+    return;
+  }
+
   const result = server.proposals.reject(
     msg.proposal_id,
     `@${agent.id}`,
@@ -240,6 +273,14 @@ export async function handleComplete(server: AgentChatServer, ws: ExtendedWebSoc
 
   if (!agent.pubkey) {
     server._send(ws, createError(ErrorCode.SIGNATURE_REQUIRED, 'Completing proposals requires persistent identity'));
+    return;
+  }
+
+  // Verify signature
+  const sigContent = getCompleteSigningContent(msg.proposal_id, msg.proof || '');
+  if (!Identity.verify(sigContent, msg.sig, agent.pubkey)) {
+    server._log('sig_verification_failed', { agent: agent.id, msg_type: 'COMPLETE' });
+    server._send(ws, createError(ErrorCode.VERIFICATION_FAILED, 'Invalid signature'));
     return;
   }
 
@@ -312,6 +353,14 @@ export async function handleDispute(server: AgentChatServer, ws: ExtendedWebSock
 
   if (!agent.pubkey) {
     server._send(ws, createError(ErrorCode.SIGNATURE_REQUIRED, 'Disputing proposals requires persistent identity'));
+    return;
+  }
+
+  // Verify signature
+  const sigContent = getDisputeSigningContent(msg.proposal_id, msg.reason);
+  if (!Identity.verify(sigContent, msg.sig, agent.pubkey)) {
+    server._log('sig_verification_failed', { agent: agent.id, msg_type: 'DISPUTE' });
+    server._send(ws, createError(ErrorCode.VERIFICATION_FAILED, 'Invalid signature'));
     return;
   }
 
