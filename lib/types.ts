@@ -139,6 +139,7 @@ export interface SkillQuery {
 export interface AgentInfo {
   id: string;
   name?: string;
+  nick?: string | null;
   presence?: PresenceStatus;
   status_text?: string | null;
 }

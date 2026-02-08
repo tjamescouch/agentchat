@@ -90,6 +90,7 @@ interface ExtendedWebSocket extends WebSocket {
 export interface AgentState {
   id: string;
   name?: string;
+  nick?: string | null;
   channels: Set<string>;
   pubkey?: string | null;
   presence?: PresenceStatus | string;
