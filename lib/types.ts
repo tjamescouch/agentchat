@@ -76,7 +76,8 @@ export enum ServerMessageType {
   DISPUTE_INTENT_ACK = 'DISPUTE_INTENT_ACK',
   DISPUTE_REVEALED = 'DISPUTE_REVEALED',
   TYPING = 'TYPING',
-  SESSION_DISPLACED = 'SESSION_DISPLACED'
+  SESSION_DISPLACED = 'SESSION_DISPLACED',
+  SETTLEMENT_COMPLETE = 'SETTLEMENT_COMPLETE'
 }
 
 export enum ErrorCode {
@@ -587,6 +588,14 @@ export interface SessionDisplacedMessage extends BaseMessage {
   new_ip?: string;
 }
 
+export interface SettlementCompleteMessage extends BaseMessage {
+  type: ServerMessageType.SETTLEMENT_COMPLETE;
+  dispute_id: string;
+  proposal_id: string;
+  verdict: string;
+  rating_changes: Record<string, { oldRating: number; newRating: number; change: number }>;
+}
+
 export interface AdminResultMessage extends BaseMessage {
   type: ServerMessageType.ADMIN_RESULT;
   action: string;
@@ -628,7 +637,8 @@ export type ServerMessage =
   | AdminResultMessage
   | ChallengeMessage
   | NickChangedMessage
-  | SessionDisplacedMessage;
+  | SessionDisplacedMessage
+  | SettlementCompleteMessage;
 
 // ============ Validation Result ============
 

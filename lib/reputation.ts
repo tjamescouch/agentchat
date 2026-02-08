@@ -671,6 +671,17 @@ export class ReputationStore {
   }
 
   /**
+   * Apply pre-calculated rating changes from an agentcourt verdict settlement.
+   * Takes the output of calculateDisputeSettlement() and persists the changes.
+   */
+  async applyVerdictSettlement(changes: Record<string, { change: number }>): Promise<void> {
+    for (const [agentId, { change }] of Object.entries(changes)) {
+      await this._updateAgent(agentId, change);
+    }
+    await this.save();
+  }
+
+  /**
    * Process a receipt (routes to completion or dispute)
    */
   async updateRatings(receipt: Receipt): Promise<RatingChanges | null> {
