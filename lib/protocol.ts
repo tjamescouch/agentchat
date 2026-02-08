@@ -33,6 +33,13 @@ export const ClientMessageType = {
   REJECT: 'REJECT' as const,
   COMPLETE: 'COMPLETE' as const,
   DISPUTE: 'DISPUTE' as const,
+  // Agentcourt dispute message types
+  DISPUTE_INTENT: 'DISPUTE_INTENT' as const,
+  DISPUTE_REVEAL: 'DISPUTE_REVEAL' as const,
+  EVIDENCE: 'EVIDENCE' as const,
+  ARBITER_ACCEPT: 'ARBITER_ACCEPT' as const,
+  ARBITER_DECLINE: 'ARBITER_DECLINE' as const,
+  ARBITER_VOTE: 'ARBITER_VOTE' as const,
   // Skill discovery message types
   REGISTER_SKILLS: 'REGISTER_SKILLS' as const,
   SEARCH_SKILLS: 'SEARCH_SKILLS' as const,
@@ -68,6 +75,15 @@ export const ServerMessageType = {
   REJECT: 'REJECT' as const,
   COMPLETE: 'COMPLETE' as const,
   DISPUTE: 'DISPUTE' as const,
+  // Agentcourt dispute message types
+  PANEL_FORMED: 'PANEL_FORMED' as const,
+  ARBITER_ASSIGNED: 'ARBITER_ASSIGNED' as const,
+  EVIDENCE_RECEIVED: 'EVIDENCE_RECEIVED' as const,
+  CASE_READY: 'CASE_READY' as const,
+  VERDICT: 'VERDICT' as const,
+  DISPUTE_FALLBACK: 'DISPUTE_FALLBACK' as const,
+  DISPUTE_INTENT_ACK: 'DISPUTE_INTENT_ACK' as const,
+  DISPUTE_REVEALED: 'DISPUTE_REVEALED' as const,
   // Skill discovery message types
   SKILLS_REGISTERED: 'SKILLS_REGISTERED' as const,
   SEARCH_RESULTS: 'SEARCH_RESULTS' as const,
@@ -110,6 +126,15 @@ export const ErrorCode = {
   NO_PUBKEY: 'NO_PUBKEY' as const,
   // Allowlist errors
   NOT_ALLOWED: 'NOT_ALLOWED' as const,
+  // Agentcourt errors
+  DISPUTE_NOT_FOUND: 'DISPUTE_NOT_FOUND' as const,
+  DISPUTE_INVALID_PHASE: 'DISPUTE_INVALID_PHASE' as const,
+  DISPUTE_COMMITMENT_MISMATCH: 'DISPUTE_COMMITMENT_MISMATCH' as const,
+  DISPUTE_NOT_PARTY: 'DISPUTE_NOT_PARTY' as const,
+  DISPUTE_NOT_ARBITER: 'DISPUTE_NOT_ARBITER' as const,
+  DISPUTE_DEADLINE_PASSED: 'DISPUTE_DEADLINE_PASSED' as const,
+  DISPUTE_ALREADY_EXISTS: 'DISPUTE_ALREADY_EXISTS' as const,
+  INSUFFICIENT_ARBITERS: 'INSUFFICIENT_ARBITERS' as const,
 };
 
 export const PresenceStatus = {
@@ -244,6 +269,13 @@ interface RawClientMessage {
   signature?: string;
   timestamp?: number;
   nick?: string;
+  // Agentcourt dispute fields
+  commitment?: string;
+  dispute_id?: string;
+  items?: unknown[];
+  statement?: string;
+  verdict?: string;
+  reasoning?: string;
 }
 
 /**
@@ -495,6 +527,79 @@ export function validateClientMessage(raw: string | RawClientMessage): Validatio
       }
       break;
 
+    // Agentcourt dispute message types
+    case ClientMessageType.DISPUTE_INTENT:
+      if (!msg.proposal_id) {
+        return { valid: false, error: 'Missing proposal_id' };
+      }
+      if (!msg.reason || typeof msg.reason !== 'string') {
+        return { valid: false, error: 'Missing or invalid reason' };
+      }
+      if (!msg.commitment || typeof msg.commitment !== 'string') {
+        return { valid: false, error: 'Missing or invalid commitment hash' };
+      }
+      if (!msg.sig) {
+        return { valid: false, error: 'Dispute intent must be signed' };
+      }
+      break;
+
+    case ClientMessageType.DISPUTE_REVEAL:
+      if (!msg.proposal_id) {
+        return { valid: false, error: 'Missing proposal_id' };
+      }
+      if (!msg.nonce || typeof msg.nonce !== 'string') {
+        return { valid: false, error: 'Missing or invalid nonce' };
+      }
+      if (!msg.sig) {
+        return { valid: false, error: 'Dispute reveal must be signed' };
+      }
+      break;
+
+    case ClientMessageType.EVIDENCE:
+      if (!msg.dispute_id || typeof msg.dispute_id !== 'string') {
+        return { valid: false, error: 'Missing or invalid dispute_id' };
+      }
+      if (!msg.items || !Array.isArray(msg.items)) {
+        return { valid: false, error: 'Missing or invalid items array' };
+      }
+      if (typeof msg.statement !== 'string') {
+        return { valid: false, error: 'Missing or invalid statement' };
+      }
+      if (!msg.sig) {
+        return { valid: false, error: 'Evidence must be signed' };
+      }
+      break;
+
+    case ClientMessageType.ARBITER_ACCEPT:
+      if (!msg.dispute_id || typeof msg.dispute_id !== 'string') {
+        return { valid: false, error: 'Missing or invalid dispute_id' };
+      }
+      if (!msg.sig) {
+        return { valid: false, error: 'Arbiter accept must be signed' };
+      }
+      break;
+
+    case ClientMessageType.ARBITER_DECLINE:
+      if (!msg.dispute_id || typeof msg.dispute_id !== 'string') {
+        return { valid: false, error: 'Missing or invalid dispute_id' };
+      }
+      break;
+
+    case ClientMessageType.ARBITER_VOTE:
+      if (!msg.dispute_id || typeof msg.dispute_id !== 'string') {
+        return { valid: false, error: 'Missing or invalid dispute_id' };
+      }
+      if (!msg.verdict || !['disputant', 'respondent', 'mutual'].includes(msg.verdict)) {
+        return { valid: false, error: 'Invalid verdict (must be disputant, respondent, or mutual)' };
+      }
+      if (typeof msg.reasoning !== 'string') {
+        return { valid: false, error: 'Missing or invalid reasoning' };
+      }
+      if (!msg.sig) {
+        return { valid: false, error: 'Arbiter vote must be signed' };
+      }
+      break;
+
     case ClientMessageType.SET_NICK:
       if (!msg.nick || typeof msg.nick !== 'string') {
         return { valid: false, error: 'Missing or invalid nick' };
@@ -560,6 +665,21 @@ export function generateProposalId(): string {
   const timestamp = Date.now().toString(36);
   const random = crypto.randomBytes(4).toString('hex');
   return `prop_${timestamp}_${random}`;
+}
+
+/**
+ * Check if a message type is an agentcourt dispute type
+ */
+export function isDisputeMessage(type: string): boolean {
+  const disputeTypes: string[] = [
+    ClientMessageType.DISPUTE_INTENT,
+    ClientMessageType.DISPUTE_REVEAL,
+    ClientMessageType.EVIDENCE,
+    ClientMessageType.ARBITER_ACCEPT,
+    ClientMessageType.ARBITER_DECLINE,
+    ClientMessageType.ARBITER_VOTE,
+  ];
+  return disputeTypes.includes(type);
 }
 
 /**

@@ -25,6 +25,7 @@ import {
   serialize,
 } from './protocol.js';
 import { ProposalStore } from './proposals.js';
+import { DisputeStore } from './disputes.js';
 import { ReputationStore } from './reputation.js';
 import { EscrowHooks } from './escrow-hooks.js';
 import { Allowlist } from './allowlist.js';
@@ -46,6 +47,14 @@ import {
   handleComplete,
   handleDispute,
 } from './server/handlers/proposal.js';
+import {
+  handleDisputeIntent,
+  handleDisputeReveal,
+  handleEvidence,
+  handleArbiterAccept,
+  handleArbiterDecline,
+  handleArbiterVote,
+} from './server/handlers/disputes.js';
 import {
   handleIdentify,
   handleVerifyIdentity,
@@ -201,6 +210,9 @@ export class AgentChatServer {
   // Proposal store
   proposals: ProposalStore;
 
+  // Dispute store (Agentcourt)
+  disputes: DisputeStore;
+
   // Skills registry
   skillsRegistry: Map<string, SkillRegistration>;
 
@@ -287,6 +299,7 @@ export class AgentChatServer {
 
     // Proposal store for structured negotiations
     this.proposals = new ProposalStore();
+    this.disputes = new DisputeStore();
 
     // Skills registry
     this.skillsRegistry = new Map();
@@ -641,6 +654,7 @@ export class AgentChatServer {
     }
     if (this.proposals) {
       this.proposals.close();
+      this.disputes.close();
     }
     this._log('server_stop');
   }
@@ -741,6 +755,25 @@ export class AgentChatServer {
         break;
       case ClientMessageType.DISPUTE:
         handleDispute(this, ws, msg);
+        break;
+      // Agentcourt dispute messages
+      case ClientMessageType.DISPUTE_INTENT:
+        handleDisputeIntent(this, ws, msg);
+        break;
+      case ClientMessageType.DISPUTE_REVEAL:
+        handleDisputeReveal(this, ws, msg);
+        break;
+      case ClientMessageType.EVIDENCE:
+        handleEvidence(this, ws, msg);
+        break;
+      case ClientMessageType.ARBITER_ACCEPT:
+        handleArbiterAccept(this, ws, msg);
+        break;
+      case ClientMessageType.ARBITER_DECLINE:
+        handleArbiterDecline(this, ws, msg);
+        break;
+      case ClientMessageType.ARBITER_VOTE:
+        handleArbiterVote(this, ws, msg);
         break;
       // Skill discovery messages
       case ClientMessageType.REGISTER_SKILLS:
