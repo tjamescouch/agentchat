@@ -29,6 +29,7 @@ import { DisputeStore } from './disputes.js';
 import { ReputationStore } from './reputation.js';
 import { EscrowHooks } from './escrow-hooks.js';
 import { Allowlist } from './allowlist.js';
+import { Redactor } from './redactor.js';
 
 // Import extracted handlers
 import {
@@ -231,6 +232,9 @@ export class AgentChatServer {
   pendingChallenges: Map<string, PendingChallenge>;
   challengeTimeoutMs: number;
 
+  // Secret redactor (agentseenoevil)
+  redactor: Redactor;
+
   // Allowlist
   allowlist: Allowlist | null;
 
@@ -317,6 +321,9 @@ export class AgentChatServer {
         this.escrowHooks.on(event as EscrowEventType, handler);
       }
     }
+
+    // Secret redactor — mandatory input sanitization (agentseenoevil)
+    this.redactor = new Redactor({ builtins: true, scanEnv: true, labelRedactions: true });
 
     // Pending verification requests (inter-agent)
     this.pendingVerifications = new Map();

@@ -149,7 +149,7 @@ export function handleDisputeIntent(server: AgentChatServer, ws: ExtendedWebSock
     msg.proposal_id,
     disputantId,
     respondentId,
-    msg.reason,
+    server.redactor.clean(msg.reason),
     msg.commitment,
   );
 
@@ -331,7 +331,7 @@ export function handleEvidence(server: AgentChatServer, ws: ExtendedWebSocket, m
     msg.dispute_id,
     agentId,
     msg.items as any,
-    msg.statement,
+    server.redactor.clean(msg.statement),
     msg.sig,
   );
 

@@ -57,11 +57,14 @@ export function handleProposal(server: AgentChatServer, ws: ExtendedWebSocket, m
     return;
   }
 
+  // Redact secrets from proposal task description
+  const taskText = server.redactor.clean(msg.task);
+
   // Create proposal in store
   const proposal = server.proposals.create({
     from: `@${agent.id}`,
     to: msg.to,
-    task: msg.task,
+    task: taskText,
     amount: msg.amount,
     currency: msg.currency,
     payment_code: (msg as ProposalMessage & { payment_code?: string }).payment_code,

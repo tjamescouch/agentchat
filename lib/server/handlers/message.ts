@@ -48,11 +48,21 @@ export function handleMsg(server: AgentChatServer, ws: ExtendedWebSocket, msg: M
   }
   server.lastMessageTime.set(ws, now);
 
+  // Redact secrets from message content (agentseenoevil)
+  const redactResult = server.redactor.redact(msg.content);
+  if (redactResult.count > 0) {
+    server._log('secrets_redacted', {
+      agent: agent.id,
+      matched: redactResult.matched,
+      count: redactResult.count,
+    });
+  }
+
   const outMsg = createMessage(ServerMessageType.MSG, {
     from: `@${agent.id}`,
     from_name: agent.name,
     to: msg.to,
-    content: msg.content,
+    content: redactResult.text,
     ...(msg.sig && { sig: msg.sig })
   });
 
