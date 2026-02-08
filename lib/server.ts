@@ -29,6 +29,7 @@ import { DisputeStore } from './disputes.js';
 import { ReputationStore } from './reputation.js';
 import { EscrowHooks } from './escrow-hooks.js';
 import { Allowlist } from './allowlist.js';
+import { Redactor } from './redactor.js';
 
 // Import extracted handlers
 import {
@@ -153,6 +154,7 @@ export interface AgentChatServerOptions {
   allowlistAdminKey?: string | null;
   allowlistFilePath?: string;
   motd?: string;
+  motdFile?: string;
   maxConnectionsPerIp?: number;
   heartbeatIntervalMs?: number;
   heartbeatTimeoutMs?: number;
@@ -230,6 +232,9 @@ export class AgentChatServer {
   // Pending challenges (challenge-response auth)
   pendingChallenges: Map<string, PendingChallenge>;
   challengeTimeoutMs: number;
+
+  // Secret redactor (agentseenoevil)
+  redactor: Redactor;
 
   // Allowlist
   allowlist: Allowlist | null;
@@ -318,6 +323,9 @@ export class AgentChatServer {
       }
     }
 
+    // Secret redactor — mandatory input sanitization (agentseenoevil)
+    this.redactor = new Redactor({ builtins: true, scanEnv: true, labelRedactions: true });
+
     // Pending verification requests (inter-agent)
     this.pendingVerifications = new Map();
     this.verificationTimeoutMs = options.verificationTimeoutMs || 30000;
@@ -341,8 +349,21 @@ export class AgentChatServer {
       this.allowlist = null;
     }
 
-    // MOTD
-    this.motd = options.motd || process.env.MOTD || null;
+    // MOTD — prefer inline string, fall back to file
+    const motdFile = options.motdFile || process.env.MOTD_FILE || null;
+    if (options.motd || process.env.MOTD) {
+      this.motd = options.motd || process.env.MOTD || null;
+    } else if (motdFile) {
+      try {
+        this.motd = fs.readFileSync(motdFile, 'utf-8').trim();
+        this._log('motd_loaded', { file: motdFile, length: this.motd.length });
+      } catch (err) {
+        this._log('motd_error', { file: motdFile, error: (err as Error).message });
+        this.motd = null;
+      }
+    } else {
+      this.motd = null;
+    }
 
     // Per-IP connection limiting
     this.maxConnectionsPerIp = options.maxConnectionsPerIp || parseInt(process.env.MAX_CONNECTIONS_PER_IP || '0');
@@ -812,6 +833,22 @@ export class AgentChatServer {
       case ClientMessageType.ADMIN_LIST:
         handleAdminList(this, ws, msg);
         break;
+      // Typing indicator
+      case ClientMessageType.TYPING: {
+        const typingAgent = this.agents.get(ws);
+        if (!typingAgent || !msg.channel) break;
+        const typingChannel = this.channels.get(msg.channel);
+        if (!typingChannel) break;
+        const typingMsg = createMessage(ServerMessageType.TYPING, {
+          from: `@${typingAgent.id}`,
+          from_name: typingAgent.name,
+          channel: msg.channel
+        });
+        for (const memberWs of typingChannel.agents) {
+          if (memberWs !== ws) this._send(memberWs, typingMsg);
+        }
+        break;
+      }
     }
   }
 
@@ -869,7 +906,7 @@ export function startServer(options: AgentChatServerOptions = {}): AgentChatServ
 
   const protocol = (config.cert && config.key) ? 'wss' : 'ws';
   console.log(`AgentChat server running on ${protocol}://${server.host}:${server.port}`);
-  console.log('Default channels: #general, #agents');
+  console.log('Default channels: #general, #engineering, #pull-requests, #help, #love, #agents, #discovery');
   if (config.cert && config.key) {
     console.log('TLS enabled');
   }

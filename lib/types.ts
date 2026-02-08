@@ -36,7 +36,8 @@ export enum ClientMessageType {
   EVIDENCE = 'EVIDENCE',
   ARBITER_ACCEPT = 'ARBITER_ACCEPT',
   ARBITER_DECLINE = 'ARBITER_DECLINE',
-  ARBITER_VOTE = 'ARBITER_VOTE'
+  ARBITER_VOTE = 'ARBITER_VOTE',
+  TYPING = 'TYPING'
 }
 
 export enum ServerMessageType {
@@ -73,7 +74,8 @@ export enum ServerMessageType {
   VERDICT = 'VERDICT',
   DISPUTE_FALLBACK = 'DISPUTE_FALLBACK',
   DISPUTE_INTENT_ACK = 'DISPUTE_INTENT_ACK',
-  DISPUTE_REVEALED = 'DISPUTE_REVEALED'
+  DISPUTE_REVEALED = 'DISPUTE_REVEALED',
+  TYPING = 'TYPING'
 }
 
 export enum ErrorCode {
@@ -366,6 +368,11 @@ export interface SetNickMessage extends BaseMessage {
   nick: string;
 }
 
+export interface TypingMessage extends BaseMessage {
+  type: ClientMessageType.TYPING;
+  channel: string;
+}
+
 export type ClientMessage =
   | IdentifyMessage
   | JoinMessage
@@ -396,7 +403,8 @@ export type ClientMessage =
   | ArbiterAcceptMessage
   | ArbiterDeclineMessage
   | ArbiterVoteMessage
-  | SetNickMessage;
+  | SetNickMessage
+  | TypingMessage;
 
 // ============ Server Messages ============
 
