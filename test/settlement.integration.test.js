@@ -222,8 +222,8 @@ describe('Verdict Settlement Integration', () => {
     const disputeAfterAccept = server.disputes.get(ack.dispute_id);
     if (disputeAfterAccept.phase === 'evidence') {
       const items1 = [{ kind: 'other', label: 'proof', value: 'screenshots of incomplete work' }];
-      const itemsHash1 = crypto.createHash('sha256').update(JSON.stringify(items1)).digest('hex');
-      const evidenceSig1 = identity1.sign(getEvidenceSigningContent(ack.dispute_id, itemsHash1));
+      const itemsJson1 = JSON.stringify(items1);
+      const evidenceSig1 = identity1.sign(getEvidenceSigningContent(ack.dispute_id, itemsJson1));
 
       client1.sendRaw({
         type: 'EVIDENCE',
@@ -235,8 +235,8 @@ describe('Verdict Settlement Integration', () => {
       await new Promise(r => setTimeout(r, 50));
 
       const items2 = [{ kind: 'other', label: 'defense', value: 'partial delivery proof' }];
-      const itemsHash2 = crypto.createHash('sha256').update(JSON.stringify(items2)).digest('hex');
-      const evidenceSig2 = identity2.sign(getEvidenceSigningContent(ack.dispute_id, itemsHash2));
+      const itemsJson2 = JSON.stringify(items2);
+      const evidenceSig2 = identity2.sign(getEvidenceSigningContent(ack.dispute_id, itemsJson2));
 
       client2.sendRaw({
         type: 'EVIDENCE',
