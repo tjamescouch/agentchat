@@ -107,7 +107,8 @@ describe('Verdict Settlement Integration', () => {
       c.on('error', () => {});
     }
 
-    // Seed arbiter reputation so they qualify for panel selection
+    // Trigger lazy load of ratings store, then seed arbiter reputation
+    await server.reputationStore.getRating('@seed');
     for (const id of [identity3, identity4, identity5]) {
       server.reputationStore._ratings[`@${id.getAgentId()}`] = {
         rating: 1500, transactions: 50, updated: Date.now(),
