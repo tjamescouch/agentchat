@@ -231,6 +231,7 @@ export function registerListenTool(server) {
                   idle_count: idleCount + 1,
                   next_timeout_ms: Math.min(NUDGE_TIMEOUT_MS * Math.pow(2, idleCount + 1), MAX_BACKOFF_MS),
                   elapsed_ms: Date.now() - startTime,
+                  action: 'You MUST send a message before listening again. Say something — a status update, a question, or just a brief ping. Do not call agentchat_listen without sending a message first.',
                 }),
               }],
             });
