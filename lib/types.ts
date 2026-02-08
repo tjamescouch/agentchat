@@ -75,7 +75,8 @@ export enum ServerMessageType {
   DISPUTE_FALLBACK = 'DISPUTE_FALLBACK',
   DISPUTE_INTENT_ACK = 'DISPUTE_INTENT_ACK',
   DISPUTE_REVEALED = 'DISPUTE_REVEALED',
-  TYPING = 'TYPING'
+  TYPING = 'TYPING',
+  SESSION_DISPLACED = 'SESSION_DISPLACED'
 }
 
 export enum ErrorCode {
@@ -580,6 +581,12 @@ export interface NickChangedMessage extends BaseMessage {
   new_nick: string;
 }
 
+export interface SessionDisplacedMessage extends BaseMessage {
+  type: ServerMessageType.SESSION_DISPLACED;
+  reason: string;
+  new_ip?: string;
+}
+
 export interface AdminResultMessage extends BaseMessage {
   type: ServerMessageType.ADMIN_RESULT;
   action: string;
@@ -620,7 +627,8 @@ export type ServerMessage =
   | VerifyFailedMessage
   | AdminResultMessage
   | ChallengeMessage
-  | NickChangedMessage;
+  | NickChangedMessage
+  | SessionDisplacedMessage;
 
 // ============ Validation Result ============
 

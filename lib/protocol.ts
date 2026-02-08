@@ -104,6 +104,8 @@ export const ServerMessageType = {
   NICK_CHANGED: 'NICK_CHANGED' as const,
   // Typing indicator
   TYPING: 'TYPING' as const,
+  // Session conflict
+  SESSION_DISPLACED: 'SESSION_DISPLACED' as const,
 };
 
 export const ErrorCode = {
