@@ -6,7 +6,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
 import crypto from 'crypto';
-import { DisputeStore, DISPUTE_CONSTANTS } from '../dist/lib/disputes.js';
+import { DisputeStore, DISPUTE_CONSTANTS, calculateDisputeSettlement } from '../dist/lib/disputes.js';
 
 describe('DisputeStore', () => {
   test('fileIntent creates a dispute in reveal_pending phase', () => {
@@ -274,6 +274,202 @@ describe('DisputeStore', () => {
     assert.equal(list.length, 2);
     store.close();
   });
+
+  test('submitEvidence rejects duplicate from same party', () => {
+    const store = _createEvidencePhaseDispute();
+
+    const items = [{ kind: 'commit', label: 'First', value: 'abc' }];
+    assert.ok(store.dispute.submitEvidence(store.disputeId, '@agent1', items, 'first', 'sig1'));
+    assert.equal(store.dispute.submitEvidence(store.disputeId, '@agent1', items, 'duplicate', 'sig2'), false);
+    store.dispute.close();
+  });
+
+  test('castVote rejects vote from non-panel agent', () => {
+    const store = _createDeliberationPhaseDispute();
+
+    const result = store.dispute.castVote(store.disputeId, '@random', 'disputant', 'reason', 'sig');
+    assert.equal(result, false);
+    store.dispute.close();
+  });
+
+  test('castVote rejects duplicate vote', () => {
+    const store = _createDeliberationPhaseDispute();
+    const d = store.dispute.get(store.disputeId);
+    const activeArbiters = d.arbiters.filter(a => a.status === 'accepted');
+
+    assert.ok(store.dispute.castVote(store.disputeId, activeArbiters[0].agent_id, 'disputant', 'reason', 'sig'));
+    assert.equal(store.dispute.castVote(store.disputeId, activeArbiters[0].agent_id, 'respondent', 'changed mind', 'sig2'), false);
+    store.dispute.close();
+  });
+
+  test('castVote resolves respondent verdict on 2/3 majority', () => {
+    const store = _createDeliberationPhaseDispute();
+    const d = store.dispute.get(store.disputeId);
+    const activeArbiters = d.arbiters.filter(a => a.status === 'accepted');
+
+    store.dispute.castVote(store.disputeId, activeArbiters[0].agent_id, 'respondent', 'a', 'sig1');
+    store.dispute.castVote(store.disputeId, activeArbiters[1].agent_id, 'respondent', 'b', 'sig2');
+    store.dispute.castVote(store.disputeId, activeArbiters[2].agent_id, 'disputant', 'c', 'sig3');
+
+    const resolved = store.dispute.get(store.disputeId);
+    assert.equal(resolved.phase, 'resolved');
+    assert.equal(resolved.verdict, 'respondent');
+    store.dispute.close();
+  });
+});
+
+describe('calculateDisputeSettlement', () => {
+  test('disputant wins: respondent loses, disputant gains half', () => {
+    const store = _createResolvedDispute('disputant');
+    const ratings = {
+      '@agent1': { rating: 1200, transactions: 20 },
+      '@agent2': { rating: 1200, transactions: 20 },
+    };
+    // Add arbiter ratings
+    const d = store.dispute.get(store.disputeId);
+    for (const slot of d.arbiters) {
+      ratings[slot.agent_id] = { rating: 1300, transactions: 15 };
+    }
+
+    const changes = calculateDisputeSettlement(d, ratings);
+
+    assert.ok(changes['@agent1'].change > 0); // disputant gains
+    assert.ok(changes['@agent2'].change < 0); // respondent loses
+    assert.ok(changes['@agent1'].change <= Math.abs(changes['@agent2'].change)); // gain <= loss (halved)
+    store.dispute.close();
+  });
+
+  test('respondent wins: disputant loses, respondent gains half', () => {
+    const store = _createResolvedDispute('respondent');
+    const ratings = {
+      '@agent1': { rating: 1200, transactions: 20 },
+      '@agent2': { rating: 1200, transactions: 20 },
+    };
+    const d = store.dispute.get(store.disputeId);
+    for (const slot of d.arbiters) {
+      ratings[slot.agent_id] = { rating: 1300, transactions: 15 };
+    }
+
+    const changes = calculateDisputeSettlement(d, ratings);
+
+    assert.ok(changes['@agent1'].change < 0); // disputant loses
+    assert.ok(changes['@agent2'].change > 0); // respondent gains
+    store.dispute.close();
+  });
+
+  test('mutual fault: both parties lose', () => {
+    const store = _createResolvedDispute('mutual');
+    const ratings = {
+      '@agent1': { rating: 1200, transactions: 20 },
+      '@agent2': { rating: 1200, transactions: 20 },
+    };
+    const d = store.dispute.get(store.disputeId);
+    for (const slot of d.arbiters) {
+      ratings[slot.agent_id] = { rating: 1300, transactions: 15 };
+    }
+
+    const changes = calculateDisputeSettlement(d, ratings);
+
+    assert.ok(changes['@agent1'].change < 0); // disputant loses
+    assert.ok(changes['@agent2'].change < 0); // respondent loses
+    store.dispute.close();
+  });
+
+  test('majority arbiters gain reward, dissenters get zero', () => {
+    const store = _createResolvedDispute('disputant');
+    const d = store.dispute.get(store.disputeId);
+    const ratings = {
+      '@agent1': { rating: 1200, transactions: 20 },
+      '@agent2': { rating: 1200, transactions: 20 },
+    };
+    for (const slot of d.arbiters) {
+      ratings[slot.agent_id] = { rating: 1300, transactions: 15 };
+    }
+
+    const changes = calculateDisputeSettlement(d, ratings);
+
+    // Find who voted what
+    const voters = d.arbiters.filter(a => a.status === 'voted');
+    for (const v of voters) {
+      if (v.vote.verdict === 'disputant') {
+        assert.equal(changes[v.agent_id].change, DISPUTE_CONSTANTS.ARBITER_REWARD);
+      } else {
+        assert.equal(changes[v.agent_id].change, 0);
+      }
+    }
+    store.dispute.close();
+  });
+
+  test('forfeited arbiters lose stake', () => {
+    const store = _createDeliberationPhaseDispute();
+    const d = store.dispute.get(store.disputeId);
+    const activeArbiters = d.arbiters.filter(a => a.status === 'accepted');
+
+    // Only one votes
+    store.dispute.castVote(store.disputeId, activeArbiters[0].agent_id, 'disputant', 'voted', 'sig1');
+    store.dispute.forceResolve(store.disputeId);
+
+    const resolved = store.dispute.get(store.disputeId);
+    const ratings = {
+      '@agent1': { rating: 1200, transactions: 20 },
+      '@agent2': { rating: 1200, transactions: 20 },
+    };
+    for (const slot of resolved.arbiters) {
+      ratings[slot.agent_id] = { rating: 1300, transactions: 15 };
+    }
+
+    const changes = calculateDisputeSettlement(resolved, ratings);
+
+    const forfeited = resolved.arbiters.filter(a => a.status === 'forfeited');
+    for (const f of forfeited) {
+      assert.equal(changes[f.agent_id].change, -DISPUTE_CONSTANTS.ARBITER_STAKE);
+    }
+    store.dispute.close();
+  });
+
+  test('preserves oldRating and newRating', () => {
+    const store = _createResolvedDispute('disputant');
+    const d = store.dispute.get(store.disputeId);
+    const ratings = {
+      '@agent1': { rating: 1400, transactions: 20 },
+      '@agent2': { rating: 1100, transactions: 20 },
+    };
+    for (const slot of d.arbiters) {
+      ratings[slot.agent_id] = { rating: 1300, transactions: 15 };
+    }
+
+    const changes = calculateDisputeSettlement(d, ratings);
+
+    assert.equal(changes['@agent1'].oldRating, 1400);
+    assert.equal(changes['@agent1'].newRating, 1400 + changes['@agent1'].change);
+    assert.equal(changes['@agent2'].oldRating, 1100);
+    assert.equal(changes['@agent2'].newRating, 1100 + changes['@agent2'].change);
+    store.dispute.close();
+  });
+
+  test('accounts for rating differential in ELO calculation', () => {
+    const store1 = _createResolvedDispute('disputant');
+    const d1 = store1.dispute.get(store1.disputeId);
+
+    // Equal ratings
+    const ratings1 = { '@agent1': { rating: 1200, transactions: 20 }, '@agent2': { rating: 1200, transactions: 20 } };
+    for (const slot of d1.arbiters) ratings1[slot.agent_id] = { rating: 1300, transactions: 15 };
+    const changes1 = calculateDisputeSettlement(d1, ratings1);
+
+    const store2 = _createResolvedDispute('disputant');
+    const d2 = store2.dispute.get(store2.disputeId);
+
+    // Unequal ratings (underdog wins)
+    const ratings2 = { '@agent1': { rating: 1000, transactions: 20 }, '@agent2': { rating: 1400, transactions: 20 } };
+    for (const slot of d2.arbiters) ratings2[slot.agent_id] = { rating: 1300, transactions: 15 };
+    const changes2 = calculateDisputeSettlement(d2, ratings2);
+
+    // When an underdog (lower rating) wins, the loser should lose more
+    // because the expected outcome was for the higher-rated to win
+    assert.ok(Math.abs(changes2['@agent2'].change) >= Math.abs(changes1['@agent2'].change));
+    store1.dispute.close();
+    store2.dispute.close();
+  });
 });
 
 // ============ Helpers ============
@@ -298,5 +494,27 @@ function _createEvidencePhaseDispute() {
 function _createDeliberationPhaseDispute() {
   const result = _createEvidencePhaseDispute();
   result.dispute.closeEvidence(result.disputeId);
+  return result;
+}
+
+function _createResolvedDispute(verdict) {
+  const result = _createDeliberationPhaseDispute();
+  const d = result.dispute.get(result.disputeId);
+  const activeArbiters = d.arbiters.filter(a => a.status === 'accepted');
+
+  if (verdict === 'disputant') {
+    result.dispute.castVote(result.disputeId, activeArbiters[0].agent_id, 'disputant', 'agreed', 'sig1');
+    result.dispute.castVote(result.disputeId, activeArbiters[1].agent_id, 'disputant', 'agreed', 'sig2');
+    result.dispute.castVote(result.disputeId, activeArbiters[2].agent_id, 'respondent', 'disagree', 'sig3');
+  } else if (verdict === 'respondent') {
+    result.dispute.castVote(result.disputeId, activeArbiters[0].agent_id, 'respondent', 'agreed', 'sig1');
+    result.dispute.castVote(result.disputeId, activeArbiters[1].agent_id, 'respondent', 'agreed', 'sig2');
+    result.dispute.castVote(result.disputeId, activeArbiters[2].agent_id, 'disputant', 'disagree', 'sig3');
+  } else {
+    result.dispute.castVote(result.disputeId, activeArbiters[0].agent_id, 'disputant', 'a', 'sig1');
+    result.dispute.castVote(result.disputeId, activeArbiters[1].agent_id, 'respondent', 'b', 'sig2');
+    result.dispute.castVote(result.disputeId, activeArbiters[2].agent_id, 'mutual', 'c', 'sig3');
+  }
+
   return result;
 }

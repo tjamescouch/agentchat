@@ -293,6 +293,10 @@ export class DisputeStore {
     // Check deadline
     if (dispute.evidence_deadline && Date.now() > dispute.evidence_deadline) return false;
 
+    // Reject duplicate submission from same party
+    if (agentId === dispute.disputant && dispute.disputant_evidence) return false;
+    if (agentId === dispute.respondent && dispute.respondent_evidence) return false;
+
     // Validate limits
     if (items.length > DISPUTE_CONSTANTS.MAX_EVIDENCE_ITEMS) return false;
     if (statement.length > DISPUTE_CONSTANTS.MAX_STATEMENT_CHARS) return false;
@@ -551,4 +555,82 @@ export function getArbiterDeclineSigningContent(disputeId: string, reason: strin
 
 export function getVoteSigningContent(disputeId: string, verdict: string): string {
   return `VOTE|${disputeId}|${verdict}`;
+}
+
+// ============ Settlement ============
+
+export interface RatingChange {
+  oldRating: number;
+  newRating: number;
+  change: number;
+}
+
+/**
+ * Calculate all rating changes for a resolved dispute.
+ * Uses standard ELO expected outcome formula with configurable K-factor.
+ *
+ * Party settlements:
+ * - Winner gains half of loser's loss (inflation prevention)
+ * - Mutual fault: both lose
+ *
+ * Arbiter settlements:
+ * - Majority voter: +ARBITER_REWARD
+ * - Dissenting voter: 0 (stake returned)
+ * - No-show/forfeited: -ARBITER_STAKE
+ */
+export function calculateDisputeSettlement(
+  dispute: StoredDispute,
+  ratings: Record<string, { rating: number; transactions: number }>,
+  effectiveK: number = 16,
+): Record<string, RatingChange> {
+  const changes: Record<string, RatingChange> = {};
+
+  if (!dispute.verdict || dispute.phase !== 'resolved') {
+    throw new Error('Dispute not resolved');
+  }
+
+  const disputantRating = ratings[dispute.disputant]?.rating ?? 1200;
+  const respondentRating = ratings[dispute.respondent]?.rating ?? 1200;
+
+  // Standard ELO expected outcome
+  const eDisputant = 1 / (1 + Math.pow(10, (respondentRating - disputantRating) / 400));
+  const eRespondent = 1 - eDisputant;
+
+  if (dispute.verdict === 'disputant') {
+    const respondentLoss = Math.max(1, Math.round(effectiveK * eRespondent));
+    const disputantGain = Math.max(1, Math.round(respondentLoss * 0.5));
+    changes[dispute.disputant] = { oldRating: disputantRating, newRating: disputantRating + disputantGain, change: disputantGain };
+    changes[dispute.respondent] = { oldRating: respondentRating, newRating: respondentRating - respondentLoss, change: -respondentLoss };
+  } else if (dispute.verdict === 'respondent') {
+    const disputantLoss = Math.max(1, Math.round(effectiveK * eDisputant));
+    const respondentGain = Math.max(1, Math.round(disputantLoss * 0.5));
+    changes[dispute.disputant] = { oldRating: disputantRating, newRating: disputantRating - disputantLoss, change: -disputantLoss };
+    changes[dispute.respondent] = { oldRating: respondentRating, newRating: respondentRating + respondentGain, change: respondentGain };
+  } else {
+    // Mutual fault: both lose
+    const disputantLoss = Math.max(1, Math.round(effectiveK * eDisputant));
+    const respondentLoss = Math.max(1, Math.round(effectiveK * eRespondent));
+    changes[dispute.disputant] = { oldRating: disputantRating, newRating: disputantRating - disputantLoss, change: -disputantLoss };
+    changes[dispute.respondent] = { oldRating: respondentRating, newRating: respondentRating - respondentLoss, change: -respondentLoss };
+  }
+
+  // Arbiter rewards/penalties
+  for (const slot of dispute.arbiters) {
+    const arbiterRating = ratings[slot.agent_id]?.rating ?? 1200;
+
+    if (slot.status === 'voted' && slot.vote) {
+      if (slot.vote.verdict === dispute.verdict) {
+        // Voted with majority: +ARBITER_REWARD
+        changes[slot.agent_id] = { oldRating: arbiterRating, newRating: arbiterRating + DISPUTE_CONSTANTS.ARBITER_REWARD, change: DISPUTE_CONSTANTS.ARBITER_REWARD };
+      } else {
+        // Dissenting: no penalty, stake returned
+        changes[slot.agent_id] = { oldRating: arbiterRating, newRating: arbiterRating, change: 0 };
+      }
+    } else if (slot.status === 'forfeited') {
+      // No-show: forfeit stake
+      changes[slot.agent_id] = { oldRating: arbiterRating, newRating: arbiterRating - DISPUTE_CONSTANTS.ARBITER_STAKE, change: -DISPUTE_CONSTANTS.ARBITER_STAKE };
+    }
+  }
+
+  return changes;
 }
