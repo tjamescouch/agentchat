@@ -56,6 +56,8 @@ export const ClientMessageType = {
   VERIFY_IDENTITY: 'VERIFY_IDENTITY' as const,
   // Nick
   SET_NICK: 'SET_NICK' as const,
+  // Typing indicator
+  TYPING: 'TYPING' as const,
 };
 
 export const ServerMessageType = {
@@ -100,6 +102,8 @@ export const ServerMessageType = {
   CHALLENGE: 'CHALLENGE' as const,
   // Nick
   NICK_CHANGED: 'NICK_CHANGED' as const,
+  // Typing indicator
+  TYPING: 'TYPING' as const,
 };
 
 export const ErrorCode = {
@@ -609,6 +613,12 @@ export function validateClientMessage(raw: string | RawClientMessage): Validatio
       }
       if (!/^[a-zA-Z0-9_-]+$/.test(msg.nick)) {
         return { valid: false, error: 'Nick must contain only alphanumeric characters, hyphens, and underscores' };
+      }
+      break;
+
+    case ClientMessageType.TYPING:
+      if (!isValidChannel(msg.channel)) {
+        return { valid: false, error: 'Invalid channel name' };
       }
       break;
 
