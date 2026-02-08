@@ -25,6 +25,7 @@ import {
   getDisputeRevealSigningContent,
   getEvidenceSigningContent,
   getArbiterAcceptSigningContent,
+  getArbiterDeclineSigningContent,
   getVoteSigningContent,
 } from '../../disputes.js';
 import { Identity } from '../../identity.js';
@@ -351,7 +352,7 @@ export function handleEvidence(server: AgentChatServer, ws: ExtendedWebSocket, m
 
   // Verify signature
   if (agent.pubkey) {
-    const itemsJson = JSON.stringify(msg.items, Object.keys(msg.items).sort());
+    const itemsJson = JSON.stringify(msg.items);
     const sigContent = getEvidenceSigningContent(msg.dispute_id, itemsJson);
     if (!Identity.verify(sigContent, msg.sig, agent.pubkey)) {
       server._log('sig_verification_failed', { agent: agent.id, msg_type: 'EVIDENCE' });
@@ -467,6 +468,16 @@ export async function handleArbiterDecline(server: AgentChatServer, ws: Extended
   if (!dispute) {
     server._send(ws, createError(ErrorCode.DISPUTE_NOT_FOUND, 'Dispute not found'));
     return;
+  }
+
+  // Verify signature (ARBITER_DECLINE has optional reason, no required sig in types but verify if present)
+  if (agent.pubkey && (msg as any).sig) {
+    const sigContent = getArbiterDeclineSigningContent(msg.dispute_id, msg.reason || '');
+    if (!Identity.verify(sigContent, (msg as any).sig, agent.pubkey)) {
+      server._log('sig_verification_failed', { agent: agent.id, msg_type: 'ARBITER_DECLINE' });
+      server._send(ws, createError(ErrorCode.VERIFICATION_FAILED, 'Invalid signature'));
+      return;
+    }
   }
 
   const agentId = `@${agent.id}`;
