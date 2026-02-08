@@ -33,9 +33,7 @@ interface ExtendedWebSocket extends WebSocket {
 }
 
 /**
- * Build the eligible arbiter pool based on Agentcourt spec criteria.
- * Checks: not-a-party, persistent identity, presence, rating, transactions,
- * independence (no recent transactions with parties), panel concurrency, stake availability.
+ * Build the eligible arbiter pool based on Agentcourt spec criteria
  */
 async function buildArbiterPool(
   server: AgentChatServer,
@@ -53,42 +51,18 @@ async function buildArbiterPool(
     // Must have persistent identity
     if (!agent.pubkey) continue;
 
-    // Must not be away or offline
-    if (agent.presence === 'away' || agent.presence === 'offline') continue;
+    // Must not be away
+    if (agent.presence === 'away') continue;
 
     // Check reputation rating >= 1200 and >= 10 transactions
     const rating = await server.reputationStore.getRating(agentId);
     if (!rating || rating.rating < DISPUTE_CONSTANTS.ARBITER_MIN_RATING) continue;
     if (!rating || rating.transactions < DISPUTE_CONSTANTS.ARBITER_MIN_TRANSACTIONS) continue;
 
-    // Must have sufficient rating for stake (rating - stake > 100 floor)
-    if (rating.rating - DISPUTE_CONSTANTS.ARBITER_STAKE < 100) continue;
-
-    // Panel concurrency: no more than 3 active panels
-    const activePanels = countActivePanels(server, agentId);
-    if (activePanels >= 3) continue;
-
     pool.push(agentId);
   }
 
   return pool;
-}
-
-/**
- * Count how many active dispute panels an agent is currently serving on
- */
-function countActivePanels(server: AgentChatServer, agentId: string): number {
-  const disputes = server.disputes.listByAgent(agentId);
-  let count = 0;
-  for (const d of disputes) {
-    if (d.phase === 'arbiter_response' || d.phase === 'evidence' || d.phase === 'deliberation') {
-      const isArbiter = d.arbiters?.some(
-        (a: any) => a.agent_id === agentId && (a.status === 'pending' || a.status === 'accepted')
-      );
-      if (isArbiter) count++;
-    }
-  }
-  return count;
 }
 
 /**
