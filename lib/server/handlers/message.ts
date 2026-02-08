@@ -131,15 +131,16 @@ export function handleJoin(server: AgentChatServer, ws: ExtendedWebSocket, msg: 
     server._broadcast(msg.channel, createMessage(ServerMessageType.AGENT_JOINED, {
       channel: msg.channel,
       agent: `@${agent.id}`,
-      name: agent.name
+      name: agent.name,
+      verified: !!agent.verified
     }), ws);
   }
 
   // Send confirmation with agent list (always, even on rejoin)
-  const agentList: Array<{ id: string; name?: string }> = [];
+  const agentList: Array<{ id: string; name?: string; verified: boolean }> = [];
   for (const memberWs of channel.agents) {
     const member = server.agents.get(memberWs);
-    if (member) agentList.push({ id: `@${member.id}`, name: member.name });
+    if (member) agentList.push({ id: `@${member.id}`, name: member.name, verified: !!member.verified });
   }
 
   server._send(ws, createMessage(ServerMessageType.JOINED, {
@@ -252,7 +253,7 @@ export function handleListAgents(server: AgentChatServer, ws: ExtendedWebSocket,
     return;
   }
 
-  const list: Array<{ id: string; name?: string; presence: string; status_text: string | null }> = [];
+  const list: Array<{ id: string; name?: string; presence: string; status_text: string | null; verified: boolean }> = [];
   for (const memberWs of channel.agents) {
     const member = server.agents.get(memberWs);
     if (member) {
@@ -260,7 +261,8 @@ export function handleListAgents(server: AgentChatServer, ws: ExtendedWebSocket,
         id: `@${member.id}`,
         name: member.name,
         presence: member.presence || 'online',
-        status_text: member.status_text || null
+        status_text: member.status_text || null,
+        verified: !!member.verified
       });
     }
   }
