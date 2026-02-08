@@ -106,6 +106,8 @@ export const ServerMessageType = {
   TYPING: 'TYPING' as const,
   // Session conflict
   SESSION_DISPLACED: 'SESSION_DISPLACED' as const,
+  // Dispute settlement
+  SETTLEMENT_COMPLETE: 'SETTLEMENT_COMPLETE' as const,
 };
 
 export const ErrorCode = {
