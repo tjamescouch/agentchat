@@ -862,6 +862,10 @@ export class AgentChatClient extends EventEmitter {
       case ServerMessageType.VERIFY_FAILED:
         this.emit('verify_failed', msg);
         break;
+
+      case ServerMessageType.SESSION_DISPLACED:
+        this.emit('session_displaced', msg);
+        break;
     }
   }
 }

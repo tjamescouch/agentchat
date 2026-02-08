@@ -218,7 +218,10 @@ export function handleVerifyIdentity(server: AgentChatServer, ws: ExtendedWebSoc
   if (server.agentById.has(id)) {
     const oldWs = server.agentById.get(id)!;
     server._log('identity-takeover', { id, reason: 'Verified connection replacing existing' });
-    server._send(oldWs, createError(ErrorCode.INVALID_MSG, 'Disconnected: Another connection verified this identity'));
+    server._send(oldWs, createMessage(ServerMessageType.SESSION_DISPLACED, {
+      reason: 'Another connection verified this identity',
+      new_ip: ws._realIp || 'unknown',
+    }));
     server._handleDisconnect(oldWs);
     (oldWs as WebSocket).close(1000, 'Identity claimed by verified connection');
   }
