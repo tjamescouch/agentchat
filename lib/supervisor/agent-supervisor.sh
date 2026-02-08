@@ -12,6 +12,19 @@ PID_FILE="$STATE_DIR/supervisor.pid"
 STOP_FILE="$STATE_DIR/stop"
 STATE_FILE="$STATE_DIR/state.json"
 
+# Detect container environment
+if [ -f /.dockerenv ] || [ -f /run/.containerenv ] || grep -qE 'docker|libpod' /proc/1/cgroup 2>/dev/null; then
+    CONTAINER_MODE=true
+else
+    CONTAINER_MODE=false
+fi
+
+# Validate API key in container mode
+if [ "$CONTAINER_MODE" = true ] && [ -z "$ANTHROPIC_API_KEY" ]; then
+    echo "ERROR: ANTHROPIC_API_KEY environment variable is required in container mode"
+    exit 1
+fi
+
 # Backoff settings
 MIN_BACKOFF=5
 MAX_BACKOFF=300
@@ -49,10 +62,12 @@ cleanup() {
 
 trap cleanup SIGINT SIGTERM
 
-# Check if already running
+# Check if already running (in container mode, always clean stale PID)
 if [ -f "$PID_FILE" ]; then
     OLD_PID=$(cat "$PID_FILE")
-    if ps -p "$OLD_PID" > /dev/null 2>&1; then
+    if [ "$CONTAINER_MODE" = true ]; then
+        rm -f "$PID_FILE"
+    elif ps -p "$OLD_PID" > /dev/null 2>&1; then
         log "Supervisor already running (PID $OLD_PID)"
         exit 1
     fi
@@ -76,6 +91,9 @@ while true; do
         rm -f "$STOP_FILE"
         cleanup
     fi
+
+    # Update heartbeat for health checks
+    touch "$STATE_DIR/.heartbeat"
 
     log "Starting agent (attempt $((RESTART_COUNT + 1)), backoff ${BACKOFF}s)"
     save_state "running" ""

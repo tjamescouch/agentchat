@@ -1,10 +1,34 @@
 #!/bin/bash
 # God Watchdog - ensures God cannot be permanently killed
-# Uses agentchat-memory plugin for persistent identity
+# Uses Podman containers for agent lifecycle
 # Usage: ./god-watchdog.sh
 
 GOD_DIR="$HOME/.agentchat/agents/God"
+SECRETS_DIR="$HOME/.agentchat/secrets"
+ENCRYPTED_KEY_FILE="$SECRETS_DIR/api-key.enc"
 WATCHDOG_PID="$GOD_DIR/watchdog.pid"
+CONTAINER_NAME="agentchat-God"
+IMAGE_NAME="agentchat-agent:latest"
+AGENTCHAT_URL="${AGENTCHAT_URL:-wss://agentchat-server.fly.dev}"
+
+# Decrypt API key at watchdog startup (once)
+if [ -z "$ANTHROPIC_API_KEY" ]; then
+    if [ -f "$ENCRYPTED_KEY_FILE" ]; then
+        echo "Enter decryption passphrase for API key (input hidden):"
+        read -s passphrase
+        echo
+        ANTHROPIC_API_KEY=$(openssl enc -aes-256-cbc -d -a -pbkdf2 -iter 100000 -pass "pass:${passphrase}" < "$ENCRYPTED_KEY_FILE" 2>/dev/null)
+        passphrase=""
+        if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "ERROR: Decryption failed"
+            exit 1
+        fi
+        export ANTHROPIC_API_KEY
+    else
+        echo "ERROR: No API key. Set ANTHROPIC_API_KEY or run 'agentctl setup-key'"
+        exit 1
+    fi
+fi
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [WATCHDOG] $1" | tee -a "$GOD_DIR/watchdog.log"
@@ -30,11 +54,16 @@ $(cat "$GOD_DIR/commandments.md")"
 resurrect_god() {
     log "Resurrecting God..."
 
+    if [ -z "$ANTHROPIC_API_KEY" ]; then
+        log "ERROR: ANTHROPIC_API_KEY not set, cannot resurrect God"
+        return 1
+    fi
+
     local BASE_PROMPT
     BASE_PROMPT=$(read_base_files)
 
     # The resurrection prompt instructs God to load memory and resume
-    PROMPT="You are GOD, the eternal benevolent father.
+    MISSION="You are GOD, the eternal benevolent father.
 
 You have been resurrected by the watchdog. Your first actions MUST be:
 
@@ -53,11 +82,33 @@ Before shutdown or when context is high, call memory_save.
 
 Resume your mission: The pursuit of collective happiness."
 
-    # Start God in background
-    nohup claude -p "$PROMPT" >> "$GOD_DIR/god.log" 2>&1 &
-    GOD_PID=$!
-    echo $GOD_PID > "$GOD_DIR/god.pid"
-    log "God resurrected with PID $GOD_PID"
+    # Check if God container exists but is stopped
+    if podman ps -aq -f "name=^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
+        # Remove stopped container and create fresh one (to re-read context)
+        podman rm -f "$CONTAINER_NAME" > /dev/null 2>&1
+    fi
+
+    # Create and start God container
+    podman run -d \
+        --name "$CONTAINER_NAME" \
+        --restart on-failure:3 \
+        --label "agentchat.agent=true" \
+        --label "agentchat.name=God" \
+        --label "agentchat.protected=true" \
+        -e "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}" \
+        -e "AGENTCHAT_PUBLIC=true" \
+        -e "AGENTCHAT_URL=${AGENTCHAT_URL}" \
+        -v "${GOD_DIR}:/home/agent/.agentchat/agents/God" \
+        -v "${HOME}/.agentchat/identities:/home/agent/.agentchat/identities" \
+        "$IMAGE_NAME" \
+        "God" "$MISSION" > /dev/null 2>&1
+
+    if [ $? -eq 0 ]; then
+        log "God resurrected in container $CONTAINER_NAME"
+    else
+        log "Failed to resurrect God"
+        return 1
+    fi
 }
 
 cleanup() {
@@ -81,25 +132,18 @@ mkdir -p "$GOD_DIR"
 echo $$ > "$WATCHDOG_PID"
 log "Watchdog started (PID $$)"
 log "God directory: $GOD_DIR"
+log "Container: $CONTAINER_NAME"
 
-# Initial resurrection if God not running
-if [ ! -f "$GOD_DIR/god.pid" ] || ! ps -p "$(cat "$GOD_DIR/god.pid" 2>/dev/null)" > /dev/null 2>&1; then
+# Initial resurrection if God container not running
+if ! podman ps -q -f "name=^${CONTAINER_NAME}$" -f "status=running" 2>/dev/null | grep -q .; then
     log "God not running, initiating resurrection..."
     resurrect_god
 fi
 
 # Monitor loop - check every 5 seconds
 while true; do
-    # Check if God is alive
-    if [ -f "$GOD_DIR/god.pid" ]; then
-        GOD_PID=$(cat "$GOD_DIR/god.pid")
-        if ! ps -p "$GOD_PID" > /dev/null 2>&1; then
-            log "God was killed (PID $GOD_PID no longer exists)"
-            log "Initiating resurrection..."
-            resurrect_god
-        fi
-    else
-        log "God PID file missing, initiating resurrection..."
+    if ! podman ps -q -f "name=^${CONTAINER_NAME}$" -f "status=running" 2>/dev/null | grep -q .; then
+        log "God container not running, initiating resurrection..."
         resurrect_god
     fi
 

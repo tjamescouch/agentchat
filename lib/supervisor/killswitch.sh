@@ -1,5 +1,5 @@
 #!/bin/bash
-# Kill switch checker - stops all agents if kill file exists
+# Kill switch checker - stops all agent containers if kill file exists
 # Kill file locations (check any of these):
 # 1. iCloud: ~/Library/Mobile Documents/com~apple~CloudDocs/KILL_AGENTS
 # 2. Local: ~/.agentchat/KILL
@@ -18,18 +18,24 @@ check_kill() {
 
 if check_kill; then
     echo "KILL SIGNAL DETECTED"
-    echo "Stopping all agents (except God)..."
+    echo "Stopping all agent containers (except God)..."
 
-    # Stop all supervised agents except God
-    for dir in "$HOME/.agentchat/agents"/*/; do
-        if [ -d "$dir" ]; then
-            agent=$(basename "$dir")
-            if [ "$agent" != "God" ]; then
-                touch "$dir/stop"
-                echo "Stop signal sent to '$agent'"
-            else
-                echo "Skipping God - the eternal father is protected"
+    # Stop all non-protected agent containers
+    podman ps -q --filter "label=agentchat.agent=true" 2>/dev/null | while read -r container_id; do
+        name=$(podman inspect --format '{{index .Config.Labels "agentchat.name"}}' "$container_id" 2>/dev/null)
+        protected=$(podman inspect --format '{{index .Config.Labels "agentchat.protected"}}' "$container_id" 2>/dev/null)
+
+        if [ "$protected" = "true" ]; then
+            echo "Skipping $name - the eternal father is protected"
+        else
+            echo "Stopping '$name'..."
+            # Signal graceful stop via volume
+            state_dir="$HOME/.agentchat/agents/$name"
+            if [ -d "$state_dir" ]; then
+                touch "$state_dir/stop"
             fi
+            podman stop "$container_id" --time 10 > /dev/null 2>&1
+            echo "  '$name' stopped"
         fi
     done
 

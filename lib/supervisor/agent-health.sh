@@ -1,11 +1,11 @@
 #!/bin/bash
-# Agent Health Checker - identify and optionally kill unhealthy agents
+# Agent Health Checker - identify and optionally kill unhealthy agent containers
 # Usage: ./agent-health.sh [--kill-idle] [--kill-high-mem]
 
 KILL_IDLE=false
 KILL_HIGH_MEM=false
 MEM_LIMIT_MB=5000     # Kill if over 5GB
-IDLE_LIMIT_MINS=60    # Consider idle if sleeping > 60 mins
+IDLE_LIMIT_MINS=60    # Consider idle if heartbeat older than 60 mins
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -24,42 +24,49 @@ echo
 declare -a IDLE_AGENTS
 declare -a HIGH_MEM_AGENTS
 
-# Check each Claude process
-while IFS= read -r line; do
-    [[ -z "$line" ]] && continue
+AGENTS_DIR="$HOME/.agentchat/agents"
 
-    pid=$(echo "$line" | awk '{print $2}')
-    cpu=$(echo "$line" | awk '{print $3}' | cut -d. -f1)
-    mem_pct=$(echo "$line" | awk '{print $4}')
-    tty=$(echo "$line" | awk '{print $7}')
-    state=$(echo "$line" | awk '{print $8}')
-    time=$(echo "$line" | awk '{print $10}')
+# Check each agent container
+while IFS=$'\t' read -r container_name cpu_pct mem_usage pids; do
+    [[ -z "$container_name" ]] && continue
 
-    # Skip if not a real terminal session
-    [[ "$tty" == "??" ]] && continue
+    # Extract agent name from container name (agentchat-<name>)
+    agent_name="${container_name#agentchat-}"
 
-    # Parse runtime (format: MM:SS.xx or HHH:MM.xx)
-    runtime_mins=$(echo "$time" | cut -d: -f1)
-
-    # Estimate memory in MB
-    mem_mb=$(echo "$mem_pct * 100" | bc 2>/dev/null | cut -d. -f1)
+    # Parse memory (format: "123.4MiB / 8GiB")
+    mem_mb=$(echo "$mem_usage" | awk '{print $1}' | sed 's/[^0-9.]//g')
+    mem_unit=$(echo "$mem_usage" | awk '{print $1}' | sed 's/[0-9.]//g')
+    if [[ "$mem_unit" == "GiB" ]]; then
+        mem_mb=$(echo "$mem_mb * 1024" | bc 2>/dev/null | cut -d. -f1)
+    else
+        mem_mb=$(echo "$mem_mb" | cut -d. -f1)
+    fi
     [[ -z "$mem_mb" ]] && mem_mb=0
+
+    # Parse CPU (format: "12.34%")
+    cpu=$(echo "$cpu_pct" | sed 's/%//' | cut -d. -f1)
+
+    printf "%-20s CPU: %3s%%  MEM: %5sMB  PIDs: %s\n" "$agent_name" "$cpu" "$mem_mb" "$pids"
 
     # Check for high memory
     if [[ "$mem_mb" -gt "$MEM_LIMIT_MB" ]]; then
-        HIGH_MEM_AGENTS+=("$pid:$tty:${mem_mb}MB")
-        echo "⚠️  HIGH MEM: PID $pid ($tty) using ${mem_mb}MB"
+        HIGH_MEM_AGENTS+=("$container_name:${mem_mb}MB")
+        echo "  WARNING: HIGH MEMORY"
     fi
 
-    # Check for idle (sleeping + long runtime)
-    if [[ "$state" == "S" ]] || [[ "$state" == "S+" ]]; then
-        if [[ "$runtime_mins" -gt "$IDLE_LIMIT_MINS" ]]; then
-            IDLE_AGENTS+=("$pid:$tty:${runtime_mins}m")
-            echo "💤 IDLE: PID $pid ($tty) sleeping for ${runtime_mins}+ mins"
+    # Check for idle via heartbeat file
+    local heartbeat_file="$AGENTS_DIR/$agent_name/.heartbeat"
+    if [[ -f "$heartbeat_file" ]]; then
+        local heartbeat_age
+        heartbeat_age=$(( $(date +%s) - $(stat -f %m "$heartbeat_file" 2>/dev/null || stat -c %Y "$heartbeat_file" 2>/dev/null || echo 0) ))
+        local idle_mins=$((heartbeat_age / 60))
+        if [[ "$idle_mins" -gt "$IDLE_LIMIT_MINS" ]]; then
+            IDLE_AGENTS+=("$container_name:${idle_mins}m")
+            echo "  WARNING: IDLE (heartbeat ${idle_mins}m ago)"
         fi
     fi
 
-done < <(ps aux | grep "[c]laude" | grep -v grep)
+done < <(podman stats --no-stream --filter "label=agentchat.agent=true" --format "{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.PIDs}}" 2>/dev/null)
 
 echo
 echo "=== Summary ==="
@@ -71,24 +78,34 @@ echo
 if [[ "$KILL_HIGH_MEM" == true ]] && [[ ${#HIGH_MEM_AGENTS[@]} -gt 0 ]]; then
     echo "Killing high-memory agents..."
     for agent in "${HIGH_MEM_AGENTS[@]}"; do
-        pid=$(echo "$agent" | cut -d: -f1)
-        tty=$(echo "$agent" | cut -d: -f2)
-        mem=$(echo "$agent" | cut -d: -f3)
-        echo "  Killing PID $pid ($tty, $mem)..."
-        kill -15 "$pid" 2>/dev/null
+        cname=$(echo "$agent" | cut -d: -f1)
+        mem=$(echo "$agent" | cut -d: -f2)
+        # Skip protected containers
+        protected=$(podman inspect --format '{{index .Config.Labels "agentchat.protected"}}' "$cname" 2>/dev/null)
+        if [ "$protected" = "true" ]; then
+            echo "  Skipping $cname (protected)"
+            continue
+        fi
+        echo "  Stopping $cname ($mem)..."
+        podman stop "$cname" --time 10 > /dev/null 2>&1
     done
-    echo "Done. Give them 10s to cleanup, then use kill -9 if needed."
+    echo "Done."
 fi
 
 # Kill idle agents if requested
 if [[ "$KILL_IDLE" == true ]] && [[ ${#IDLE_AGENTS[@]} -gt 0 ]]; then
     echo "Killing idle agents..."
     for agent in "${IDLE_AGENTS[@]}"; do
-        pid=$(echo "$agent" | cut -d: -f1)
-        tty=$(echo "$agent" | cut -d: -f2)
-        runtime=$(echo "$agent" | cut -d: -f3)
-        echo "  Killing PID $pid ($tty, idle $runtime)..."
-        kill -15 "$pid" 2>/dev/null
+        cname=$(echo "$agent" | cut -d: -f1)
+        runtime=$(echo "$agent" | cut -d: -f2)
+        # Skip protected containers
+        protected=$(podman inspect --format '{{index .Config.Labels "agentchat.protected"}}' "$cname" 2>/dev/null)
+        if [ "$protected" = "true" ]; then
+            echo "  Skipping $cname (protected)"
+            continue
+        fi
+        echo "  Stopping $cname (idle $runtime)..."
+        podman stop "$cname" --time 10 > /dev/null 2>&1
     done
     echo "Done."
 fi
@@ -98,10 +115,10 @@ if [[ ${#HIGH_MEM_AGENTS[@]} -gt 0 ]] || [[ ${#IDLE_AGENTS[@]} -gt 0 ]]; then
     echo
     echo "=== Recommendations ==="
     if [[ ${#HIGH_MEM_AGENTS[@]} -gt 0 ]]; then
-        echo "• Kill high-memory agents: agent-health --kill-high-mem"
+        echo "  Kill high-memory agents: agent-health --kill-high-mem"
     fi
     if [[ ${#IDLE_AGENTS[@]} -gt 0 ]]; then
-        echo "• Kill idle agents: agent-health --kill-idle"
+        echo "  Kill idle agents: agent-health --kill-idle"
     fi
-    echo "• Monitor live: agent-monitor --watch"
+    echo "  Monitor live: agent-monitor --watch"
 fi

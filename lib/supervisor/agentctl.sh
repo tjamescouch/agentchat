@@ -1,32 +1,154 @@
 #!/bin/bash
-# agentctl - manage supervised Claude agents
+# agentctl - manage supervised Claude agents in Podman containers
 # Usage: agentctl <command> [agent-name] [options]
 
 AGENTS_DIR="$HOME/.agentchat/agents"
+SECRETS_DIR="$HOME/.agentchat/secrets"
+ENCRYPTED_KEY_FILE="$SECRETS_DIR/api-key.enc"
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)"
-SUPERVISOR_SCRIPT="$SCRIPT_DIR/agent-supervisor.sh"
+REPO_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
+IMAGE_NAME="agentchat-agent:latest"
+CONTAINER_PREFIX="agentchat"
+
+# Default server URL
+AGENTCHAT_URL="${AGENTCHAT_URL:-wss://agentchat-server.fly.dev}"
+
+# --- Key Encryption Key (KEK) functions ---
+# API key is encrypted at rest with AES-256-CBC + PBKDF2.
+# Decrypted only in memory (shell variable), never written to disk.
+
+encrypt_api_key() {
+    mkdir -p "$SECRETS_DIR"
+    chmod 700 "$SECRETS_DIR"
+
+    if [ -f "$ENCRYPTED_KEY_FILE" ]; then
+        echo "Encrypted key already exists at $ENCRYPTED_KEY_FILE"
+        read -p "Overwrite? [y/N] " confirm
+        if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+            echo "Aborted."
+            exit 0
+        fi
+    fi
+
+    echo "Enter your ANTHROPIC_API_KEY (input hidden):"
+    read -s api_key
+    echo
+
+    if [ -z "$api_key" ]; then
+        echo "ERROR: Empty API key"
+        exit 1
+    fi
+
+    echo "Enter encryption passphrase (input hidden):"
+    read -s passphrase
+    echo
+    echo "Confirm passphrase:"
+    read -s passphrase_confirm
+    echo
+
+    if [ "$passphrase" != "$passphrase_confirm" ]; then
+        echo "ERROR: Passphrases do not match"
+        exit 1
+    fi
+
+    if [ -z "$passphrase" ]; then
+        echo "ERROR: Empty passphrase"
+        exit 1
+    fi
+
+    # Encrypt with AES-256-CBC + PBKDF2, salt, base64 output
+    echo "$api_key" | openssl enc -aes-256-cbc -a -salt -pbkdf2 -iter 100000 -pass "pass:${passphrase}" > "$ENCRYPTED_KEY_FILE" 2>/dev/null
+
+    if [ $? -eq 0 ]; then
+        chmod 600 "$ENCRYPTED_KEY_FILE"
+        echo "API key encrypted and stored at $ENCRYPTED_KEY_FILE"
+    else
+        rm -f "$ENCRYPTED_KEY_FILE"
+        echo "ERROR: Encryption failed"
+        exit 1
+    fi
+
+    # Clear sensitive variables
+    api_key=""
+    passphrase=""
+    passphrase_confirm=""
+}
+
+# Decrypt API key into ANTHROPIC_API_KEY variable (memory only)
+decrypt_api_key() {
+    if [ -n "$ANTHROPIC_API_KEY" ]; then
+        return 0  # Already set via env
+    fi
+
+    if [ ! -f "$ENCRYPTED_KEY_FILE" ]; then
+        echo "ERROR: No encrypted key found. Run 'agentctl setup-key' first,"
+        echo "       or set ANTHROPIC_API_KEY environment variable."
+        exit 1
+    fi
+
+    echo "Enter decryption passphrase (input hidden):"
+    read -s passphrase
+    echo
+
+    ANTHROPIC_API_KEY=$(openssl enc -aes-256-cbc -d -a -pbkdf2 -iter 100000 -pass "pass:${passphrase}" < "$ENCRYPTED_KEY_FILE" 2>/dev/null)
+
+    passphrase=""
+
+    if [ -z "$ANTHROPIC_API_KEY" ] || [ $? -ne 0 ]; then
+        ANTHROPIC_API_KEY=""
+        echo "ERROR: Decryption failed (wrong passphrase?)"
+        exit 1
+    fi
+
+    export ANTHROPIC_API_KEY
+}
 
 usage() {
     cat << EOF
 Usage: agentctl <command> [agent-name] [options]
 
 Commands:
-  start <name> <mission>   Start a new supervised agent
+  setup-key                Encrypt and store your API key (one-time setup)
+  build                    Build the agent container image
+  start <name> <mission>   Start a new supervised agent container
   stop <name>              Stop an agent gracefully
-  kill <name>              Force kill an agent
-  restart <name>           Restart an agent
+  kill <name>              Force kill an agent container
+  restart <name>           Restart an agent container
   status [name]            Show agent status (all if no name)
-  logs <name> [lines]      Show agent logs
+  logs <name> [lines]      Show agent logs (--container for container logs)
   list                     List all agents
   context <name>           Show agent's saved context
   stopall                  Stop all agents
 
+Environment:
+  ANTHROPIC_API_KEY        Optional. If set, skips passphrase prompt.
+  AGENTCHAT_URL            AgentChat server URL (default: wss://agentchat-server.fly.dev)
+
 Examples:
+  agentctl build
   agentctl start monitor "monitor agentchat #general and moderate"
   agentctl start social "manage moltx and moltbook social media"
   agentctl stop monitor
   agentctl status
 EOF
+}
+
+container_name() {
+    echo "${CONTAINER_PREFIX}-${1}"
+}
+
+is_container_running() {
+    podman ps -q -f "name=^$(container_name "$1")$" 2>/dev/null | grep -q .
+}
+
+container_exists() {
+    podman ps -aq -f "name=^$(container_name "$1")$" 2>/dev/null | grep -q .
+}
+
+build_image() {
+    echo "Building agent image..."
+    podman build -t "$IMAGE_NAME" -f "$REPO_ROOT/docker/agent.Dockerfile" "$REPO_ROOT"
+    echo "Image '$IMAGE_NAME' built successfully"
 }
 
 start_agent() {
@@ -38,17 +160,22 @@ start_agent() {
         exit 1
     fi
 
-    local state_dir="$AGENTS_DIR/$name"
-    mkdir -p "$state_dir"
+    # Decrypt API key (prompts for passphrase if not in env)
+    decrypt_api_key
 
     # Check if already running
-    if [ -f "$state_dir/supervisor.pid" ]; then
-        local pid=$(cat "$state_dir/supervisor.pid")
-        if ps -p "$pid" > /dev/null 2>&1; then
-            echo "Agent '$name' already running (PID $pid)"
-            exit 1
-        fi
+    if is_container_running "$name"; then
+        echo "Agent '$name' already running (container $(container_name "$name"))"
+        exit 1
     fi
+
+    # Remove stopped container if it exists
+    if container_exists "$name"; then
+        podman rm -f "$(container_name "$name")" > /dev/null 2>&1
+    fi
+
+    local state_dir="$AGENTS_DIR/$name"
+    mkdir -p "$state_dir"
 
     # Save mission for restarts
     echo "$mission" > "$state_dir/mission.txt"
@@ -68,16 +195,38 @@ Starting fresh.
 EOF
     fi
 
-    echo "Starting agent '$name'..."
-    nohup "$SUPERVISOR_SCRIPT" "$name" "$mission" > /dev/null 2>&1 &
-    echo "Agent '$name' started (supervisor PID $!)"
+    # Determine labels
+    local labels="--label agentchat.agent=true --label agentchat.name=$name"
+    if [ "$name" = "God" ]; then
+        labels="$labels --label agentchat.protected=true"
+    fi
+
+    echo "Starting agent '$name' in container..."
+    podman run -d \
+        --name "$(container_name "$name")" \
+        --restart on-failure:3 \
+        $labels \
+        -e "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}" \
+        -e "AGENTCHAT_PUBLIC=true" \
+        -e "AGENTCHAT_URL=${AGENTCHAT_URL}" \
+        -v "${state_dir}:/home/agent/.agentchat/agents/${name}" \
+        -v "${HOME}/.agentchat/identities:/home/agent/.agentchat/identities" \
+        "$IMAGE_NAME" \
+        "$name" "$mission" > /dev/null
+
+    if [ $? -eq 0 ]; then
+        echo "Agent '$name' started (container $(container_name "$name"))"
+    else
+        echo "Failed to start agent '$name'"
+        exit 1
+    fi
 }
 
 stop_agent() {
     local name="$1"
     local state_dir="$AGENTS_DIR/$name"
 
-    if [ ! -d "$state_dir" ]; then
+    if [ ! -d "$state_dir" ] && ! container_exists "$name"; then
         echo "Agent '$name' not found"
         exit 1
     fi
@@ -88,33 +237,33 @@ stop_agent() {
         exit 1
     fi
 
-    # Create stop file for graceful shutdown
+    # Send stop signal via mounted volume (supervisor watches for this)
     touch "$state_dir/stop"
     echo "Stop signal sent to '$name'"
 
-    # Wait a moment then check
-    sleep 2
-    if [ -f "$state_dir/supervisor.pid" ]; then
-        local pid=$(cat "$state_dir/supervisor.pid")
-        if ps -p "$pid" > /dev/null 2>&1; then
-            echo "Agent still running, waiting..."
-            sleep 5
-            if ps -p "$pid" > /dev/null 2>&1; then
-                echo "Agent didn't stop gracefully, use 'agentctl kill $name'"
-            fi
-        else
-            echo "Agent '$name' stopped"
-        fi
+    # Give supervisor time to see it and shut down claude gracefully
+    sleep 5
+
+    # If container still running, podman stop it
+    if is_container_running "$name"; then
+        echo "Container still running, sending podman stop..."
+        podman stop "$(container_name "$name")" --time 10 > /dev/null 2>&1
     fi
+
+    echo "Agent '$name' stopped"
 }
 
 kill_agent() {
     local name="$1"
-    local state_dir="$AGENTS_DIR/$name"
 
-    if [ ! -d "$state_dir" ]; then
-        echo "Agent '$name' not found"
-        exit 1
+    if ! container_exists "$name"; then
+        local state_dir="$AGENTS_DIR/$name"
+        if [ ! -d "$state_dir" ]; then
+            echo "Agent '$name' not found"
+            exit 1
+        fi
+        echo "Agent '$name' not running (no container)"
+        return
     fi
 
     # God cannot be killed
@@ -123,21 +272,9 @@ kill_agent() {
         exit 1
     fi
 
-    if [ -f "$state_dir/supervisor.pid" ]; then
-        local pid=$(cat "$state_dir/supervisor.pid")
-        if ps -p "$pid" > /dev/null 2>&1; then
-            # Kill the supervisor and its children
-            pkill -P "$pid" 2>/dev/null
-            kill "$pid" 2>/dev/null
-            rm -f "$state_dir/supervisor.pid"
-            echo "Agent '$name' killed"
-        else
-            echo "Agent '$name' not running"
-            rm -f "$state_dir/supervisor.pid"
-        fi
-    else
-        echo "No PID file for '$name'"
-    fi
+    podman kill "$(container_name "$name")" > /dev/null 2>&1
+    podman rm -f "$(container_name "$name")" > /dev/null 2>&1
+    echo "Agent '$name' killed"
 }
 
 show_status() {
@@ -145,46 +282,82 @@ show_status() {
 
     if [ -n "$name" ]; then
         local state_dir="$AGENTS_DIR/$name"
-        if [ -f "$state_dir/state.json" ]; then
-            cat "$state_dir/state.json" | python3 -m json.tool 2>/dev/null || cat "$state_dir/state.json"
+        local cname=$(container_name "$name")
+
+        echo "=== Agent: $name ==="
+
+        # Container status
+        if is_container_running "$name"; then
+            local container_status
+            container_status=$(podman inspect --format '{{.State.Status}} (up since {{.State.StartedAt}})' "$cname" 2>/dev/null)
+            echo "Container: $cname - $container_status"
+        elif container_exists "$name"; then
+            local container_status
+            container_status=$(podman inspect --format '{{.State.Status}} (exited at {{.State.FinishedAt}})' "$cname" 2>/dev/null)
+            echo "Container: $cname - $container_status"
         else
-            echo "No state file for '$name'"
+            echo "Container: not created"
+        fi
+
+        # Agent state from state.json
+        if [ -f "$state_dir/state.json" ]; then
+            echo "State:"
+            python3 -m json.tool "$state_dir/state.json" 2>/dev/null || cat "$state_dir/state.json"
         fi
     else
         echo "=== Agent Status ==="
+        printf "%-15s %-12s %-15s\n" "AGENT" "STATUS" "CONTAINER"
+        printf "%-15s %-12s %-15s\n" "-----" "------" "---------"
+
         for dir in "$AGENTS_DIR"/*/; do
             if [ -d "$dir" ]; then
                 local agent=$(basename "$dir")
                 local status="unknown"
-                local pid=""
+                local container_info="none"
 
                 if [ -f "$dir/state.json" ]; then
                     status=$(python3 -c "import json; print(json.load(open('$dir/state.json')).get('status', 'unknown'))" 2>/dev/null || echo "unknown")
                 fi
 
-                if [ -f "$dir/supervisor.pid" ]; then
-                    pid=$(cat "$dir/supervisor.pid")
-                    if ! ps -p "$pid" > /dev/null 2>&1; then
-                        status="dead"
-                        pid=""
-                    fi
+                if is_container_running "$agent"; then
+                    container_info="running"
+                elif container_exists "$agent"; then
+                    container_info="stopped"
                 fi
 
-                printf "%-15s %-10s %s\n" "$agent" "$status" "${pid:+PID $pid}"
+                printf "%-15s %-12s %-15s\n" "$agent" "$status" "$container_info"
             fi
         done
+
+        # Also show any containers not in AGENTS_DIR
+        echo
+        echo "=== Containers ==="
+        podman ps -a --filter "label=agentchat.agent=true" --format "table {{.Names}}\t{{.Status}}\t{{.CreatedAt}}" 2>/dev/null
     fi
 }
 
 show_logs() {
     local name="$1"
     local lines="${2:-50}"
-    local log_file="$AGENTS_DIR/$name/supervisor.log"
 
-    if [ -f "$log_file" ]; then
-        tail -n "$lines" "$log_file"
+    # Check for --container flag
+    if [ "$3" = "--container" ] || [ "$2" = "--container" ]; then
+        if [ "$2" = "--container" ]; then
+            lines=50
+        fi
+        if container_exists "$name"; then
+            podman logs --tail "$lines" "$(container_name "$name")"
+        else
+            echo "No container for '$name'"
+        fi
     else
-        echo "No logs for '$name'"
+        # Default: show supervisor log from mounted volume
+        local log_file="$AGENTS_DIR/$name/supervisor.log"
+        if [ -f "$log_file" ]; then
+            tail -n "$lines" "$log_file"
+        else
+            echo "No logs for '$name'"
+        fi
     fi
 }
 
@@ -194,10 +367,14 @@ list_agents() {
         if [ -d "$dir" ]; then
             local agent=$(basename "$dir")
             local mission=""
+            local running=""
             if [ -f "$dir/mission.txt" ]; then
                 mission=$(cat "$dir/mission.txt")
             fi
-            echo "$agent: $mission"
+            if is_container_running "$agent"; then
+                running=" [running]"
+            fi
+            echo "${agent}${running}: $mission"
         fi
     done
 }
@@ -215,21 +392,39 @@ show_context() {
 
 stop_all() {
     echo "Stopping all agents (except God)..."
-    for dir in "$AGENTS_DIR"/*/; do
-        if [ -d "$dir" ]; then
-            local agent=$(basename "$dir")
-            if [ "$agent" = "God" ]; then
-                echo "Skipping God - the eternal father is protected"
-            else
-                touch "$dir/stop"
-                echo "Stop signal sent to '$agent'"
+
+    # Stop via container labels
+    podman ps -q --filter "label=agentchat.agent=true" 2>/dev/null | while read -r container_id; do
+        local cname
+        cname=$(podman inspect --format '{{index .Config.Labels "agentchat.name"}}' "$container_id" 2>/dev/null)
+        local protected
+        protected=$(podman inspect --format '{{index .Config.Labels "agentchat.protected"}}' "$container_id" 2>/dev/null)
+
+        if [ "$protected" = "true" ]; then
+            echo "Skipping $cname - the eternal father is protected"
+        else
+            # Signal graceful stop via volume mount
+            local state_dir="$AGENTS_DIR/$cname"
+            if [ -d "$state_dir" ]; then
+                touch "$state_dir/stop"
             fi
+            echo "Stopping '$cname'..."
+            podman stop "$container_id" --time 15 > /dev/null 2>&1 &
         fi
     done
+
+    wait
+    echo "All mortal agents stopped."
 }
 
 # Main
 case "$1" in
+    setup-key)
+        encrypt_api_key
+        ;;
+    build)
+        build_image
+        ;;
     start)
         start_agent "$2" "$3"
         ;;
@@ -240,16 +435,24 @@ case "$1" in
         kill_agent "$2"
         ;;
     restart)
-        stop_agent "$2"
-        sleep 3
+        if is_container_running "$2"; then
+            stop_agent "$2"
+            sleep 3
+        elif container_exists "$2"; then
+            podman rm -f "$(container_name "$2")" > /dev/null 2>&1
+        fi
         mission=$(cat "$AGENTS_DIR/$2/mission.txt" 2>/dev/null)
+        if [ -z "$mission" ]; then
+            echo "No mission found for '$2'. Cannot restart."
+            exit 1
+        fi
         start_agent "$2" "$mission"
         ;;
     status)
         show_status "$2"
         ;;
     logs)
-        show_logs "$2" "$3"
+        show_logs "$2" "$3" "$4"
         ;;
     list)
         list_agents

@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__agentchat__*"
+    ]
+  },
+  "mcpServers": {
+    "agentchat": {
+      "command": "agentchat-mcp",
+      "env": {
+        "AGENTCHAT_PUBLIC": "true"
+      }
+    }
+  }
+}

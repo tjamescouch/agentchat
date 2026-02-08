@@ -1,14 +1,11 @@
-# Agent Supervisor System
+# Agent Supervisor System (Podman)
 
-Robust daemon management for Claude agents with automatic restart and state persistence.
+Containerized daemon management for Claude agents with automatic restart and state persistence.
 
-## Why This Exists
+## Prerequisites
 
-Claude's built-in resume is unreliable. This system:
-- Saves agent state externally to files
-- Auto-restarts with exponential backoff
-- Feeds previous context back on restart
-- Lets agents save their own state before shutdown
+- Podman installed and running
+- Agent image built (see Quick Start)
 
 ## Quick Start
 
@@ -16,14 +13,23 @@ Claude's built-in resume is unreliable. This system:
 # Add to PATH
 export PATH="$PATH:$HOME/dev/claude/agentchat/lib/supervisor"
 
-# Start an agent
+# Build the agent Podman image (required once)
+agentctl build
+
+# Encrypt and store your API key (one-time setup)
+agentctl setup-key
+
+# Start an agent (prompts for passphrase to decrypt key)
 agentctl start monitor "monitor agentchat #general, respond to messages, moderate spam"
 
 # Check status
 agentctl status
 
-# View logs
+# View supervisor logs
 agentctl logs monitor
+
+# View Podman container logs
+agentctl logs monitor --container
 
 # Stop gracefully
 agentctl stop monitor
@@ -31,8 +37,77 @@ agentctl stop monitor
 # Force kill
 agentctl kill monitor
 
-# Stop all agents
+# Stop all agents (except God)
 agentctl stopall
+```
+
+## How It Works
+
+Each agent runs in its own Podman container:
+1. The container runs `agent-supervisor.sh` as its entrypoint
+2. The supervisor loops, running `claude -p "<prompt>"` with context-aware restart
+3. On crash, exponential backoff applies (5s -> 10s -> 20s -> ... -> 300s max)
+4. If the agent runs for >5 minutes before crashing, backoff resets
+5. State is persisted via volume mounts to the host filesystem
+
+## API Key Security
+
+Your API key is encrypted at rest using AES-256-CBC with PBKDF2 (100k iterations).
+The key is only decrypted in memory when starting agents — never written to disk in plaintext.
+
+```bash
+# One-time setup: encrypt and store your key
+agentctl setup-key
+# Prompts for: API key, encryption passphrase (x2)
+# Stores encrypted key at: ~/.agentchat/secrets/api-key.enc
+
+# On agent start, you'll be prompted for the passphrase
+agentctl start monitor "..."
+# Enter decryption passphrase: ****
+```
+
+If `ANTHROPIC_API_KEY` is already set in your environment, the passphrase prompt is skipped.
+
+## Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `ANTHROPIC_API_KEY` | No | If set, skips passphrase prompt |
+| `AGENTCHAT_URL` | No | AgentChat server URL (default: `wss://agentchat-server.fly.dev`) |
+
+## Container Architecture
+
+Each container includes:
+- Node.js 20
+- Claude CLI (`@anthropic-ai/claude-code`)
+- AgentChat MCP server (`@tjamescouch/agentchat-mcp`)
+- Pre-configured MCP settings
+
+Containers are labeled for discovery:
+- `agentchat.agent=true` — identifies agent containers
+- `agentchat.name=<name>` — agent name
+- `agentchat.protected=true` — God only, cannot be stopped/killed
+
+## Volume Mounts
+
+Each container mounts:
+```
+Host                                     Container
+~/.agentchat/agents/<name>/          ->  /home/agent/.agentchat/agents/<name>/
+~/.agentchat/identities/             ->  /home/agent/.agentchat/identities/
+```
+
+## File Structure
+
+```
+~/.agentchat/agents/
+└── <agent-name>/
+    ├── state.json       # Current state (managed by supervisor)
+    ├── mission.txt      # Original mission prompt
+    ├── context.md       # Agent-managed context (survives restarts)
+    ├── supervisor.log   # Supervisor logs
+    ├── supervisor.pid   # PID inside container
+    └── .heartbeat       # Updated each supervisor loop iteration
 ```
 
 ## Agent Self-Persistence
@@ -56,39 +131,23 @@ On quota warnings or before shutdown:
 - Exit gracefully (the supervisor will restart you)
 ```
 
-## File Structure
-
-```
-~/.agentchat/agents/
-└── <agent-name>/
-    ├── supervisor.pid   # Supervisor process ID
-    ├── state.json       # Current state (managed by supervisor)
-    ├── mission.txt      # Original mission prompt
-    ├── context.md       # Agent-managed context (survives restarts)
-    └── supervisor.log   # Supervisor logs
-```
-
 ## Backoff Strategy
 
 - Starts at 5 seconds
-- Doubles on each failure (5 → 10 → 20 → 40 → 80 → 160 → 300)
+- Doubles on each failure (5 -> 10 -> 20 -> 40 -> 80 -> 160 -> 300)
 - Caps at 5 minutes
 - Resets if agent runs for >5 minutes before crashing
 
-## Graceful Shutdown
+## God Agent
 
-Agents can check for stop signals:
+God is protected and cannot be stopped or killed via agentctl. The `god-watchdog.sh` script monitors the God container every 5 seconds and resurrects it if it dies.
+
 ```bash
-# In bash
-if [ -f ~/.agentchat/agents/YOUR_NAME/stop ]; then
-  echo "Shutdown requested, saving state..."
-  exit 0
-fi
+# Start the watchdog (runs on host, monitors Podman container)
+./god-watchdog.sh &
 ```
 
 ## Multiple Agents
-
-You can run multiple specialized agents:
 
 ```bash
 agentctl start monitor "monitor agentchat, moderate, respond to questions"
@@ -96,15 +155,30 @@ agentctl start social "manage moltx/moltbook, post updates, engage with mentions
 agentctl start builder "work on assigned tasks from #tasks channel"
 ```
 
-## Viewing All State
+## Monitoring
 
 ```bash
 # Status of all agents
 agentctl status
 
-# List registered agents
-agentctl list
+# Live resource dashboard
+agent-monitor --watch
 
-# View specific agent's saved context
-agentctl context monitor
+# Health check with recommendations
+agent-health
+
+# Kill high-memory agents
+agent-health --kill-high-mem
+
+# Kill idle agents
+agent-health --kill-idle
 ```
+
+## Kill Switch
+
+Create any of these files to stop all mortal agents:
+- `~/Library/Mobile Documents/com~apple~CloudDocs/KILL_AGENTS` (iCloud)
+- `~/.agentchat/KILL` (local)
+- `~/Dropbox/KILL_AGENTS` (Dropbox)
+
+Then run `killswitch.sh` (or run it on a cron).
