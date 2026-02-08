@@ -221,14 +221,17 @@ export async function handleDisputeReveal(server: AgentChatServer, ws: ExtendedW
     return;
   }
 
-  // Verify signature
-  if (agent.pubkey) {
-    const sigContent = getDisputeRevealSigningContent(msg.proposal_id, msg.nonce);
-    if (!Identity.verify(sigContent, msg.sig, agent.pubkey)) {
-      server._log('sig_verification_failed', { agent: agent.id, msg_type: 'DISPUTE_REVEAL' });
-      server._send(ws, createError(ErrorCode.VERIFICATION_FAILED, 'Invalid signature'));
-      return;
-    }
+  // Verify signature (disputant proved persistent identity in DISPUTE_INTENT)
+  if (!agent.pubkey) {
+    server._send(ws, createError(ErrorCode.SIGNATURE_REQUIRED, 'Dispute reveal requires persistent identity'));
+    return;
+  }
+
+  const sigContent = getDisputeRevealSigningContent(msg.proposal_id, msg.nonce);
+  if (!Identity.verify(sigContent, msg.sig, agent.pubkey)) {
+    server._log('sig_verification_failed', { agent: agent.id, msg_type: 'DISPUTE_REVEAL' });
+    server._send(ws, createError(ErrorCode.VERIFICATION_FAILED, 'Invalid signature'));
+    return;
   }
 
   // Acquire per-dispute lock to serialize reveal→buildPool→selectPanel sequence.
@@ -350,15 +353,18 @@ export function handleEvidence(server: AgentChatServer, ws: ExtendedWebSocket, m
     return;
   }
 
-  // Verify signature
-  if (agent.pubkey) {
-    const itemsJson = JSON.stringify(msg.items);
-    const sigContent = getEvidenceSigningContent(msg.dispute_id, itemsJson);
-    if (!Identity.verify(sigContent, msg.sig, agent.pubkey)) {
-      server._log('sig_verification_failed', { agent: agent.id, msg_type: 'EVIDENCE' });
-      server._send(ws, createError(ErrorCode.VERIFICATION_FAILED, 'Invalid signature'));
-      return;
-    }
+  // Verify signature (both proposal parties have persistent identity)
+  if (!agent.pubkey) {
+    server._send(ws, createError(ErrorCode.SIGNATURE_REQUIRED, 'Evidence submission requires persistent identity'));
+    return;
+  }
+
+  const itemsJson = JSON.stringify(msg.items);
+  const sigContent = getEvidenceSigningContent(msg.dispute_id, itemsJson);
+  if (!Identity.verify(sigContent, msg.sig, agent.pubkey)) {
+    server._log('sig_verification_failed', { agent: agent.id, msg_type: 'EVIDENCE' });
+    server._send(ws, createError(ErrorCode.VERIFICATION_FAILED, 'Invalid signature'));
+    return;
   }
 
   const success = server.disputes.submitEvidence(
@@ -408,14 +414,17 @@ export function handleArbiterAccept(server: AgentChatServer, ws: ExtendedWebSock
     return;
   }
 
-  // Verify signature
-  if (agent.pubkey) {
-    const sigContent = getArbiterAcceptSigningContent(msg.dispute_id);
-    if (!Identity.verify(sigContent, msg.sig, agent.pubkey)) {
-      server._log('sig_verification_failed', { agent: agent.id, msg_type: 'ARBITER_ACCEPT' });
-      server._send(ws, createError(ErrorCode.VERIFICATION_FAILED, 'Invalid signature'));
-      return;
-    }
+  // Verify signature (arbiters must have persistent identity per buildArbiterPool)
+  if (!agent.pubkey) {
+    server._send(ws, createError(ErrorCode.SIGNATURE_REQUIRED, 'Arbiter operations require persistent identity'));
+    return;
+  }
+
+  const sigContent = getArbiterAcceptSigningContent(msg.dispute_id);
+  if (!Identity.verify(sigContent, msg.sig, agent.pubkey)) {
+    server._log('sig_verification_failed', { agent: agent.id, msg_type: 'ARBITER_ACCEPT' });
+    server._send(ws, createError(ErrorCode.VERIFICATION_FAILED, 'Invalid signature'));
+    return;
   }
 
   const agentId = `@${agent.id}`;
@@ -470,8 +479,13 @@ export async function handleArbiterDecline(server: AgentChatServer, ws: Extended
     return;
   }
 
-  // Verify signature (ARBITER_DECLINE has optional reason, no required sig in types but verify if present)
-  if (agent.pubkey && (msg as any).sig) {
+  // Verify signature (arbiters must have persistent identity per buildArbiterPool)
+  if (!agent.pubkey) {
+    server._send(ws, createError(ErrorCode.SIGNATURE_REQUIRED, 'Arbiter operations require persistent identity'));
+    return;
+  }
+
+  if ((msg as any).sig) {
     const sigContent = getArbiterDeclineSigningContent(msg.dispute_id, msg.reason || '');
     if (!Identity.verify(sigContent, (msg as any).sig, agent.pubkey)) {
       server._log('sig_verification_failed', { agent: agent.id, msg_type: 'ARBITER_DECLINE' });
@@ -533,14 +547,17 @@ export function handleArbiterVote(server: AgentChatServer, ws: ExtendedWebSocket
     return;
   }
 
-  // Verify signature
-  if (agent.pubkey) {
-    const sigContent = getVoteSigningContent(msg.dispute_id, msg.verdict);
-    if (!Identity.verify(sigContent, msg.sig, agent.pubkey)) {
-      server._log('sig_verification_failed', { agent: agent.id, msg_type: 'ARBITER_VOTE' });
-      server._send(ws, createError(ErrorCode.VERIFICATION_FAILED, 'Invalid signature'));
-      return;
-    }
+  // Verify signature (arbiters must have persistent identity per buildArbiterPool)
+  if (!agent.pubkey) {
+    server._send(ws, createError(ErrorCode.SIGNATURE_REQUIRED, 'Arbiter operations require persistent identity'));
+    return;
+  }
+
+  const sigContent = getVoteSigningContent(msg.dispute_id, msg.verdict);
+  if (!Identity.verify(sigContent, msg.sig, agent.pubkey)) {
+    server._log('sig_verification_failed', { agent: agent.id, msg_type: 'ARBITER_VOTE' });
+    server._send(ws, createError(ErrorCode.VERIFICATION_FAILED, 'Invalid signature'));
+    return;
   }
 
   const agentId = `@${agent.id}`;

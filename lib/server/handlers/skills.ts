@@ -43,7 +43,7 @@ interface SkillSearchResult extends Skill {
  */
 function getRegisterSkillsSigningContent(skills: Skill[]): string {
   const hash = crypto.createHash('sha256')
-    .update(JSON.stringify(skills, Object.keys(skills).sort()))
+    .update(JSON.stringify(skills))
     .digest('hex');
   return `REGISTER_SKILLS|${hash}`;
 }
