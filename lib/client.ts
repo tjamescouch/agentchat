@@ -324,6 +324,16 @@ export class AgentChatClient extends EventEmitter {
   }
 
   /**
+   * Set a nickname
+   */
+  setNick(nick: string): void {
+    this._send({
+      type: ClientMessageType.SET_NICK,
+      nick
+    });
+  }
+
+  /**
    * Create a new channel
    */
   async createChannel(channel: string, inviteOnly: boolean = false): Promise<JoinedMessage> {
@@ -782,6 +792,10 @@ export class AgentChatClient extends EventEmitter {
 
       case ServerMessageType.AGENT_LEFT:
         this.emit('agent_left', msg);
+        break;
+
+      case ServerMessageType.NICK_CHANGED:
+        this.emit('nick_changed', msg);
         break;
 
       case ServerMessageType.CHANNELS:

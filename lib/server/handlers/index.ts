@@ -40,3 +40,8 @@ export {
 export {
   handleSetPresence,
 } from './presence.js';
+
+// Nick handlers
+export {
+  handleSetNick,
+} from './nick.js';
