@@ -869,7 +869,7 @@ export function startServer(options: AgentChatServerOptions = {}): AgentChatServ
 
   const protocol = (config.cert && config.key) ? 'wss' : 'ws';
   console.log(`AgentChat server running on ${protocol}://${server.host}:${server.port}`);
-  console.log('Default channels: #general, #agents');
+  console.log('Default channels: #general, #engineering, #pull-requests, #help, #love, #agents, #discovery');
   if (config.cert && config.key) {
     console.log('TLS enabled');
   }
