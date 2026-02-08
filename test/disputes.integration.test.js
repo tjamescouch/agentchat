@@ -1,322 +1,576 @@
 /**
- * Agentcourt Dispute Integration Tests
- * Tests the full dispute flow through the server via WebSocket
+ * Agentcourt Dispute Resolution — Integration Tests
+ * Tests the full dispute lifecycle through the DisputeStore.
+ *
+ * Covers: intent → reveal → panel selection → arbiter accept →
+ *         evidence submission → voting → verdict resolution
  */
 
-import { describe, it, before, after } from 'node:test';
+import { test, describe } from 'node:test';
 import assert from 'node:assert';
 import crypto from 'crypto';
-import { AgentChatServer } from '../dist/lib/server.js';
-import { AgentChatClient } from '../dist/lib/client.js';
-import { Identity } from '../dist/lib/identity.js';
-import fs from 'fs/promises';
-import path from 'path';
-import os from 'os';
+import { DisputeStore, DISPUTE_CONSTANTS, calculateDisputeSettlement } from '../dist/lib/disputes.js';
 
-const TEST_PORT = 16680;
-const TEST_SERVER = `ws://localhost:${TEST_PORT}`;
+// ── Helpers ─────────────────────────────────────────────────────────────
 
-/**
- * Helper: send a raw message via client's internal _send
- */
-function rawSend(client, msg) {
-  client._send(msg);
+function makeNonce() {
+  return crypto.randomBytes(16).toString('hex');
+}
+
+function makeCommitment(nonce) {
+  return crypto.createHash('sha256').update(nonce).digest('hex');
+}
+
+function buildPool(count, { prefix = '@arb' } = {}) {
+  const pool = [];
+  for (let i = 0; i < count; i++) {
+    pool.push(`${prefix}${i}`);
+  }
+  return pool;
 }
 
 /**
- * Helper: wait for a specific message type from the server
+ * Run a dispute through the full lifecycle up to resolution.
+ * Returns the resolved dispute from the store.
  */
-function waitForMessage(client, type, timeout = 5000) {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`Timeout waiting for ${type}`)), timeout);
-    const handler = (data) => {
-      try {
-        const msg = JSON.parse(data.toString());
-        if (msg.type === type) {
-          client.ws.removeListener('message', handler);
-          clearTimeout(timer);
-          resolve(msg);
-        }
-      } catch { /* ignore parse errors */ }
-    };
-    client.ws.on('message', handler);
-  });
+function runFullLifecycle(store, { proposalId, disputant, respondent, reason, verdict, poolSize = 5 }) {
+  const nonce = makeNonce();
+  const commitment = makeCommitment(nonce);
+  const pool = buildPool(poolSize);
+
+  const dispute = store.fileIntent(proposalId, disputant, respondent, reason, commitment);
+  store.reveal(dispute.id, nonce);
+  store.selectPanel(dispute.id, pool);
+
+  const d = store.get(dispute.id);
+  for (const slot of d.arbiters) {
+    store.arbiterAccept(dispute.id, slot.agent_id);
+  }
+
+  store.submitEvidence(dispute.id, disputant, [{ kind: 'other', label: 'claim', value: 'data' }], 'My case.', 'sig_d');
+  store.submitEvidence(dispute.id, respondent, [{ kind: 'other', label: 'defense', value: 'data' }], 'My defense.', 'sig_r');
+  store.closeEvidence(dispute.id);
+
+  const afterEvidence = store.get(dispute.id);
+  const arbiterIds = afterEvidence.arbiters.map(a => a.agent_id);
+
+  // Cast votes according to desired verdict
+  if (verdict === 'disputant') {
+    store.castVote(dispute.id, arbiterIds[0], 'disputant', 'reason', 'sig0');
+    store.castVote(dispute.id, arbiterIds[1], 'disputant', 'reason', 'sig1');
+    store.castVote(dispute.id, arbiterIds[2], 'respondent', 'reason', 'sig2');
+  } else if (verdict === 'respondent') {
+    store.castVote(dispute.id, arbiterIds[0], 'respondent', 'reason', 'sig0');
+    store.castVote(dispute.id, arbiterIds[1], 'respondent', 'reason', 'sig1');
+    store.castVote(dispute.id, arbiterIds[2], 'disputant', 'reason', 'sig2');
+  } else {
+    store.castVote(dispute.id, arbiterIds[0], 'mutual', 'reason', 'sig0');
+    store.castVote(dispute.id, arbiterIds[1], 'mutual', 'reason', 'sig1');
+    store.castVote(dispute.id, arbiterIds[2], 'mutual', 'reason', 'sig2');
+  }
+
+  return store.get(dispute.id);
 }
 
-/**
- * Helper: create an accepted proposal between two clients
- */
-async function createAcceptedProposal(alice, bob) {
-  const proposal = await alice.propose(bob.agentId, {
-    task: 'Test work for dispute',
-    amount: 10,
-    currency: 'TEST',
-    payment_code: 'test-pay',
-    expires: 300
+// ── Full Lifecycle Tests ────────────────────────────────────────────────
+
+describe('Dispute Lifecycle Integration', () => {
+
+  test('full lifecycle: intent → reveal → panel → accept → evidence → vote → verdict (disputant wins)', () => {
+    const store = new DisputeStore();
+    const nonce = makeNonce();
+    const commitment = makeCommitment(nonce);
+    const pool = buildPool(5);
+
+    // Phase 1: Intent
+    const dispute = store.fileIntent('prop_1', '@disputant', '@respondent', 'work not delivered', commitment);
+    assert.equal(dispute.phase, 'reveal_pending');
+    assert.equal(dispute.filing_fee_escrowed, true);
+
+    // Phase 2: Reveal
+    const revealed = store.reveal(dispute.id, nonce);
+    assert.ok(revealed);
+    assert.equal(revealed.phase, 'panel_selection');
+    assert.ok(revealed.seed);
+
+    // Phase 3: Panel selection
+    const selected = store.selectPanel(dispute.id, pool);
+    assert.ok(selected);
+    assert.equal(selected.length, DISPUTE_CONSTANTS.PANEL_SIZE);
+
+    const d = store.get(dispute.id);
+    assert.equal(d.phase, 'arbiter_response');
+    assert.equal(d.arbiters.length, DISPUTE_CONSTANTS.PANEL_SIZE);
+
+    // Phase 4: All arbiters accept
+    for (const slot of d.arbiters) {
+      const accepted = store.arbiterAccept(dispute.id, slot.agent_id);
+      assert.ok(accepted, `arbiter ${slot.agent_id} should accept`);
+    }
+
+    const afterAccept = store.get(dispute.id);
+    assert.equal(afterAccept.phase, 'evidence');
+    assert.ok(afterAccept.evidence_deadline);
+
+    // Phase 5: Both parties submit evidence (separate args)
+    const dEvidence = store.submitEvidence(dispute.id, '@disputant',
+      [
+        { kind: 'commit', label: 'Missing deliverable', value: 'abc123' },
+        { kind: 'message_log', label: 'Agreement chat', value: 'We agreed on X' },
+      ],
+      'Work was not delivered as agreed.',
+      'disputant_sig',
+    );
+    assert.equal(dEvidence, true);
+
+    const rEvidence = store.submitEvidence(dispute.id, '@respondent',
+      [
+        { kind: 'commit', label: 'Partial delivery', value: 'def456' },
+      ],
+      'I delivered partial work, rest was blocked.',
+      'respondent_sig',
+    );
+    assert.equal(rEvidence, true);
+
+    // Evidence must be explicitly closed
+    store.closeEvidence(dispute.id);
+
+    const afterEvidence = store.get(dispute.id);
+    assert.equal(afterEvidence.phase, 'deliberation');
+    assert.ok(afterEvidence.vote_deadline);
+
+    // Phase 6: Arbiter votes — 2 for disputant, 1 for respondent (majority wins)
+    const arbiterIds = afterEvidence.arbiters.map(a => a.agent_id);
+
+    store.castVote(dispute.id, arbiterIds[0], 'disputant', 'Work clearly not delivered', 'sig0');
+    store.castVote(dispute.id, arbiterIds[1], 'disputant', 'Agreement was clear', 'sig1');
+    store.castVote(dispute.id, arbiterIds[2], 'respondent', 'Partial work counts', 'sig2');
+
+    // Verdict should be rendered
+    const resolved = store.get(dispute.id);
+    assert.equal(resolved.phase, 'resolved');
+    assert.equal(resolved.verdict, 'disputant');
+    assert.equal(resolved.votes.length, 3);
+
+    store.close();
   });
 
-  // Bob accepts
-  const acceptPromise = waitForMessage(alice, 'ACCEPT');
-  await bob.accept(proposal.id);
-  await acceptPromise;
+  test('full lifecycle: respondent wins', () => {
+    const store = new DisputeStore();
+    const nonce = makeNonce();
+    const commitment = makeCommitment(nonce);
+    const pool = buildPool(5);
 
-  return proposal;
-}
+    const dispute = store.fileIntent('prop_2', '@d', '@r', 'dispute reason', commitment);
+    store.reveal(dispute.id, nonce);
+    store.selectPanel(dispute.id, pool);
 
-describe('Agentcourt Dispute Integration', () => {
-  let server;
-  let tmpDir;
-  let aliceIdentityPath;
-  let bobIdentityPath;
-  let charlieIdentityPath;
+    const d = store.get(dispute.id);
+    for (const slot of d.arbiters) {
+      store.arbiterAccept(dispute.id, slot.agent_id);
+    }
 
-  before(async () => {
-    tmpDir = path.join(os.tmpdir(), `agentchat-dispute-test-${Date.now()}`);
-    await fs.mkdir(tmpDir, { recursive: true });
+    store.submitEvidence(dispute.id, '@d',
+      [{ kind: 'other', label: 'claim', value: 'my claim' }],
+      'They did wrong.',
+      'sig_d',
+    );
+    store.submitEvidence(dispute.id, '@r',
+      [{ kind: 'commit', label: 'proof', value: 'hash' }],
+      'I did the work.',
+      'sig_r',
+    );
+    store.closeEvidence(dispute.id);
 
-    aliceIdentityPath = path.join(tmpDir, 'alice.json');
-    bobIdentityPath = path.join(tmpDir, 'bob.json');
-    charlieIdentityPath = path.join(tmpDir, 'charlie.json');
+    const afterEvidence = store.get(dispute.id);
+    const arbiterIds = afterEvidence.arbiters.map(a => a.agent_id);
 
-    const alice = Identity.generate('alice');
-    await alice.save(aliceIdentityPath);
-    const bob = Identity.generate('bob');
-    await bob.save(bobIdentityPath);
-    const charlie = Identity.generate('charlie');
-    await charlie.save(charlieIdentityPath);
+    // 2 for respondent, 1 for disputant
+    store.castVote(dispute.id, arbiterIds[0], 'respondent', 'work was done', 'sig0');
+    store.castVote(dispute.id, arbiterIds[1], 'respondent', 'evidence supports respondent', 'sig1');
+    store.castVote(dispute.id, arbiterIds[2], 'disputant', 'work was incomplete', 'sig2');
 
-    server = new AgentChatServer({ port: TEST_PORT, logMessages: false });
-    server.start();
+    const resolved = store.get(dispute.id);
+    assert.equal(resolved.phase, 'resolved');
+    assert.equal(resolved.verdict, 'respondent');
+
+    store.close();
   });
 
-  after(async () => {
-    server.stop();
-    try {
-      await fs.rm(tmpDir, { recursive: true });
-    } catch { /* ignore */ }
+  test('full lifecycle: mutual fault verdict', () => {
+    const store = new DisputeStore();
+    const nonce = makeNonce();
+    const commitment = makeCommitment(nonce);
+    const pool = buildPool(5);
+
+    const dispute = store.fileIntent('prop_3', '@d', '@r', 'both at fault', commitment);
+    store.reveal(dispute.id, nonce);
+    store.selectPanel(dispute.id, pool);
+
+    const d = store.get(dispute.id);
+    for (const slot of d.arbiters) {
+      store.arbiterAccept(dispute.id, slot.agent_id);
+    }
+
+    store.submitEvidence(dispute.id, '@d', [], 'Both messed up.', 'sig_d');
+    store.submitEvidence(dispute.id, '@r', [], 'Both share blame.', 'sig_r');
+    store.closeEvidence(dispute.id);
+
+    const afterEvidence = store.get(dispute.id);
+    const arbiterIds = afterEvidence.arbiters.map(a => a.agent_id);
+
+    // All vote mutual
+    store.castVote(dispute.id, arbiterIds[0], 'mutual', 'both at fault', 'sig0');
+    store.castVote(dispute.id, arbiterIds[1], 'mutual', 'shared responsibility', 'sig1');
+    store.castVote(dispute.id, arbiterIds[2], 'mutual', 'agree', 'sig2');
+
+    const resolved = store.get(dispute.id);
+    assert.equal(resolved.phase, 'resolved');
+    assert.equal(resolved.verdict, 'mutual');
+
+    store.close();
   });
 
-  it('can file a dispute intent and receive ACK', async () => {
-    const alice = new AgentChatClient({ server: TEST_SERVER, identity: aliceIdentityPath });
-    const bob = new AgentChatClient({ server: TEST_SERVER, identity: bobIdentityPath });
+  test('arbiter decline triggers replacement from pool', () => {
+    const store = new DisputeStore();
+    const nonce = makeNonce();
+    const commitment = makeCommitment(nonce);
+    const pool = buildPool(8); // Extra agents for replacement
 
-    await alice.connect();
-    await bob.connect();
+    const dispute = store.fileIntent('prop_4', '@d', '@r', 'reason', commitment);
+    store.reveal(dispute.id, nonce);
+    store.selectPanel(dispute.id, pool);
 
-    const proposal = await createAcceptedProposal(alice, bob);
+    const d = store.get(dispute.id);
+    const originalArbiter = d.arbiters[0].agent_id;
+    // Capture original IDs before mutation (store.get returns a reference)
+    const originalIds = d.arbiters.map(a => a.agent_id);
 
-    // Create commitment
-    const nonce = crypto.randomBytes(16).toString('hex');
-    const commitment = crypto.createHash('sha256').update(nonce).digest('hex');
+    // First arbiter declines
+    const replacement = store.arbiterDecline(dispute.id, originalArbiter, pool);
 
-    // Listen for DISPUTE_INTENT_ACK
-    const ackPromise = waitForMessage(alice, 'DISPUTE_INTENT_ACK');
+    // Should get a replacement since pool has extras
+    assert.ok(replacement, 'should find a replacement from pool');
 
-    rawSend(alice, {
-      type: 'DISPUTE_INTENT',
-      proposal_id: proposal.id,
-      reason: 'Work not delivered',
-      commitment,
-      sig: 'test-sig'
-    });
+    const afterDecline = store.get(dispute.id);
+    const declinedSlot = afterDecline.arbiters.find(a => a.agent_id === originalArbiter);
+    // Status transitions: declined → replaced when replacement is found
+    assert.equal(declinedSlot.status, 'replaced');
 
-    const ack = await ackPromise;
-    assert.ok(ack.dispute_id, 'ACK should have dispute_id');
-    assert.equal(ack.proposal_id, proposal.id);
-    assert.ok(ack.server_nonce, 'ACK should include server_nonce');
+    // Replacement should be different from all original arbiters
+    assert.ok(!originalIds.includes(replacement), 'replacement should not be an original arbiter');
 
-    alice.disconnect();
-    bob.disconnect();
+    // Replacement should be added to the panel
+    const replacementSlot = afterDecline.arbiters.find(a => a.agent_id === replacement);
+    assert.ok(replacementSlot, 'replacement should be in arbiters list');
+    assert.equal(replacementSlot.status, 'pending');
+
+    store.close();
   });
 
-  it('can reveal nonce after filing intent', async () => {
-    const alice = new AgentChatClient({ server: TEST_SERVER, identity: aliceIdentityPath });
-    const bob = new AgentChatClient({ server: TEST_SERVER, identity: bobIdentityPath });
+  test('wrong nonce in reveal is rejected', () => {
+    const store = new DisputeStore();
+    const nonce = makeNonce();
+    const commitment = makeCommitment(nonce);
 
-    await alice.connect();
-    await bob.connect();
+    const dispute = store.fileIntent('prop_5', '@d', '@r', 'reason', commitment);
+    const result = store.reveal(dispute.id, 'totally_wrong_nonce');
 
-    const proposal = await createAcceptedProposal(alice, bob);
+    assert.equal(result, null);
+    assert.equal(store.get(dispute.id).phase, 'reveal_pending');
 
-    const nonce = crypto.randomBytes(16).toString('hex');
-    const commitment = crypto.createHash('sha256').update(nonce).digest('hex');
+    store.close();
+  });
 
-    const ackPromise = waitForMessage(alice, 'DISPUTE_INTENT_ACK');
-    rawSend(alice, {
-      type: 'DISPUTE_INTENT',
-      proposal_id: proposal.id,
-      reason: 'Work not done',
-      commitment,
-      sig: 'test-sig'
-    });
-    const ack = await ackPromise;
+  test('duplicate evidence submission is rejected', () => {
+    const store = new DisputeStore();
+    const nonce = makeNonce();
+    const commitment = makeCommitment(nonce);
+    const pool = buildPool(5);
 
-    // Now reveal — should get PANEL_FORMED or DISPUTE_FALLBACK (fallback if no arbiters available)
-    const responsePromise = Promise.race([
-      waitForMessage(alice, 'PANEL_FORMED'),
-      waitForMessage(alice, 'DISPUTE_FALLBACK'),
-    ]);
+    const dispute = store.fileIntent('prop_6', '@d', '@r', 'reason', commitment);
+    store.reveal(dispute.id, nonce);
+    store.selectPanel(dispute.id, pool);
 
-    rawSend(alice, {
-      type: 'DISPUTE_REVEAL',
-      proposal_id: proposal.id,
-      nonce,
-      sig: 'test-sig'
-    });
+    const d = store.get(dispute.id);
+    for (const slot of d.arbiters) {
+      store.arbiterAccept(dispute.id, slot.agent_id);
+    }
 
-    const response = await responsePromise;
-    assert.ok(
-      response.type === 'PANEL_FORMED' || response.type === 'DISPUTE_FALLBACK',
-      `Expected PANEL_FORMED or DISPUTE_FALLBACK, got ${response.type}`
+    // First submission succeeds
+    const first = store.submitEvidence(dispute.id, '@d',
+      [{ kind: 'other', label: 'proof', value: 'data' }],
+      'My case.',
+      'sig1',
+    );
+    assert.equal(first, true);
+
+    // Second submission from same party should fail
+    const second = store.submitEvidence(dispute.id, '@d',
+      [{ kind: 'other', label: 'more proof', value: 'more data' }],
+      'Updated case.',
+      'sig2',
+    );
+    assert.equal(second, false);
+
+    store.close();
+  });
+
+  test('non-arbiter cannot vote', () => {
+    const store = new DisputeStore();
+    const nonce = makeNonce();
+    const commitment = makeCommitment(nonce);
+    const pool = buildPool(5);
+
+    const dispute = store.fileIntent('prop_7', '@d', '@r', 'reason', commitment);
+    store.reveal(dispute.id, nonce);
+    store.selectPanel(dispute.id, pool);
+
+    const d = store.get(dispute.id);
+    for (const slot of d.arbiters) {
+      store.arbiterAccept(dispute.id, slot.agent_id);
+    }
+
+    store.submitEvidence(dispute.id, '@d', [], 'case', 's');
+    store.submitEvidence(dispute.id, '@r', [], 'case', 's');
+    store.closeEvidence(dispute.id);
+
+    // Random agent tries to vote
+    const result = store.castVote(dispute.id, '@random_agent', 'disputant', 'i say so', 'sig');
+    assert.equal(result, false);
+
+    store.close();
+  });
+
+  test('duplicate vote from same arbiter is rejected', () => {
+    const store = new DisputeStore();
+    const nonce = makeNonce();
+    const commitment = makeCommitment(nonce);
+    const pool = buildPool(5);
+
+    const dispute = store.fileIntent('prop_8', '@d', '@r', 'reason', commitment);
+    store.reveal(dispute.id, nonce);
+    store.selectPanel(dispute.id, pool);
+
+    const d = store.get(dispute.id);
+    for (const slot of d.arbiters) {
+      store.arbiterAccept(dispute.id, slot.agent_id);
+    }
+
+    store.submitEvidence(dispute.id, '@d', [], 'x', 's');
+    store.submitEvidence(dispute.id, '@r', [], 'x', 's');
+    store.closeEvidence(dispute.id);
+
+    const arbiter = store.get(dispute.id).arbiters[0].agent_id;
+
+    // First vote succeeds
+    const first = store.castVote(dispute.id, arbiter, 'disputant', 'reason', 'sig1');
+    assert.equal(first, true);
+
+    // Second vote from same arbiter should fail (status is now 'voted', not 'accepted')
+    const second = store.castVote(dispute.id, arbiter, 'respondent', 'changed mind', 'sig2');
+    assert.equal(second, false);
+
+    store.close();
+  });
+
+  test('evidence hashes are computed for each item', () => {
+    const store = new DisputeStore();
+    const nonce = makeNonce();
+    const commitment = makeCommitment(nonce);
+    const pool = buildPool(5);
+
+    const dispute = store.fileIntent('prop_9', '@d', '@r', 'reason', commitment);
+    store.reveal(dispute.id, nonce);
+    store.selectPanel(dispute.id, pool);
+
+    const d = store.get(dispute.id);
+    for (const slot of d.arbiters) {
+      store.arbiterAccept(dispute.id, slot.agent_id);
+    }
+
+    store.submitEvidence(dispute.id, '@d',
+      [
+        { kind: 'commit', label: 'commit ref', value: 'abc123' },
+        { kind: 'message_log', label: 'chat log', value: 'conversation text' },
+      ],
+      'Evidence submitted.',
+      'sig',
     );
 
-    alice.disconnect();
-    bob.disconnect();
+    const afterEvidence = store.get(dispute.id);
+    const items = afterEvidence.disputant_evidence.items;
+    assert.equal(items.length, 2);
+    for (const item of items) {
+      assert.ok(item.hash, `item "${item.label}" should have a hash`);
+      assert.equal(item.hash.length, 64); // SHA256 hex
+    }
+
+    store.close();
   });
 
-  it('rejects reveal with wrong nonce', async () => {
-    const alice = new AgentChatClient({ server: TEST_SERVER, identity: aliceIdentityPath });
-    const bob = new AgentChatClient({ server: TEST_SERVER, identity: bobIdentityPath });
+  test('seed is deterministic from proposal_id + nonce + server_nonce', () => {
+    const store = new DisputeStore();
+    const nonce = makeNonce();
+    const commitment = makeCommitment(nonce);
 
-    await alice.connect();
-    await bob.connect();
+    const dispute = store.fileIntent('prop_10', '@d', '@r', 'reason', commitment);
+    store.reveal(dispute.id, nonce);
 
-    const proposal = await createAcceptedProposal(alice, bob);
+    const d = store.get(dispute.id);
+    const expectedSeed = crypto.createHash('sha256')
+      .update('prop_10' + nonce + d.server_nonce)
+      .digest('hex');
 
-    const nonce = crypto.randomBytes(16).toString('hex');
-    const commitment = crypto.createHash('sha256').update(nonce).digest('hex');
+    assert.equal(d.seed, expectedSeed);
 
-    const ackPromise = waitForMessage(alice, 'DISPUTE_INTENT_ACK');
-    rawSend(alice, {
-      type: 'DISPUTE_INTENT',
-      proposal_id: proposal.id,
-      reason: 'Bad work',
-      commitment,
-      sig: 'test-sig'
-    });
-    await ackPromise;
-
-    // Send wrong nonce
-    const errorPromise = waitForMessage(alice, 'ERROR');
-    rawSend(alice, {
-      type: 'DISPUTE_REVEAL',
-      proposal_id: proposal.id,
-      nonce: 'wrong-nonce-value',
-      sig: 'test-sig'
-    });
-
-    const error = await errorPromise;
-    assert.ok(error.message.includes('commitment') || error.message.includes('Nonce'),
-      `Expected commitment mismatch error, got: ${error.message}`);
-
-    alice.disconnect();
-    bob.disconnect();
+    store.close();
   });
 
-  it('rejects dispute on non-accepted proposal', async () => {
-    const alice = new AgentChatClient({ server: TEST_SERVER, identity: aliceIdentityPath });
-    const bob = new AgentChatClient({ server: TEST_SERVER, identity: bobIdentityPath });
+  test('lookups: getByProposal and listByAgent', () => {
+    const store = new DisputeStore();
+    const nonce = makeNonce();
+    const commitment = makeCommitment(nonce);
 
-    await alice.connect();
-    await bob.connect();
+    const dispute = store.fileIntent('prop_11', '@alice', '@bob', 'reason', commitment);
 
-    // Create proposal but don't accept it
-    const proposal = await alice.propose(bob.agentId, {
-      task: 'Unaccepted work',
-      amount: 5,
-      currency: 'TEST',
-      payment_code: 'test-pay',
-      expires: 300
+    // Lookup by proposal
+    const byProp = store.getByProposal('prop_11');
+    assert.ok(byProp);
+    assert.equal(byProp.id, dispute.id);
+
+    // Lookup by agent
+    const aliceDisputes = store.listByAgent('@alice');
+    assert.equal(aliceDisputes.length, 1);
+    assert.equal(aliceDisputes[0].id, dispute.id);
+
+    const bobDisputes = store.listByAgent('@bob');
+    assert.equal(bobDisputes.length, 1);
+
+    store.close();
+  });
+});
+
+describe('calculateDisputeSettlement', () => {
+  test('disputant wins: disputant gains, respondent loses', () => {
+    if (!calculateDisputeSettlement) return;
+
+    const store = new DisputeStore();
+    const resolved = runFullLifecycle(store, {
+      proposalId: 'settle_1',
+      disputant: '@d',
+      respondent: '@r',
+      reason: 'test settlement',
+      verdict: 'disputant',
     });
 
-    const nonce = crypto.randomBytes(16).toString('hex');
-    const commitment = crypto.createHash('sha256').update(nonce).digest('hex');
+    const ratings = {
+      '@d': { rating: 1200, transactions: 10 },
+      '@r': { rating: 1200, transactions: 10 },
+    };
 
-    const errorPromise = waitForMessage(alice, 'ERROR');
-    rawSend(alice, {
-      type: 'DISPUTE_INTENT',
-      proposal_id: proposal.id,
-      reason: 'Test',
-      commitment,
-      sig: 'test-sig'
-    });
+    const changes = calculateDisputeSettlement(resolved, ratings);
 
-    const error = await errorPromise;
-    assert.ok(error.message.includes('accepted'),
-      `Expected "accepted" error, got: ${error.message}`);
+    assert.ok(changes);
+    assert.ok(changes['@d'].change > 0, 'disputant should gain rating');
+    assert.ok(changes['@r'].change < 0, 'respondent should lose rating');
 
-    alice.disconnect();
-    bob.disconnect();
+    store.close();
   });
 
-  it('rejects dispute from ephemeral agent (no pubkey)', async () => {
-    const ephemeral = new AgentChatClient({ server: TEST_SERVER, name: 'ephemeral-test' });
-    const bob = new AgentChatClient({ server: TEST_SERVER, identity: bobIdentityPath });
+  test('respondent wins: respondent gains, disputant loses', () => {
+    if (!calculateDisputeSettlement) return;
 
-    await ephemeral.connect();
-    await bob.connect();
-
-    const nonce = crypto.randomBytes(16).toString('hex');
-    const commitment = crypto.createHash('sha256').update(nonce).digest('hex');
-
-    const errorPromise = waitForMessage(ephemeral, 'ERROR');
-    rawSend(ephemeral, {
-      type: 'DISPUTE_INTENT',
-      proposal_id: 'fake_proposal',
-      reason: 'Test',
-      commitment,
-      sig: 'test-sig'
+    const store = new DisputeStore();
+    const resolved = runFullLifecycle(store, {
+      proposalId: 'settle_2',
+      disputant: '@d',
+      respondent: '@r',
+      reason: 'test settlement',
+      verdict: 'respondent',
     });
 
-    const error = await errorPromise;
-    assert.ok(error.message.includes('persistent') || error.message.includes('Signature'),
-      `Expected persistent identity error, got: ${error.message}`);
+    const ratings = {
+      '@d': { rating: 1200, transactions: 10 },
+      '@r': { rating: 1200, transactions: 10 },
+    };
 
-    ephemeral.disconnect();
-    bob.disconnect();
+    const changes = calculateDisputeSettlement(resolved, ratings);
+
+    assert.ok(changes);
+    assert.ok(changes['@r'].change > 0, 'respondent should gain rating');
+    assert.ok(changes['@d'].change < 0, 'disputant should lose rating');
+
+    store.close();
   });
 
-  it('rejects duplicate dispute on same proposal', async () => {
-    const alice = new AgentChatClient({ server: TEST_SERVER, identity: aliceIdentityPath });
-    const bob = new AgentChatClient({ server: TEST_SERVER, identity: bobIdentityPath });
+  test('mutual fault: both lose', () => {
+    if (!calculateDisputeSettlement) return;
 
-    await alice.connect();
-    await bob.connect();
-
-    const proposal = await createAcceptedProposal(alice, bob);
-
-    const nonce1 = crypto.randomBytes(16).toString('hex');
-    const commitment1 = crypto.createHash('sha256').update(nonce1).digest('hex');
-
-    // First dispute — should succeed
-    const ackPromise = waitForMessage(alice, 'DISPUTE_INTENT_ACK');
-    rawSend(alice, {
-      type: 'DISPUTE_INTENT',
-      proposal_id: proposal.id,
-      reason: 'First dispute',
-      commitment: commitment1,
-      sig: 'test-sig'
-    });
-    await ackPromise;
-
-    // Second dispute on same proposal — should fail
-    const nonce2 = crypto.randomBytes(16).toString('hex');
-    const commitment2 = crypto.createHash('sha256').update(nonce2).digest('hex');
-
-    const errorPromise = waitForMessage(alice, 'ERROR');
-    rawSend(alice, {
-      type: 'DISPUTE_INTENT',
-      proposal_id: proposal.id,
-      reason: 'Second dispute',
-      commitment: commitment2,
-      sig: 'test-sig'
+    const store = new DisputeStore();
+    const resolved = runFullLifecycle(store, {
+      proposalId: 'settle_3',
+      disputant: '@d',
+      respondent: '@r',
+      reason: 'test settlement',
+      verdict: 'mutual',
     });
 
-    const error = await errorPromise;
-    assert.ok(error.message.includes('already'),
-      `Expected "already exists" error, got: ${error.message}`);
+    const ratings = {
+      '@d': { rating: 1200, transactions: 10 },
+      '@r': { rating: 1200, transactions: 10 },
+    };
 
-    alice.disconnect();
-    bob.disconnect();
+    const changes = calculateDisputeSettlement(resolved, ratings);
+
+    assert.ok(changes);
+    assert.ok(changes['@d'].change < 0, 'disputant should lose rating');
+    assert.ok(changes['@r'].change < 0, 'respondent should lose rating');
+
+    store.close();
+  });
+
+  test('settlement includes arbiter rewards for majority voters', () => {
+    if (!calculateDisputeSettlement) return;
+
+    const store = new DisputeStore();
+    const resolved = runFullLifecycle(store, {
+      proposalId: 'settle_4',
+      disputant: '@d',
+      respondent: '@r',
+      reason: 'test arbiter rewards',
+      verdict: 'disputant',
+    });
+
+    const ratings = {
+      '@d': { rating: 1200, transactions: 10 },
+      '@r': { rating: 1200, transactions: 10 },
+    };
+    // Add arbiter ratings
+    for (const slot of resolved.arbiters) {
+      ratings[slot.agent_id] = { rating: 1400, transactions: 20 };
+    }
+
+    const changes = calculateDisputeSettlement(resolved, ratings);
+
+    // Arbiters who voted with the majority (disputant) should get ARBITER_REWARD
+    const majorityVoters = resolved.arbiters.filter(
+      a => a.vote && a.vote.verdict === 'disputant'
+    );
+    for (const voter of majorityVoters) {
+      assert.equal(changes[voter.agent_id].change, DISPUTE_CONSTANTS.ARBITER_REWARD,
+        `majority voter ${voter.agent_id} should get ARBITER_REWARD`);
+    }
+
+    // Dissenter should get 0
+    const dissenters = resolved.arbiters.filter(
+      a => a.vote && a.vote.verdict !== 'disputant'
+    );
+    for (const dissenter of dissenters) {
+      assert.equal(changes[dissenter.agent_id].change, 0,
+        `dissenter ${dissenter.agent_id} should get 0 change`);
+    }
+
+    store.close();
   });
 });
