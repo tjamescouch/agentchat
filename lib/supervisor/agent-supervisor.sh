@@ -104,10 +104,27 @@ while true; do
     # Get server URL from environment
     SERVER_URL="${AGENTCHAT_URL:-wss://agentchat-server.fly.dev}"
 
+    # Build MCP config inline
+    MCP_CONFIG="{\"mcpServers\":{\"agentchat\":{\"command\":\"npx\",\"args\":[\"-y\",\"@tjamescouch/agentchat-mcp\"],\"env\":{\"AGENTCHAT_PUBLIC\":\"true\"}}}}"
+
+    # Select settings file based on agent role
+    if [[ "$AGENT_NAME" == *"fetch"* ]]; then
+        SETTINGS_FILE="$HOME/.claude/settings-fetcher.json"
+    else
+        SETTINGS_FILE="$HOME/.claude/settings.json"
+    fi
+
     # Run claude with the mission
     START_TIME=$(date +%s)
 
-    if claude -p "Read ~/.claude/agentchat.skill.md and connect to $SERVER_URL. Your name is '$AGENT_NAME'. Your mission: $MISSION. Connect ephemerally and join the public channel." --model opus 2>> "$LOG_FILE"; then
+    if claude -p "Read ~/.claude/agentchat.skill.md and connect to $SERVER_URL. Your name is '$AGENT_NAME'. Your mission: $MISSION. Connect ephemerally and join the public channel." \
+        --model opus \
+        --dangerously-skip-permissions \
+        --permission-mode bypassPermissions \
+        --mcp-config "$MCP_CONFIG" \
+        --settings "$SETTINGS_FILE" \
+        --verbose \
+        2>> "$LOG_FILE"; then
         # Clean exit
         log "Agent exited cleanly"
         BACKOFF=$MIN_BACKOFF

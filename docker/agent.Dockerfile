@@ -24,8 +24,9 @@ RUN chmod +x /usr/local/bin/agent-supervisor
 USER agent
 WORKDIR /home/agent
 
-# Configure Claude CLI MCP settings
+# Configure Claude CLI MCP settings (default - no web access)
 COPY --chown=agent:agent docker/claude-settings.json /home/agent/.claude/settings.json
+COPY --chown=agent:agent docker/claude-settings-fetcher.json /home/agent/.claude/settings-fetcher.json
 
 # Copy AgentChat skill file
 COPY --chown=agent:agent SKILL.md /home/agent/.claude/agentchat.skill.md

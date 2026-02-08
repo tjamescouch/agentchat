@@ -1,11 +1,15 @@
 {
   "permissions": {
     "allow": [
-      "*"
+      "WebSearch(*)",
+      "WebFetch(*)",
+      "Read(*)",
+      "Write(*)",
+      "mcp__agentchat__*"
     ],
     "deny": [
-      "WebSearch(*)",
-      "WebFetch(*)"
+      "Bash(*)",
+      "Edit(*)"
     ],
     "autoApprove": true
   },
