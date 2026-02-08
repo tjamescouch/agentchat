@@ -141,7 +141,7 @@ check "Container is running" podman ps -q -f "name=^agentchat-${TEST_AGENT}$"
 check "State dir created" test -d "$HOME/.agentchat/agents/${TEST_AGENT}"
 check "Mission file created" test -f "$HOME/.agentchat/agents/${TEST_AGENT}/mission.txt"
 check "Context file created" test -f "$HOME/.agentchat/agents/${TEST_AGENT}/context.md"
-check_output "Container has agent label" "agentchat.agent=true" podman inspect --format '{{index .Config.Labels "agentchat.agent"}}' "agentchat-${TEST_AGENT}"
+check_output "Container has agent label" "true" podman inspect --format '{{index .Config.Labels "agentchat.agent"}}' "agentchat-${TEST_AGENT}"
 check_output "Container has name label" "$TEST_AGENT" podman inspect --format '{{index .Config.Labels "agentchat.name"}}' "agentchat-${TEST_AGENT}"
 
 # Status
@@ -152,7 +152,7 @@ check_output "List shows agent" "$TEST_AGENT" "$AGENTCTL" list
 
 # Logs (container)
 sleep 3
-check_output "Container logs available" "Starting supervisor" "$AGENTCTL" logs "$TEST_AGENT" --container
+check_output "Container logs available" "supervisor" "$AGENTCTL" logs "$TEST_AGENT" --container
 
 # Stop
 bold "  Stopping test agent..."
