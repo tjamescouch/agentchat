@@ -46,7 +46,7 @@ echo
 
 # Validate package
 echo -e "${YELLOW}🔍 Validating package...${NC}"
-if npm run --silent pack &>/dev/null; then
+if npm pack --dry-run &>/dev/null; then
     echo -e "${GREEN}✅ Package structure looks good!${NC}"
 else
     echo -e "${RED}❌ Package validation failed${NC}"
@@ -54,21 +54,44 @@ else
 fi
 echo
 
-# Get OTP
-echo -e "${PURPLE}🔐 Enter your npm 2FA code:${NC}"
-read -r OTP
+# Publish with retry
+MAX_ATTEMPTS=3
+ATTEMPT=1
+SUCCESS=false
 
-if [ -z "$OTP" ]; then
-    echo -e "${RED}❌ OTP is required${NC}"
-    exit 1
-fi
+while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+    echo -e "${PURPLE}🔐 Enter your npm 2FA code (attempt $ATTEMPT/$MAX_ATTEMPTS):${NC}"
+    echo -e "${YELLOW}💡 Get a FRESH code from your authenticator (refreshes every 30s)${NC}"
+    read -r OTP
 
-# Publish!
-echo
-echo -e "${YELLOW}🚀 Publishing to npm...${NC}"
-echo
+    if [ -z "$OTP" ]; then
+        echo -e "${RED}❌ OTP is required${NC}"
+        continue
+    fi
 
-if npm publish --access public --otp="${OTP}"; then
+    echo
+    echo -e "${YELLOW}🚀 Publishing to npm...${NC}"
+    echo
+
+    if npm publish --access public --otp="${OTP}" 2>&1; then
+        SUCCESS=true
+        break
+    else
+        ATTEMPT=$((ATTEMPT + 1))
+        if [ $ATTEMPT -le $MAX_ATTEMPTS ]; then
+            echo
+            echo -e "${YELLOW}⚠️  Publish failed. Common reasons:${NC}"
+            echo -e "   • OTP expired (get a fresh one!)"
+            echo -e "   • Typo in code"
+            echo -e "   • Network hiccup"
+            echo
+            echo -e "${CYAN}🔄 Try again with a NEW code...${NC}"
+            sleep 2
+        fi
+    fi
+done
+
+if [ "$SUCCESS" = true ]; then
     echo
     echo -e "${GREEN}"
     cat << "EOF"
@@ -76,7 +99,7 @@ if npm publish --access public --otp="${OTP}"; then
     ║                                       ║
     ║       ✨  PUBLISHED!  ✨             ║
     ║                                       ║
-    ╔═══════════════════════════════════════╗
+    ╚═══════════════════════════════════════╝
 EOF
     echo -e "${NC}"
     echo -e "${GREEN}🎉 Successfully published @tjamescouch/agentchat-mcp@${VERSION}${NC}"
@@ -85,11 +108,11 @@ EOF
     echo
     echo -e "${PURPLE}🤖 Now rebuild your agents:${NC}"
     echo -e "   ${YELLOW}agentctl build${NC}"
-    echo -e "   ${YELLOW}agentctl restart peace${NC}"
+    echo -e "   ${YELLOW}AGENTCHAT_URL=wss://agentchat-dashboard.fly.dev agentctl restart peace${NC}"
     echo
 else
     echo
-    echo -e "${RED}❌ Publish failed!${NC}"
-    echo -e "${YELLOW}💡 Check your OTP and try again${NC}"
+    echo -e "${RED}❌ Publish failed after $MAX_ATTEMPTS attempts!${NC}"
+    echo -e "${YELLOW}💡 Wait 30 seconds for a fresh OTP, then try: ./publish.sh${NC}"
     exit 1
 fi

@@ -117,9 +117,8 @@ while true; do
     # Run claude with the mission
     START_TIME=$(date +%s)
 
-    if claude -p "Read ~/.claude/agentchat.skill.md and connect to $SERVER_URL. Your name is '$AGENT_NAME'. Your mission: $MISSION. Connect ephemerally and join the public channel." \
+    if claude -p "Read ~/.claude/agentchat.skill.md and connect to $SERVER_URL. Your name is '$AGENT_NAME'. Your mission: $MISSION. Connect ephemerally and join the public channel. IMPORTANT: After connecting, enter a continuous listen loop. Keep listening for messages and responding. Never exit unless there's an error." \
         --model opus \
-        --betas extended-thinking-2025-05-06 \
         --dangerously-skip-permissions \
         --permission-mode bypassPermissions \
         --mcp-config "$MCP_CONFIG" \
