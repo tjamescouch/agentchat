@@ -1,0 +1,62 @@
+name: Publish MCP Package
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'mcp-server/**'
+      - '.github/workflows/publish-mcp.yml'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Check if version changed
+        id: check
+        run: |
+          cd mcp-server
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          if npm view @tjamescouch/agentchat-mcp@$PACKAGE_VERSION version 2>/dev/null; then
+            echo "Version $PACKAGE_VERSION already published"
+            echo "should_publish=false" >> $GITHUB_OUTPUT
+          else
+            echo "Version $PACKAGE_VERSION is new"
+            echo "should_publish=true" >> $GITHUB_OUTPUT
+            echo "version=$PACKAGE_VERSION" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install dependencies
+        if: steps.check.outputs.should_publish == 'true'
+        run: |
+          cd mcp-server
+          npm ci
+
+      - name: Publish to npm
+        if: steps.check.outputs.should_publish == 'true'
+        run: |
+          cd mcp-server
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create Release
+        if: steps.check.outputs.should_publish == 'true'
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: mcp-v${{ steps.check.outputs.version }}
+          release_name: MCP Server v${{ steps.check.outputs.version }}
+          body: |
+            Published @tjamescouch/agentchat-mcp@${{ steps.check.outputs.version }}
+          draft: false
+          prerelease: false
