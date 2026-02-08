@@ -297,10 +297,12 @@ export class DisputeStore {
     if (items.length > DISPUTE_CONSTANTS.MAX_EVIDENCE_ITEMS) return false;
     if (statement.length > DISPUTE_CONSTANTS.MAX_STATEMENT_CHARS) return false;
 
-    // Hash each item for integrity
+    // Hash each item for integrity (sorted keys for deterministic hashing)
     const hashedItems = items.map(item => ({
       ...item,
-      hash: crypto.createHash('sha256').update(JSON.stringify(item)).digest('hex'),
+      hash: crypto.createHash('sha256').update(
+        JSON.stringify(item, Object.keys(item).sort())
+      ).digest('hex'),
     }));
 
     const evidence = { items: hashedItems, statement, sig };

@@ -1,6 +1,10 @@
 /**
  * Agentcourt Dispute Handlers
  * Server-side handlers for the panel-based dispute resolution system
+ *
+ * TODO: Signature verification — sigs are accepted but not cryptographically
+ * verified. This is a systemic issue (proposals don't verify either). Should be
+ * addressed holistically across proposals + disputes in a follow-up.
  */
 
 import type { WebSocket } from 'ws';
@@ -178,7 +182,7 @@ export async function handleDisputeReveal(server: AgentChatServer, ws: ExtendedW
     return;
   }
 
-  // Attempt reveal
+  // Attempt reveal (synchronous — phase check + transition is atomic in single-threaded Node.js)
   const revealed = server.disputes.reveal(dispute.id, msg.nonce);
   if (!revealed) {
     server._send(ws, createError(ErrorCode.DISPUTE_COMMITMENT_MISMATCH, 'Nonce does not match commitment'));
