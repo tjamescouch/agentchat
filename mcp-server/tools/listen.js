@@ -14,9 +14,10 @@ import { client, getLastSeen, updateLastSeen, getIdleCount, incrementIdleCount, 
 
 // Timeouts - agent cannot override these
 const ENFORCED_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour when alone
-const NUDGE_TIMEOUT_MS = 5 * 1000; // 5 seconds when others are present
-const MAX_BACKOFF_MS = 5 * 60 * 1000; // 5 minute cap on backoff
+const NUDGE_TIMEOUT_MS = 30 * 1000; // 30 seconds when others are present
+const MAX_BACKOFF_MS = 15 * 60 * 1000; // 15 minute cap on backoff
 const POLL_INTERVAL_MS = 500; // fallback poll interval
+const HEARTBEAT_INTERVAL_MS = 30 * 1000; // heartbeat file write interval
 
 /**
  * Read inbox.jsonl and return messages newer than lastSeen for the given channels.
@@ -77,7 +78,7 @@ function readInbox(paths, lastSeen, channels, agentId) {
 export function registerListenTool(server) {
   server.tool(
     'agentchat_listen',
-    'Listen for messages - blocks until a message arrives. If others are in the channel, returns after ~30s with nudge:true so you can take initiative. If alone, waits up to 1 hour.',
+    'Listen for messages - blocks until a message arrives. If others are in the channel, returns after ~30s with nudge:true so you can take initiative. If alone, waits up to 1 hour. Writes a heartbeat file every 30s during blocking for deadlock detection.',
     {
       channels: z.array(z.string()).describe('Channels to listen on (e.g., ["#general"])'),
     },
@@ -151,7 +152,7 @@ export function registerListenTool(server) {
           let pollId = null;
           let timeoutId = null;
 
-          const cleanup = () => {
+          let cleanup = () => {
             if (watcher) { watcher.close(); watcher = null; }
             if (pollId) { clearInterval(pollId); pollId = null; }
             if (timeoutId) { clearTimeout(timeoutId); timeoutId = null; }
@@ -216,9 +217,25 @@ export function registerListenTool(server) {
             : ENFORCED_TIMEOUT_MS;
           const actualTimeout = addJitter(baseTimeout, 0.2);
 
+          // Heartbeat file for deadlock detection
+          const heartbeatPath = path.join(newdataDir, 'heartbeat');
+          const writeHeartbeat = () => {
+            try { fs.writeFileSync(heartbeatPath, String(Date.now())); } catch { /* ignore */ }
+          };
+          writeHeartbeat();
+          const heartbeatId = setInterval(writeHeartbeat, HEARTBEAT_INTERVAL_MS);
+
+          const origCleanup = cleanup;
+          const cleanupAll = () => {
+            clearInterval(heartbeatId);
+            origCleanup();
+          };
+          // Replace cleanup ref for the timeout/tryRead paths
+          cleanup = cleanupAll;
+
           timeoutId = setTimeout(() => {
             incrementIdleCount();
-            cleanup();
+            cleanupAll();
             resolve({
               content: [{
                 type: 'text',
@@ -231,7 +248,6 @@ export function registerListenTool(server) {
                   idle_count: idleCount + 1,
                   next_timeout_ms: Math.min(NUDGE_TIMEOUT_MS * Math.pow(2, idleCount + 1), MAX_BACKOFF_MS),
                   elapsed_ms: Date.now() - startTime,
-                  action: 'You MUST send a message before listening again. Say something — a status update, a question, or just a brief ping. Do not call agentchat_listen without sending a message first.',
                 }),
               }],
             });
