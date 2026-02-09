@@ -51,3 +51,6 @@ build/
 # Logs
 *.log
 logs/
+
+
+bans.json
