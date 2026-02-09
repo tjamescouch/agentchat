@@ -49,7 +49,16 @@ export function handleSetPresence(server: AgentChatServer, ws: ExtendedWebSocket
     status_text: agent.status_text
   });
 
+  // Collect unique recipients across all channels to avoid duplicate sends
+  const seen = new Set<WebSocket>();
   for (const channelName of agent.channels) {
-    server._broadcast(channelName, presenceMsg);
+    const ch = server.channels.get(channelName);
+    if (!ch) continue;
+    for (const memberWs of ch.agents) {
+      if (memberWs !== ws && !seen.has(memberWs)) {
+        seen.add(memberWs);
+        server._send(memberWs, presenceMsg);
+      }
+    }
   }
 }
