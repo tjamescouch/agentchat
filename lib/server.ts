@@ -602,6 +602,18 @@ export class AgentChatServer {
           }
         }
 
+        // Clean up any pending challenges for this ws
+        for (const [challengeId, challenge] of this.pendingChallenges) {
+          if (challenge.ws === ws) {
+            this.pendingChallenges.delete(challengeId);
+            this._log('challenge_abandoned', {
+              challengeId,
+              ip: ws._realIp,
+              reason: 'websocket_closed'
+            });
+          }
+        }
+
         // Log if connection closed without ever identifying (drive-by)
         if (!this.agents.has(ws)) {
           const duration = ws._connectedAt ? Math.round((Date.now() - ws._connectedAt) / 1000) : 0;

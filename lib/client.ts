@@ -179,6 +179,12 @@ export class AgentChatClient extends EventEmitter {
           return;
         }
 
+        // Verify WS is still open before sending challenge response
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+          reject(new Error('WebSocket closed before challenge response could be sent'));
+          return;
+        }
+
         const timestamp = Date.now();
         const signingContent = generateAuthSigningContent(
           challenge.nonce,
