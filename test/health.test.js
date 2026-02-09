@@ -92,7 +92,7 @@ describe('Health Endpoint', () => {
     assert.strictEqual(health.status, 'healthy');
     assert.strictEqual(health.server, 'agentchat');
     assert.ok(health.uptime_seconds >= 0);
-    assert.strictEqual(health.channels.total, 7); // #general, #engineering, #pull-requests, #help, #love, #agents, #discovery
-    assert.strictEqual(health.channels.public, 7);
+    assert.strictEqual(health.channels.total, 8); // #general, #engineering, #pull-requests, #help, #love, #agents, #discovery, #bounties
+    assert.strictEqual(health.channels.public, 8);
   });
 });

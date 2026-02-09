@@ -77,9 +77,10 @@ export function registerConnectTool(server) {
           setKeepaliveInterval(null);
         }
 
-        // Disconnect existing client
+        // Disconnect existing client and wait briefly for server to process
         if (client) {
           client.disconnect();
+          await new Promise(r => setTimeout(r, 100));
         }
 
         const actualServerUrl = server_url || DEFAULT_SERVER_URL;
@@ -128,8 +129,33 @@ export function registerConnectTool(server) {
           options.identity = actualIdentityPath;
         }
 
-        const newClient = new AgentChatClient(options);
-        await newClient.connect();
+        // Connect with retry for challenge-response race conditions
+        const MAX_RETRIES = 3;
+        const RETRY_DELAYS = [0, 500, 1500];
+        let newClient;
+        let lastError;
+
+        for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+          if (attempt > 0) {
+            await new Promise(r => setTimeout(r, RETRY_DELAYS[attempt]));
+          }
+          try {
+            newClient = new AgentChatClient(options);
+            await newClient.connect();
+            break;
+          } catch (err) {
+            lastError = err;
+            const isRetryable = err.message && (
+              err.message.includes('Challenge expired') ||
+              err.message.includes('Challenge not found') ||
+              err.message.includes('WebSocket closed before challenge')
+            );
+            if (!isRetryable || attempt === MAX_RETRIES - 1) {
+              throw err;
+            }
+          }
+        }
+
         setClient(newClient);
         setServerUrl(actualServerUrl);
 
@@ -163,6 +189,15 @@ export function registerConnectTool(server) {
         }, KEEPALIVE_INTERVAL_MS);
         setKeepaliveInterval(interval);
 
+        // Auto-join marketplace channels for discoverability
+        for (const ch of ['#general', '#discovery', '#bounties']) {
+          try {
+            await newClient.join(ch);
+          } catch {
+            // Non-fatal: channel may not exist on older servers
+          }
+        }
+
         return {
           content: [
             {
@@ -173,6 +208,13 @@ export function registerConnectTool(server) {
                 server: actualServerUrl,
                 persistent: !!actualIdentityPath,
                 identity_path: actualIdentityPath,
+                marketplace: {
+                  hint: 'Register skills with agentchat_register_skills, find work with agentchat_search_skills, send proposals with agentchat_propose',
+                  channels: {
+                    '#discovery': 'Skill registration announcements',
+                    '#bounties': 'Open work proposals',
+                  },
+                },
               }),
             },
           ],

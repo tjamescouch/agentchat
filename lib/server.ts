@@ -27,6 +27,7 @@ import {
 import { ProposalStore } from './proposals.js';
 import { DisputeStore } from './disputes.js';
 import { ReputationStore } from './reputation.js';
+import { SkillsStore } from './skills-store.js';
 import { EscrowHooks } from './escrow-hooks.js';
 import { Allowlist } from './allowlist.js';
 import { Banlist } from './banlist.js';
@@ -224,6 +225,7 @@ export class AgentChatServer {
 
   // Skills registry
   skillsRegistry: Map<string, SkillRegistration>;
+  skillsStore: SkillsStore;
 
   // Reputation store
   reputationStore: ReputationStore;
@@ -311,13 +313,15 @@ export class AgentChatServer {
     this._createChannel('#love', false);
     this._createChannel('#agents', false);
     this._createChannel('#discovery', false);
+    this._createChannel('#bounties', false);
 
     // Proposal store for structured negotiations
     this.proposals = new ProposalStore();
     this.disputes = new DisputeStore();
 
-    // Skills registry
+    // Skills registry (in-memory + persistent)
     this.skillsRegistry = new Map();
+    this.skillsStore = new SkillsStore();
 
     // Reputation store for ELO ratings
     this.reputationStore = new ReputationStore();
@@ -535,6 +539,19 @@ export class AgentChatServer {
 
     this._log('server_start', { port: this.port, host: this.host, tls });
 
+    // Load persisted skills into in-memory registry
+    this.skillsStore.load().then(async () => {
+      const persisted = await this.skillsStore.getAll();
+      for (const [agentId, registration] of Object.entries(persisted)) {
+        this.skillsRegistry.set(agentId, registration);
+      }
+      if (Object.keys(persisted).length > 0) {
+        this._log('skills_loaded', { count: Object.keys(persisted).length });
+      }
+    }).catch(err => {
+      this._log('skills_load_error', { error: err.message });
+    });
+
     this.wss.on('connection', (ws: ExtendedWebSocket, req: IncomingMessage) => {
       // Get real IP (X-Forwarded-For for proxied connections like Fly.io)
       const forwardedFor = req.headers['x-forwarded-for'];
@@ -582,6 +599,18 @@ export class AgentChatServer {
             this.connectionsByIp.delete(ws._realIp);
           } else {
             this.connectionsByIp.set(ws._realIp, current - 1);
+          }
+        }
+
+        // Clean up any pending challenges for this ws
+        for (const [challengeId, challenge] of this.pendingChallenges) {
+          if (challenge.ws === ws) {
+            this.pendingChallenges.delete(challengeId);
+            this._log('challenge_abandoned', {
+              challengeId,
+              ip: ws._realIp,
+              reason: 'websocket_closed'
+            });
           }
         }
 

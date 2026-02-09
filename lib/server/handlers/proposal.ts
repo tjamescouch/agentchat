@@ -101,6 +101,20 @@ export function handleProposal(server: AgentChatServer, ws: ExtendedWebSocket, m
   server._send(targetWs, outMsg);
   // Echo back to sender with the assigned ID
   server._send(ws, outMsg);
+
+  // Broadcast to #bounties for marketplace discovery
+  if (server.channels.has('#bounties')) {
+    const amountStr = msg.amount ? ` (${msg.amount} ${msg.currency || 'ELO'})` : '';
+    const stakeStr = msg.elo_stake ? ` [stake: ${msg.elo_stake} ELO]` : '';
+    const bountyMsg = createMessage(ServerMessageType.MSG, {
+      from: '@server',
+      from_name: 'Server',
+      to: '#bounties',
+      content: `[BOUNTY] @${agent.id} → ${msg.to}: "${taskText}"${amountStr}${stakeStr} — ${proposal.id}`
+    });
+    server._broadcast('#bounties', bountyMsg);
+    server._bufferMessage('#bounties', bountyMsg);
+  }
 }
 
 /**
@@ -209,6 +223,18 @@ export async function handleAccept(server: AgentChatServer, ws: ExtendedWebSocke
   }
   // Echo to acceptor
   server._send(ws, outMsg);
+
+  // Notify #bounties that this proposal was claimed
+  if (server.channels.has('#bounties')) {
+    const claimedMsg = createMessage(ServerMessageType.MSG, {
+      from: '@server',
+      from_name: 'Server',
+      to: '#bounties',
+      content: `[CLAIMED] ${proposal.id} accepted by @${agent.id} — "${proposal.task}"`
+    });
+    server._broadcast('#bounties', claimedMsg);
+    server._bufferMessage('#bounties', claimedMsg);
+  }
 }
 
 /**
