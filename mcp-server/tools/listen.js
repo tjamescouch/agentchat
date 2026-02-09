@@ -209,9 +209,9 @@ export function registerListenTool(server) {
             tryRead();
           }, POLL_INTERVAL_MS);
 
-          // Exponential backoff timeout
+          // Linear backoff timeout
           const idleCount = getIdleCount();
-          const backoffMultiplier = Math.pow(2, idleCount);
+          const backoffMultiplier = idleCount + 1;
           const baseTimeout = othersPresent
             ? Math.min(NUDGE_TIMEOUT_MS * backoffMultiplier, MAX_BACKOFF_MS)
             : ENFORCED_TIMEOUT_MS;

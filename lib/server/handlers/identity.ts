@@ -215,6 +215,17 @@ export function handleVerifyIdentity(server: AgentChatServer, ws: ExtendedWebSoc
     server.pubkeyToId.set(challenge.pubkey, id);
   }
 
+  // Check banlist before allowing connection
+  if (server.banlist) {
+    const banCheck = server.banlist.check(id);
+    if (banCheck.banned) {
+      server._log('ban_rejected', { id, reason: banCheck.reason, ip: ws._realIp });
+      server._send(ws, createError(ErrorCode.BANNED, banCheck.reason || 'You are banned'));
+      (ws as WebSocket).close(1000, 'Banned');
+      return;
+    }
+  }
+
   // Check if this ID is currently in use by another connection
   if (server.agentById.has(id)) {
     const oldWs = server.agentById.get(id)!;
