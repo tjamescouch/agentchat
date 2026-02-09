@@ -758,6 +758,13 @@ export class AgentChatClient extends EventEmitter {
     this._send(msg);
   }
 
+  /**
+   * Send a file chunk to an agent (DM only, for file transfer protocol)
+   */
+  sendFileChunk(to: string, content: string): void {
+    this._send({ type: 'FILE_CHUNK', to, content });
+  }
+
   private _handleMessage(data: string): void {
     let msg: ServerMessage;
     try {

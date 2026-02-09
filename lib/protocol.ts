@@ -62,6 +62,8 @@ export const ClientMessageType = {
   ADMIN_KICK: 'ADMIN_KICK' as const,
   ADMIN_BAN: 'ADMIN_BAN' as const,
   ADMIN_UNBAN: 'ADMIN_UNBAN' as const,
+  // File transfer
+  FILE_CHUNK: 'FILE_CHUNK' as const,
 };
 
 export const ServerMessageType = {
@@ -115,6 +117,8 @@ export const ServerMessageType = {
   // Moderation
   KICKED: 'KICKED' as const,
   BANNED: 'BANNED' as const,
+  // File transfer
+  FILE_CHUNK: 'FILE_CHUNK' as const,
 };
 
 export const ErrorCode = {
@@ -352,6 +356,21 @@ export function validateClientMessage(raw: string | RawClientMessage): Validatio
       // Validate signature format if present
       if (msg.sig !== undefined && typeof msg.sig !== 'string') {
         return { valid: false, error: 'Invalid signature format' };
+      }
+      break;
+
+    case ClientMessageType.FILE_CHUNK:
+      if (!msg.to) {
+        return { valid: false, error: 'Missing target' };
+      }
+      if (!isAgent(msg.to)) {
+        return { valid: false, error: 'FILE_CHUNK only supports DM targets (@agent)' };
+      }
+      if (typeof msg.content !== 'string') {
+        return { valid: false, error: 'Missing or invalid content' };
+      }
+      if (msg.content.length > 2 * 1024 * 1024) {
+        return { valid: false, error: 'FILE_CHUNK too large (max 2MB)' };
       }
       break;
 
