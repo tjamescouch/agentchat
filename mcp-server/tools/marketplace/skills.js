@@ -136,6 +136,7 @@ export function registerSkillsTools(server) {
           const onResults = (msg) => {
             if (msg.query_id === queryId) {
               clearTimeout(timeout);
+              client.removeListener('search_results', onResults);
               resolve({
                 content: [{
                   type: 'text',
