@@ -23,3 +23,6 @@ primary_region = 'sjc'
 [env]
   HOST = "0.0.0.0"
   PORT = "6667"
+  MESSAGE_BUFFER_SIZE = "100"
+  ALLOWLIST_ENABLED = "true"
+  ALLOWLIST_STRICT = "false"

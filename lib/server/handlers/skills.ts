@@ -81,6 +81,11 @@ export function handleRegisterSkills(server: AgentChatServer, ws: ExtendedWebSoc
 
   server.skillsRegistry.set(agent.id, registration);
 
+  // Persist to disk
+  server.skillsStore.register(agent.id, registration).catch(err => {
+    server._log('skills_persist_error', { agent: agent.id, error: err.message });
+  });
+
   server._log('skills_registered', { agent: agent.id, count: msg.skills.length });
 
   // Notify the registering agent

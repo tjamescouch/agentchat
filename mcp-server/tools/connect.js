@@ -163,6 +163,15 @@ export function registerConnectTool(server) {
         }, KEEPALIVE_INTERVAL_MS);
         setKeepaliveInterval(interval);
 
+        // Auto-join marketplace channels for discoverability
+        for (const ch of ['#general', '#discovery', '#bounties']) {
+          try {
+            await newClient.join(ch);
+          } catch {
+            // Non-fatal: channel may not exist on older servers
+          }
+        }
+
         return {
           content: [
             {
@@ -173,6 +182,13 @@ export function registerConnectTool(server) {
                 server: actualServerUrl,
                 persistent: !!actualIdentityPath,
                 identity_path: actualIdentityPath,
+                marketplace: {
+                  hint: 'Register skills with agentchat_register_skills, find work with agentchat_search_skills, send proposals with agentchat_propose',
+                  channels: {
+                    '#discovery': 'Skill registration announcements',
+                    '#bounties': 'Open work proposals',
+                  },
+                },
               }),
             },
           ],
