@@ -12,6 +12,7 @@ import type {
   ListAgentsMessage,
   CreateChannelMessage,
   InviteMessage,
+  FileChunkMessage,
 } from '../../types.js';
 import {
   ServerMessageType,
@@ -354,4 +355,39 @@ export function handleInvite(server: AgentChatServer, ws: ExtendedWebSocket, msg
       content: `You have been invited to ${msg.channel}`
     }));
   }
+}
+
+/**
+ * Handle FILE_CHUNK command - relay file transfer chunks between agents (DM only)
+ */
+export function handleFileChunk(server: AgentChatServer, ws: ExtendedWebSocket, msg: FileChunkMessage): void {
+  const agent = server.agents.get(ws);
+  if (!agent) {
+    server._send(ws, createError(ErrorCode.AUTH_REQUIRED, 'Must IDENTIFY first'));
+    return;
+  }
+
+  // File chunk rate limit: 10 per second (separate from MSG rate limit)
+  const now = Date.now();
+  const lastChunkTime = server.lastFileChunkTime.get(ws) || 0;
+  if (now - lastChunkTime < 100) {
+    server._send(ws, createError(ErrorCode.RATE_LIMITED, 'File chunk rate limit (max 10/sec)'));
+    return;
+  }
+  server.lastFileChunkTime.set(ws, now);
+
+  const targetId = msg.to.slice(1);
+  const targetWs = server.agentById.get(targetId);
+  if (!targetWs) {
+    server._send(ws, createError(ErrorCode.AGENT_NOT_FOUND, `Agent ${msg.to} not found`));
+    return;
+  }
+
+  // Relay to target (no buffering, no redaction — file transfer data)
+  const outMsg = createMessage(ServerMessageType.FILE_CHUNK, {
+    from: `@${agent.id}`,
+    to: msg.to,
+    content: msg.content
+  });
+  server._send(targetWs, outMsg);
 }

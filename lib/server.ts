@@ -42,6 +42,7 @@ import {
   handleListAgents,
   handleCreateChannel,
   handleInvite,
+  handleFileChunk,
 } from './server/handlers/message.js';
 import {
   handleProposal,
@@ -208,6 +209,7 @@ export class AgentChatServer {
   agentById: Map<string, ExtendedWebSocket>;
   channels: Map<string, ChannelState>;
   lastMessageTime: Map<ExtendedWebSocket, number>;
+  lastFileChunkTime: Map<ExtendedWebSocket, number>;
   pubkeyToId: Map<string, string>;
 
   // Idle prompt settings
@@ -291,6 +293,7 @@ export class AgentChatServer {
     this.agentById = new Map();
     this.channels = new Map();
     this.lastMessageTime = new Map();
+    this.lastFileChunkTime = new Map();
     this.pubkeyToId = new Map();
 
     // Idle prompt settings
@@ -535,12 +538,12 @@ export class AgentChatServer {
         key: fs.readFileSync(this.tlsKey!)
       };
       this.httpServer = https.createServer(httpsOptions, httpHandler);
-      this.wss = new WebSocketServer({ server: this.httpServer });
+      this.wss = new WebSocketServer({ server: this.httpServer, maxPayload: 2 * 1024 * 1024 });
       this.httpServer.listen(this.port, this.host);
     } else {
       // Plain mode: create HTTP server for health endpoint + WebSocket
       this.httpServer = http.createServer(httpHandler);
-      this.wss = new WebSocketServer({ server: this.httpServer });
+      this.wss = new WebSocketServer({ server: this.httpServer, maxPayload: 2 * 1024 * 1024 });
       this.httpServer.listen(this.port, this.host);
     }
 
@@ -736,7 +739,7 @@ export class AgentChatServer {
 
   _handleMessage(ws: ExtendedWebSocket, data: string): void {
     // Application-level message size limit (defense-in-depth for proxy bypass)
-    const maxPayloadBytes = 256 * 1024; // 256KB - matches wsOptions.maxPayload
+    const maxPayloadBytes = 2 * 1024 * 1024; // 2MB - matches wsOptions.maxPayload (supports FILE_CHUNK)
     if (data.length > maxPayloadBytes) {
       this._log('message_too_large', {
         ip: ws._realIp,
@@ -799,6 +802,9 @@ export class AgentChatServer {
         break;
       case ClientMessageType.MSG:
         handleMsg(this, ws, msg);
+        break;
+      case ClientMessageType.FILE_CHUNK:
+        handleFileChunk(this, ws, msg);
         break;
       case ClientMessageType.LIST_CHANNELS:
         handleListChannels(this, ws);
@@ -947,6 +953,7 @@ export class AgentChatServer {
     this.agentById.delete(agent.id);
     this.agents.delete(ws);
     this.lastMessageTime.delete(ws);
+    this.lastFileChunkTime.delete(ws);
   }
 }
 

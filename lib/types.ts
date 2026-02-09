@@ -41,7 +41,9 @@ export enum ClientMessageType {
   // Moderation
   ADMIN_KICK = 'ADMIN_KICK',
   ADMIN_BAN = 'ADMIN_BAN',
-  ADMIN_UNBAN = 'ADMIN_UNBAN'
+  ADMIN_UNBAN = 'ADMIN_UNBAN',
+  // File transfer
+  FILE_CHUNK = 'FILE_CHUNK'
 }
 
 export enum ServerMessageType {
@@ -84,7 +86,9 @@ export enum ServerMessageType {
   SETTLEMENT_COMPLETE = 'SETTLEMENT_COMPLETE',
   // Moderation
   KICKED = 'KICKED',
-  BANNED = 'BANNED'
+  BANNED = 'BANNED',
+  // File transfer
+  FILE_CHUNK = 'FILE_CHUNK'
 }
 
 export enum ErrorCode {
@@ -202,6 +206,12 @@ export interface MsgMessage extends BaseMessage {
   to: string;
   content: string;
   sig?: string;
+}
+
+export interface FileChunkMessage extends BaseMessage {
+  type: ClientMessageType.FILE_CHUNK;
+  to: string;
+  content: string;
 }
 
 export interface ListChannelsMessage extends BaseMessage {
@@ -437,7 +447,8 @@ export type ClientMessage =
   | TypingMessage
   | AdminKickMessage
   | AdminBanMessage
-  | AdminUnbanMessage;
+  | AdminUnbanMessage
+  | FileChunkMessage;
 
 // ============ Server Messages ============
 
