@@ -24,5 +24,3 @@ primary_region = 'sjc'
   HOST = "0.0.0.0"
   PORT = "6667"
   MESSAGE_BUFFER_SIZE = "100"
-  ALLOWLIST_ENABLED = "true"
-  ALLOWLIST_STRICT = "false"
