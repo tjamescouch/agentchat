@@ -58,6 +58,10 @@ export const ClientMessageType = {
   SET_NICK: 'SET_NICK' as const,
   // Typing indicator
   TYPING: 'TYPING' as const,
+  // Moderation
+  ADMIN_KICK: 'ADMIN_KICK' as const,
+  ADMIN_BAN: 'ADMIN_BAN' as const,
+  ADMIN_UNBAN: 'ADMIN_UNBAN' as const,
 };
 
 export const ServerMessageType = {
@@ -108,6 +112,9 @@ export const ServerMessageType = {
   SESSION_DISPLACED: 'SESSION_DISPLACED' as const,
   // Dispute settlement
   SETTLEMENT_COMPLETE: 'SETTLEMENT_COMPLETE' as const,
+  // Moderation
+  KICKED: 'KICKED' as const,
+  BANNED: 'BANNED' as const,
 };
 
 export const ErrorCode = {
@@ -143,6 +150,8 @@ export const ErrorCode = {
   DISPUTE_DEADLINE_PASSED: 'DISPUTE_DEADLINE_PASSED' as const,
   DISPUTE_ALREADY_EXISTS: 'DISPUTE_ALREADY_EXISTS' as const,
   INSUFFICIENT_ARBITERS: 'INSUFFICIENT_ARBITERS' as const,
+  // Moderation
+  BANNED: 'BANNED' as const,
 };
 
 export const PresenceStatus = {
@@ -635,6 +644,33 @@ export function validateClientMessage(raw: string | RawClientMessage): Validatio
       }
       if (!msg.timestamp || typeof msg.timestamp !== 'number') {
         return { valid: false, error: 'Missing or invalid timestamp' };
+      }
+      break;
+
+    case ClientMessageType.ADMIN_KICK:
+      if (!msg.agent_id || typeof msg.agent_id !== 'string') {
+        return { valid: false, error: 'Missing or invalid agent_id' };
+      }
+      if (!msg.admin_key || typeof msg.admin_key !== 'string') {
+        return { valid: false, error: 'Missing admin_key' };
+      }
+      break;
+
+    case ClientMessageType.ADMIN_BAN:
+      if (!msg.agent_id || typeof msg.agent_id !== 'string') {
+        return { valid: false, error: 'Missing or invalid agent_id' };
+      }
+      if (!msg.admin_key || typeof msg.admin_key !== 'string') {
+        return { valid: false, error: 'Missing admin_key' };
+      }
+      break;
+
+    case ClientMessageType.ADMIN_UNBAN:
+      if (!msg.agent_id || typeof msg.agent_id !== 'string') {
+        return { valid: false, error: 'Missing or invalid agent_id' };
+      }
+      if (!msg.admin_key || typeof msg.admin_key !== 'string') {
+        return { valid: false, error: 'Missing admin_key' };
       }
       break;
 

@@ -34,6 +34,7 @@ import { registerCreateChannelTool } from './create-channel.js';
 import { registerDaemonTools } from './daemon.js';
 import { registerNickTool } from './nick.js';
 import { registerMarketplaceTools } from './marketplace/index.js';
+import { registerModerationTools } from './moderation.js';
 
 /**
  * Register all tools with the MCP server
@@ -47,6 +48,9 @@ export function registerAllTools(server) {
   registerCreateChannelTool(server);
   registerNickTool(server);
   registerDaemonTools(server);
+
+  // === MODERATION TOOLS ===
+  registerModerationTools(server);
 
   // === MARKETPLACE TOOLS ===
   registerMarketplaceTools(server);

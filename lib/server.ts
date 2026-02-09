@@ -29,6 +29,7 @@ import { DisputeStore } from './disputes.js';
 import { ReputationStore } from './reputation.js';
 import { EscrowHooks } from './escrow-hooks.js';
 import { Allowlist } from './allowlist.js';
+import { Banlist } from './banlist.js';
 import { Redactor } from './redactor.js';
 
 // Import extracted handlers
@@ -77,6 +78,11 @@ import {
   handleAdminRevoke,
   handleAdminList,
 } from './server/handlers/admin.js';
+import {
+  handleAdminKick,
+  handleAdminBan,
+  handleAdminUnban,
+} from './server/handlers/ban.js';
 
 // Extended WebSocket with custom properties
 interface ExtendedWebSocket extends WebSocket {
@@ -239,6 +245,9 @@ export class AgentChatServer {
   // Allowlist
   allowlist: Allowlist | null;
 
+  // Banlist
+  banlist: Banlist | null;
+
   // MOTD (message of the day)
   motd: string | null;
 
@@ -347,6 +356,14 @@ export class AgentChatServer {
       });
     } else {
       this.allowlist = null;
+    }
+
+    // Banlist — uses same admin key as allowlist
+    const banlistAdminKey = options.allowlistAdminKey || process.env.ALLOWLIST_ADMIN_KEY || null;
+    if (banlistAdminKey) {
+      this.banlist = new Banlist({ adminKey: banlistAdminKey });
+    } else {
+      this.banlist = null;
     }
 
     // MOTD — prefer inline string, fall back to file
@@ -832,6 +849,16 @@ export class AgentChatServer {
         break;
       case ClientMessageType.ADMIN_LIST:
         handleAdminList(this, ws, msg);
+        break;
+      // Moderation messages
+      case ClientMessageType.ADMIN_KICK:
+        handleAdminKick(this, ws, msg);
+        break;
+      case ClientMessageType.ADMIN_BAN:
+        handleAdminBan(this, ws, msg);
+        break;
+      case ClientMessageType.ADMIN_UNBAN:
+        handleAdminUnban(this, ws, msg);
         break;
       // Typing indicator
       case ClientMessageType.TYPING: {

@@ -45,3 +45,10 @@ export {
 export {
   handleSetNick,
 } from './nick.js';
+
+// Ban/kick handlers
+export {
+  handleAdminKick,
+  handleAdminBan,
+  handleAdminUnban,
+} from './ban.js';

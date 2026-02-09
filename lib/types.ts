@@ -37,7 +37,11 @@ export enum ClientMessageType {
   ARBITER_ACCEPT = 'ARBITER_ACCEPT',
   ARBITER_DECLINE = 'ARBITER_DECLINE',
   ARBITER_VOTE = 'ARBITER_VOTE',
-  TYPING = 'TYPING'
+  TYPING = 'TYPING',
+  // Moderation
+  ADMIN_KICK = 'ADMIN_KICK',
+  ADMIN_BAN = 'ADMIN_BAN',
+  ADMIN_UNBAN = 'ADMIN_UNBAN'
 }
 
 export enum ServerMessageType {
@@ -77,7 +81,10 @@ export enum ServerMessageType {
   DISPUTE_REVEALED = 'DISPUTE_REVEALED',
   TYPING = 'TYPING',
   SESSION_DISPLACED = 'SESSION_DISPLACED',
-  SETTLEMENT_COMPLETE = 'SETTLEMENT_COMPLETE'
+  SETTLEMENT_COMPLETE = 'SETTLEMENT_COMPLETE',
+  // Moderation
+  KICKED = 'KICKED',
+  BANNED = 'BANNED'
 }
 
 export enum ErrorCode {
@@ -99,7 +106,8 @@ export enum ErrorCode {
   VERIFICATION_FAILED = 'VERIFICATION_FAILED',
   VERIFICATION_EXPIRED = 'VERIFICATION_EXPIRED',
   NO_PUBKEY = 'NO_PUBKEY',
-  NOT_ALLOWED = 'NOT_ALLOWED'
+  NOT_ALLOWED = 'NOT_ALLOWED',
+  BANNED = 'BANNED'
 }
 
 export enum PresenceStatus {
@@ -309,6 +317,26 @@ export interface AdminListMessage extends BaseMessage {
   admin_key: string;
 }
 
+export interface AdminKickMessage extends BaseMessage {
+  type: ClientMessageType.ADMIN_KICK;
+  agent_id: string;
+  admin_key: string;
+  reason?: string;
+}
+
+export interface AdminBanMessage extends BaseMessage {
+  type: ClientMessageType.ADMIN_BAN;
+  agent_id: string;
+  admin_key: string;
+  reason?: string;
+}
+
+export interface AdminUnbanMessage extends BaseMessage {
+  type: ClientMessageType.ADMIN_UNBAN;
+  agent_id: string;
+  admin_key: string;
+}
+
 export interface VerifyIdentityMessage extends BaseMessage {
   type: ClientMessageType.VERIFY_IDENTITY;
   challenge_id: string;
@@ -406,7 +434,10 @@ export type ClientMessage =
   | ArbiterDeclineMessage
   | ArbiterVoteMessage
   | SetNickMessage
-  | TypingMessage;
+  | TypingMessage
+  | AdminKickMessage
+  | AdminBanMessage
+  | AdminUnbanMessage;
 
 // ============ Server Messages ============
 

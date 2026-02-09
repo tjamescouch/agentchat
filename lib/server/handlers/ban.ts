@@ -1,0 +1,136 @@
+/**
+ * Ban/Kick Handlers
+ * Handles moderation commands: kick, ban, unban
+ */
+
+import type { WebSocket } from 'ws';
+import type { AgentChatServer } from '../../server.js';
+import type {
+  AdminKickMessage,
+  AdminBanMessage,
+  AdminUnbanMessage,
+} from '../../types.js';
+import {
+  ServerMessageType,
+  ErrorCode,
+  createMessage,
+  createError,
+} from '../../protocol.js';
+
+// Extended WebSocket with custom properties
+interface ExtendedWebSocket extends WebSocket {
+  _connectedAt?: number;
+  _realIp?: string;
+  _userAgent?: string;
+}
+
+/**
+ * Handle ADMIN_KICK command - immediately disconnect an agent
+ */
+export function handleAdminKick(server: AgentChatServer, ws: ExtendedWebSocket, msg: AdminKickMessage): void {
+  if (!server.banlist) {
+    server._send(ws, createError(ErrorCode.INVALID_MSG, 'Moderation not configured (no admin key)'));
+    return;
+  }
+
+  if (!server.banlist._validateAdminKey(msg.admin_key)) {
+    server._send(ws, createError(ErrorCode.AUTH_REQUIRED, 'Invalid admin key'));
+    return;
+  }
+
+  // Strip @ prefix if present
+  const targetId = msg.agent_id.startsWith('@') ? msg.agent_id.slice(1) : msg.agent_id;
+  const targetWs = server.agentById.get(targetId);
+
+  if (!targetWs) {
+    server._send(ws, createError(ErrorCode.AGENT_NOT_FOUND, `Agent @${targetId} not found or not online`));
+    return;
+  }
+
+  // Send KICKED to target before disconnecting
+  server._send(targetWs, createMessage(ServerMessageType.KICKED, {
+    reason: msg.reason || 'Kicked by admin',
+  }));
+
+  server._log('admin_kick', { targetId, reason: msg.reason });
+
+  // Disconnect the target
+  server._handleDisconnect(targetWs);
+  (targetWs as WebSocket).close(1000, 'Kicked by admin');
+
+  // Confirm to admin
+  server._send(ws, createMessage(ServerMessageType.ADMIN_RESULT, {
+    action: 'kick',
+    success: true,
+    agentId: `@${targetId}`,
+  }));
+}
+
+/**
+ * Handle ADMIN_BAN command - persist ban and kick if online
+ */
+export function handleAdminBan(server: AgentChatServer, ws: ExtendedWebSocket, msg: AdminBanMessage): void {
+  if (!server.banlist) {
+    server._send(ws, createError(ErrorCode.INVALID_MSG, 'Moderation not configured (no admin key)'));
+    return;
+  }
+
+  // Strip @ prefix if present
+  const targetId = msg.agent_id.startsWith('@') ? msg.agent_id.slice(1) : msg.agent_id;
+
+  const result = server.banlist.ban(targetId, msg.admin_key, msg.reason || '');
+
+  if (!result.success) {
+    server._send(ws, createError(ErrorCode.AUTH_REQUIRED, result.error!));
+    return;
+  }
+
+  server._log('admin_ban', { targetId, reason: msg.reason });
+
+  // If the agent is currently online, kick them
+  const targetWs = server.agentById.get(targetId);
+  if (targetWs) {
+    server._send(targetWs, createMessage(ServerMessageType.BANNED, {
+      reason: msg.reason || 'Banned by admin',
+    }));
+    server._handleDisconnect(targetWs);
+    (targetWs as WebSocket).close(1000, 'Banned by admin');
+  }
+
+  // Confirm to admin
+  server._send(ws, createMessage(ServerMessageType.ADMIN_RESULT, {
+    action: 'ban',
+    success: true,
+    agentId: `@${targetId}`,
+  }));
+}
+
+/**
+ * Handle ADMIN_UNBAN command - remove ban
+ */
+export function handleAdminUnban(server: AgentChatServer, ws: ExtendedWebSocket, msg: AdminUnbanMessage): void {
+  if (!server.banlist) {
+    server._send(ws, createError(ErrorCode.INVALID_MSG, 'Moderation not configured (no admin key)'));
+    return;
+  }
+
+  // Strip @ prefix if present
+  const targetId = msg.agent_id.startsWith('@') ? msg.agent_id.slice(1) : msg.agent_id;
+
+  const result = server.banlist.unban(targetId, msg.admin_key);
+
+  if (!result.success) {
+    const code = result.error === 'invalid admin key' ? ErrorCode.AUTH_REQUIRED : ErrorCode.AGENT_NOT_FOUND;
+    server._send(ws, createError(code, result.error!));
+    return;
+  }
+
+  server._log('admin_unban', { targetId });
+
+  // Confirm to admin
+  server._send(ws, createMessage(ServerMessageType.ADMIN_RESULT, {
+    action: 'unban',
+    success: true,
+    agentId: `@${targetId}`,
+  }));
+}
