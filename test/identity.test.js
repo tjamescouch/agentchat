@@ -72,7 +72,7 @@ describe('Identity', () => {
     const id2 = pubkeyToAgentId(identity.pubkey);
 
     assert.equal(id1, id2);
-    assert.equal(id1.length, 8);
+    assert.equal(id1.length, 16);
   });
 
   test('export excludes private key', () => {

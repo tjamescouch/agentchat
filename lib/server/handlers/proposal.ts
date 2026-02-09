@@ -35,6 +35,9 @@ import {
 } from '../../escrow-hooks.js';
 import { Identity } from '../../identity.js';
 
+// Anti-sybil: minimum proposal age before completion allowed (default 60s)
+export const DEFAULT_MIN_PROPOSAL_AGE_MS = 60_000;
+
 // Extended WebSocket with custom properties
 interface ExtendedWebSocket extends WebSocket {
   _connectedAt?: number;
@@ -311,6 +314,20 @@ export async function handleComplete(server: AgentChatServer, ws: ExtendedWebSoc
     server._log('sig_verification_failed', { agent: agent.id, msg_type: 'COMPLETE' });
     server._send(ws, createError(ErrorCode.VERIFICATION_FAILED, 'Invalid signature'));
     return;
+  }
+
+  // Anti-sybil: minimum proposal age before completion
+  const minAge = server.minProposalAgeMs ?? DEFAULT_MIN_PROPOSAL_AGE_MS;
+  if (minAge > 0) {
+    const existing = server.proposals.get(msg.proposal_id);
+    if (existing) {
+      const proposalAge = Date.now() - existing.created_at;
+      if (proposalAge < minAge) {
+        const remainingSec = Math.ceil((minAge - proposalAge) / 1000);
+        server._send(ws, createError(ErrorCode.RATE_LIMITED, `Proposal must be at least ${minAge / 1000}s old before completion (${remainingSec}s remaining)`));
+        return;
+      }
+    }
   }
 
   const result = server.proposals.complete(

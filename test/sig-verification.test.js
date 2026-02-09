@@ -70,7 +70,7 @@ describe('Proposal Signature Verification', () => {
     bobIdentity = Identity.generate('bob');
     await bobIdentity.save(bobIdentityPath);
 
-    server = new AgentChatServer({ port: TEST_PORT, logMessages: false });
+    server = new AgentChatServer({ port: TEST_PORT, logMessages: false, minProposalAgeMs: 0 });
     server.start();
   });
 
