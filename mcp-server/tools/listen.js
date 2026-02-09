@@ -246,7 +246,7 @@ export function registerListenTool(server) {
                   others_waiting: othersPresent,
                   channel_occupancy: channelOccupancy,
                   idle_count: idleCount + 1,
-                  next_timeout_ms: Math.min(NUDGE_TIMEOUT_MS * Math.pow(2, idleCount + 1), MAX_BACKOFF_MS),
+                  next_timeout_ms: Math.min(NUDGE_TIMEOUT_MS * (idleCount + 2), MAX_BACKOFF_MS),
                   elapsed_ms: Date.now() - startTime,
                 }),
               }],
