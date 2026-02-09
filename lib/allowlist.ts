@@ -172,13 +172,22 @@ export class Allowlist {
     try {
       if (fs.existsSync(this.filePath)) {
         const data = JSON.parse(fs.readFileSync(this.filePath, 'utf8'));
+        let migrated = false;
         for (const entry of data) {
+          // Re-derive agentId from pubkey to pick up ID format changes
+          const currentId = pubkeyToAgentId(entry.pubkey);
+          if (entry.agentId !== currentId) {
+            migrated = true;
+          }
           this.entries.set(entry.pubkey, {
-            agentId: entry.agentId,
+            agentId: currentId,
             approvedAt: entry.approvedAt,
             approvedBy: entry.approvedBy || 'admin',
             note: entry.note || '',
           });
+        }
+        if (migrated) {
+          this._save(); // Persist updated IDs
         }
       }
     } catch (err) {

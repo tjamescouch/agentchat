@@ -209,7 +209,16 @@ export function handleVerifyIdentity(server: AgentChatServer, ws: ExtendedWebSoc
   const existingId = server.pubkeyToId.get(challenge.pubkey);
   let id: string;
   if (existingId) {
-    id = existingId;
+    // Migrate old 8-char IDs to new 16-char format
+    const newId = pubkeyToAgentId(challenge.pubkey);
+    if (existingId.length < newId.length) {
+      id = newId;
+      server.pubkeyToId.set(challenge.pubkey, newId);
+      server.reputationStore.migrateAgentId(`@${existingId}`, `@${newId}`);
+      server._log('agent_id_migrated', { oldId: existingId, newId });
+    } else {
+      id = existingId;
+    }
   } else {
     id = pubkeyToAgentId(challenge.pubkey);
     server.pubkeyToId.set(challenge.pubkey, id);

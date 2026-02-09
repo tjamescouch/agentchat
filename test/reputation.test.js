@@ -518,7 +518,7 @@ describe('ELO Staking', () => {
     );
 
     // Release the escrow (simulating expiration)
-    const releaseResult = store.releaseEscrow('prop_expire');
+    const releaseResult = await store.releaseEscrow('prop_expire');
 
     assert.strictEqual(releaseResult.released, true);
     assert.strictEqual(releaseResult.escrow.status, 'released');

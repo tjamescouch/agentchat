@@ -131,6 +131,9 @@ const K_FACTOR_ESTABLISHED = 16;  // >= 100 transactions
 const TRANSACTIONS_NEW = 30;
 const TRANSACTIONS_INTERMEDIATE = 100;
 
+// Anti-sybil constants
+export const PAIR_COOLDOWN_MS = 3_600_000; // 1 hour between same-pair completions
+
 // ============ Helper Functions ============
 
 /**
@@ -240,13 +243,21 @@ export function calculateDisputeLoss(
  */
 export class ReputationStore {
   private ratingsPath: string;
+  private escrowsPath: string;
   private _ratings: Record<string, RatingRecord> | null;
   private _escrows: Map<string, Escrow>;
+  private _escrowsLoaded: boolean;
+  private _completionLog: Map<string, number>; // "agentA|agentB" -> last completion timestamp
+  private _pairCompletionCount: Map<string, number>; // "agentA|agentB" -> count
 
-  constructor(ratingsPath: string = DEFAULT_RATINGS_PATH) {
+  constructor(ratingsPath: string = DEFAULT_RATINGS_PATH, escrowsPath?: string) {
     this.ratingsPath = ratingsPath;
+    this.escrowsPath = escrowsPath || path.join(path.dirname(ratingsPath), 'escrows.json');
     this._ratings = null; // Lazy load
     this._escrows = new Map(); // proposalId -> escrow record
+    this._escrowsLoaded = false;
+    this._completionLog = new Map();
+    this._pairCompletionCount = new Map();
   }
 
   /**
@@ -279,11 +290,50 @@ export class ReputationStore {
   }
 
   /**
-   * Ensure ratings are loaded
+   * Load escrows from file
+   */
+  async loadEscrows(): Promise<void> {
+    try {
+      const content = await fsp.readFile(this.escrowsPath, 'utf-8');
+      const entries = JSON.parse(content) as Record<string, Escrow>;
+      for (const [key, value] of Object.entries(entries)) {
+        this._escrows.set(key, value);
+      }
+      this._escrowsLoaded = true;
+    } catch (err: any) {
+      if (err.code === 'ENOENT') {
+        this._escrowsLoaded = true; // No file yet, that's fine
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  /**
+   * Save escrows to file (write-ahead)
+   */
+  async saveEscrows(): Promise<void> {
+    const obj: Record<string, Escrow> = {};
+    for (const [key, value] of this._escrows) {
+      obj[key] = value;
+    }
+    await fsp.mkdir(path.dirname(this.escrowsPath), { recursive: true });
+    await fsp.writeFile(
+      this.escrowsPath,
+      JSON.stringify(obj, null, 2),
+      { mode: 0o600 }
+    );
+  }
+
+  /**
+   * Ensure ratings and escrows are loaded
    */
   private async _ensureLoaded(): Promise<void> {
     if (this._ratings === null) {
       await this.load();
+    }
+    if (!this._escrowsLoaded) {
+      await this.loadEscrows();
     }
   }
 
@@ -292,6 +342,32 @@ export class ReputationStore {
    */
   private _normalizeId(agentId: string): string {
     return agentId.startsWith('@') ? agentId : `@${agentId}`;
+  }
+
+  /**
+   * Migrate an agent's rating record from an old ID to a new ID
+   * Used when agent ID format changes (e.g., 8-char to 16-char)
+   */
+  migrateAgentId(oldId: string, newId: string): void {
+    if (!this._ratings) return;
+    const normalizedOld = this._normalizeId(oldId);
+    const normalizedNew = this._normalizeId(newId);
+    if (normalizedOld === normalizedNew) return;
+    const record = this._ratings[normalizedOld];
+    if (record) {
+      this._ratings[normalizedNew] = record;
+      delete this._ratings[normalizedOld];
+      this.save().catch(() => {}); // Best-effort persist
+    }
+    // Also migrate escrow references
+    let escrowMigrated = false;
+    for (const escrow of this._escrows.values()) {
+      if (escrow.from.agent_id === normalizedOld) { escrow.from.agent_id = normalizedNew; escrowMigrated = true; }
+      if (escrow.to.agent_id === normalizedOld) { escrow.to.agent_id = normalizedNew; escrowMigrated = true; }
+    }
+    if (escrowMigrated) {
+      this.saveEscrows().catch(() => {}); // Best-effort persist
+    }
   }
 
   /**
@@ -423,6 +499,7 @@ export class ReputationStore {
     };
 
     this._escrows.set(proposalId, escrow);
+    await this.saveEscrows(); // Write-ahead: persist before confirming
     return { success: true, escrow };
   }
 
@@ -437,7 +514,7 @@ export class ReputationStore {
    * Release escrow (return stakes to both parties, no rating change)
    * Used for proposal expiration
    */
-  releaseEscrow(proposalId: string): EscrowResult {
+  async releaseEscrow(proposalId: string): Promise<EscrowResult> {
     const escrow = this._escrows.get(proposalId);
     if (!escrow) {
       return { released: false, error: 'Escrow not found' };
@@ -451,6 +528,7 @@ export class ReputationStore {
     escrow.settled_at = Date.now();
     escrow.settlement_reason = 'expired';
 
+    await this.saveEscrows(); // Persist release
     return { released: true, escrow };
   }
 
@@ -493,6 +571,14 @@ export class ReputationStore {
       throw new Error('Receipt missing party information');
     }
 
+    // Anti-sybil: cooldown between same-pair completions
+    const pairKey = [this._normalizeId(party1), this._normalizeId(party2)].sort().join('|');
+    const lastCompletion = this._completionLog.get(pairKey);
+    if (lastCompletion && (Date.now() - lastCompletion) < PAIR_COOLDOWN_MS) {
+      const remainingSec = Math.ceil((PAIR_COOLDOWN_MS - (Date.now() - lastCompletion)) / 1000);
+      throw new Error(`Completion cooldown: same pair can complete at most once per hour (${remainingSec}s remaining)`);
+    }
+
     // Get current ratings
     const rating1 = await this.getRating(party1);
     const rating2 = await this.getRating(party2);
@@ -504,9 +590,17 @@ export class ReputationStore {
     const fullGain1 = calculateCompletionGain(rating1.rating, rating2.rating, k1, amount);
     const fullGain2 = calculateCompletionGain(rating2.rating, rating1.rating, k2, amount);
 
-    // Half the gains (staking model: split gains to balance inflation)
-    const gain1 = Math.max(1, Math.round(fullGain1 / 2));
-    const gain2 = Math.max(1, Math.round(fullGain2 / 2));
+    // Anti-sybil: diminishing returns on repeated same-pair completions
+    const pairCount = (this._pairCompletionCount.get(pairKey) || 0) + 1;
+    this._pairCompletionCount.set(pairKey, pairCount);
+    const diminishingFactor = 1 / pairCount;
+
+    // Half the gains (staking model) and apply diminishing factor
+    const gain1 = Math.max(1, Math.round(fullGain1 / 2 * diminishingFactor));
+    const gain2 = Math.max(1, Math.round(fullGain2 / 2 * diminishingFactor));
+
+    // Record completion timestamp for cooldown
+    this._completionLog.set(pairKey, Date.now());
 
     // Settle escrow if exists (return stakes)
     let escrowSettlement: EscrowSettlement | null = null;
@@ -521,6 +615,7 @@ export class ReputationStore {
           acceptor_stake: escrow.to.stake,
           settlement: 'returned'
         };
+        await this.saveEscrows(); // Persist settlement
       }
     }
 
@@ -641,6 +736,7 @@ export class ReputationStore {
       escrow.status = 'settled';
       escrow.settled_at = Date.now();
       escrow.settlement_reason = 'disputed';
+      await this.saveEscrows(); // Persist settlement
     }
 
     const updated1 = await this._updateAgent(party1, change1);

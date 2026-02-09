@@ -165,6 +165,7 @@ export interface AgentChatServerOptions {
   maxConnectionsPerIp?: number;
   heartbeatIntervalMs?: number;
   heartbeatTimeoutMs?: number;
+  minProposalAgeMs?: number;
 }
 
 // Health status response
@@ -240,6 +241,9 @@ export class AgentChatServer {
   // Pending challenges (challenge-response auth)
   pendingChallenges: Map<string, PendingChallenge>;
   challengeTimeoutMs: number;
+
+  // Anti-sybil
+  minProposalAgeMs: number;
 
   // Secret redactor (agentseenoevil)
   redactor: Redactor;
@@ -348,6 +352,9 @@ export class AgentChatServer {
     this.challengeTimeoutMs = options.challengeTimeoutMs
       || parseInt(process.env.CHALLENGE_TIMEOUT_MS || '', 10)
       || 60000;
+
+    // Anti-sybil
+    this.minProposalAgeMs = options.minProposalAgeMs ?? 60000;
 
     // Allowlist
     const allowlistEnabled = options.allowlistEnabled || process.env.ALLOWLIST_ENABLED === 'true';

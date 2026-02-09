@@ -54,11 +54,11 @@ export interface RotationChainResult {
 
 /**
  * Generate stable agent ID from pubkey
- * Returns first 8 chars of SHA256 hash (hex)
+ * Returns first 16 chars of SHA256 hash (hex) — 64 bits of collision resistance
  */
 export function pubkeyToAgentId(pubkey: string): string {
   const hash = crypto.createHash('sha256').update(pubkey).digest('hex');
-  return hash.substring(0, 8);
+  return hash.substring(0, 16);
 }
 
 /**
