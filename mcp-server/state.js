@@ -3,6 +3,10 @@
  * Centralized state management for the AgentChat MCP server
  */
 
+import fs from 'fs';
+import path from 'path';
+import { getDaemonPaths } from '@tjamescouch/agentchat/lib/daemon.js';
+
 // Connection state
 export let client = null;
 export let daemon = null;
@@ -10,7 +14,29 @@ export let serverUrl = null;
 export let keepaliveInterval = null;
 
 // Message tracking - timestamp of last message we returned to the caller
-export let lastSeenTimestamp = 0;
+// Persisted to disk so it survives reconnections (P2-LISTEN-5 fix)
+const LAST_SEEN_FILE = path.join(getDaemonPaths('default').dir, 'last_seen_ts');
+
+function loadLastSeen() {
+  try {
+    const val = parseInt(fs.readFileSync(LAST_SEEN_FILE, 'utf-8').trim(), 10);
+    return isNaN(val) ? 0 : val;
+  } catch {
+    return 0;
+  }
+}
+
+function persistLastSeen(ts) {
+  try {
+    const dir = path.dirname(LAST_SEEN_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(LAST_SEEN_FILE, String(ts));
+  } catch {
+    // Best effort
+  }
+}
+
+export let lastSeenTimestamp = loadLastSeen();
 
 // Exponential backoff - tracks consecutive idle nudges
 let consecutiveIdleCount = 0;
@@ -65,18 +91,23 @@ export function setKeepaliveInterval(interval) {
 /**
  * Update the last seen timestamp
  * Only updates if the new timestamp is greater than current
+ * Persists to disk so it survives reconnections (P2-LISTEN-5)
  */
 export function updateLastSeen(ts) {
   if (ts && ts > lastSeenTimestamp) {
     lastSeenTimestamp = ts;
+    persistLastSeen(ts);
   }
 }
 
 /**
- * Reset the last seen timestamp (e.g., on new connection)
+ * Reset the last seen timestamp on new connection.
+ * No longer wipes to 0 — preserves disk-persisted value to avoid
+ * duplicate processing on reconnect (P2-LISTEN-5 fix).
  */
 export function resetLastSeen() {
-  lastSeenTimestamp = 0;
+  // Intentional no-op — lastSeenTimestamp persists across reconnections.
+  // To force a full re-read, manually delete the last_seen_ts file.
 }
 
 /**

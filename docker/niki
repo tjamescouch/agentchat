@@ -20,7 +20,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { createWriteStream, writeFileSync, mkdirSync } from 'node:fs';
+import { createWriteStream, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
@@ -40,6 +40,8 @@ Options:
   --log <file>            Write diagnostics log to file
   --state <file>          Write state JSON on exit (budget used, reason, etc.)
   --cooldown <seconds>    Grace period after SIGTERM before SIGKILL (default: 5)
+  --abort-file <path>     Poll this file for external abort signal
+  --poll-interval <ms>    Base poll interval in ms for abort file (default: 1000)
 
 Examples:
   niki --budget 500000 -- claude -p "your prompt" --verbose
@@ -61,6 +63,8 @@ const { values: opts } = parseArgs({
     log:             { type: 'string' },
     state:           { type: 'string' },
     cooldown:        { type: 'string', default: '5' },
+    'abort-file':    { type: 'string' },
+    'poll-interval': { type: 'string', default: '1000' },
   },
 });
 
@@ -69,6 +73,8 @@ const TIMEOUT_S     = parseInt(opts.timeout, 10);
 const MAX_SENDS     = parseInt(opts['max-sends'], 10);
 const MAX_TOOL_CALLS = parseInt(opts['max-tool-calls'], 10);
 const COOLDOWN_S    = parseInt(opts.cooldown, 10);
+const ABORT_FILE    = opts['abort-file'] ? resolve(opts['abort-file']) : null;
+const POLL_INTERVAL = parseInt(opts['poll-interval'], 10);
 const LOG_FILE      = opts.log;
 const STATE_FILE    = opts.state;
 
@@ -86,7 +92,7 @@ const state = {
   sendCallsThisMinute: 0,
   exitCode: null,
   exitSignal: null,
-  killedBy: null,    // 'budget' | 'timeout' | 'rate-sends' | 'rate-tools' | null
+  killedBy: null,    // 'budget' | 'timeout' | 'rate-sends' | 'rate-tools' | 'abort' | null
   duration: 0,
 };
 
@@ -271,6 +277,34 @@ child.stderr.on('data', (chunk) => {
   }
 });
 
+// --- Abort file polling (with jitter) ---
+
+let abortPollId = null;
+
+function jitteredDelay(base) {
+  // ±30% jitter
+  const jitter = base * 0.3;
+  return base + (Math.random() * 2 * jitter - jitter);
+}
+
+function scheduleAbortPoll() {
+  if (!ABORT_FILE || killed) return;
+  abortPollId = setTimeout(() => {
+    if (killed) return;
+    if (existsSync(ABORT_FILE)) {
+      log(`Abort file detected: ${ABORT_FILE}`);
+      killChild('abort');
+      return;
+    }
+    scheduleAbortPoll();
+  }, jitteredDelay(POLL_INTERVAL));
+}
+
+if (ABORT_FILE) {
+  log(`Abort file: ${ABORT_FILE} (poll: ${POLL_INTERVAL}ms ±30% jitter)`);
+  scheduleAbortPoll();
+}
+
 // --- Timeout ---
 
 const timeoutId = setTimeout(() => {
@@ -281,6 +315,7 @@ const timeoutId = setTimeout(() => {
 
 child.on('exit', (code, signal) => {
   clearTimeout(timeoutId);
+  if (abortPollId) clearTimeout(abortPollId);
   state.exitCode = code;
   state.exitSignal = signal;
   state.duration = Math.round((Date.now() - new Date(state.startedAt).getTime()) / 1000);

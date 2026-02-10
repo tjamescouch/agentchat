@@ -40,7 +40,7 @@ function readInbox(paths, lastSeen, channels, agentId) {
       const msg = JSON.parse(line);
 
       if (msg.type !== 'MSG' || !msg.ts) continue;
-      if (msg.ts <= lastSeen) continue;
+      if (msg.ts < lastSeen) continue;
       if (msg.from === agentId || msg.from === '@server') continue;
 
       const isRelevantChannel = channels.includes(msg.to);
@@ -59,10 +59,10 @@ function readInbox(paths, lastSeen, channels, agentId) {
     }
   }
 
-  // Deduplicate by ts:from
+  // Deduplicate by ts:from:content_prefix (handles same-ms messages)
   const seen = new Set();
   const deduped = messages.filter((m) => {
-    const key = `${m.ts}:${m.from}`;
+    const key = `${m.ts}:${m.from}:${(m.content || '').slice(0, 50)}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;

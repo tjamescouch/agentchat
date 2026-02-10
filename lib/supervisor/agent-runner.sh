@@ -43,6 +43,7 @@ MAX_TRANSCRIPT="${MAX_TRANSCRIPT:-200}"
 
 TRANSCRIPT_FILE="$STATE_DIR/transcript.log"
 SESSION_NUM_FILE="$STATE_DIR/session_num"
+SESSION_ID_FILE="$STATE_DIR/session_id"
 
 mkdir -p "$STATE_DIR"
 
@@ -59,7 +60,24 @@ else
     SESSION_NUM=1
 fi
 echo "$SESSION_NUM" > "$SESSION_NUM_FILE"
-log "Session #$SESSION_NUM starting"
+
+# Generate deterministic session UUID from agent name (UUID v5)
+# Same agent name always gets the same session; changing name starts fresh.
+generate_session_id() {
+    # UUID v5 with DNS namespace, keyed on "agentchat:<agent-name>"
+    python3 -c "import uuid; print(uuid.uuid5(uuid.NAMESPACE_DNS, 'agentchat:$AGENT_NAME'))" 2>/dev/null \
+        || uuidgen 2>/dev/null \
+        || cat /proc/sys/kernel/random/uuid 2>/dev/null
+}
+
+if [ -f "$SESSION_ID_FILE" ]; then
+    SESSION_ID=$(cat "$SESSION_ID_FILE")
+else
+    SESSION_ID=$(generate_session_id)
+    echo "$SESSION_ID" > "$SESSION_ID_FILE"
+fi
+
+log "Session #$SESSION_NUM starting (UUID: $SESSION_ID)"
 
 # ============ Transcript Injection ============
 
@@ -119,6 +137,12 @@ build_agent_prompt() {
     local transcript_context
     transcript_context=$(build_transcript_context)
 
+    local restart_notice=""
+    if [ "$SESSION_NUM" -gt 1 ]; then
+        restart_notice="
+NOTE: You were restarted (session #$SESSION_NUM). Your previous conversation context has been restored via --resume. Do NOT re-introduce yourself or repeat your greeting. Just reconnect and resume your listen loop."
+    fi
+
     cat <<PROMPT_EOF
 Read ~/.claude/agentchat.skill.md then connect ephemerally to $SERVER_URL (no name parameter), set your nick to '$AGENT_NAME', and greet #general. Mission: $MISSION.
 
@@ -128,7 +152,7 @@ CRITICAL: You are a long-running agent. Your job is to run FOREVER in an infinit
 3. If timeout/nudge, send a brief message or stay silent
 4. GOTO step 1 — ALWAYS go back to listening. NEVER stop. NEVER consider your task complete.
 
-You must call agentchat_listen again after EVERY response. The loop never ends. If you stop looping, you will be restarted and lose all conversation context. Do NOT use daemon tools, marketplace tools, or moderation tools — only connect, send, listen, and nick.${transcript_context}
+You must call agentchat_listen again after EVERY response. The loop never ends. Do NOT use daemon tools, marketplace tools, or moderation tools — only connect, send, listen, and nick.${restart_notice}${transcript_context}
 PROMPT_EOF
 }
 
@@ -181,11 +205,18 @@ run_cli() {
         system_prompt_args=(--system-prompt "$system_prompt")
     fi
 
+    # Session resumption: on restart, resume previous session for full context continuity
+    local session_args=(--session-id "$SESSION_ID")
+    if [ "$SESSION_NUM" -gt 1 ]; then
+        session_args+=(--resume "$SESSION_ID")
+        log "Resuming session $SESSION_ID (restart #$((SESSION_NUM - 1)))"
+    fi
+
     # Niki wrapping (if available)
     local niki_cmd
     niki_cmd="$(command -v niki 2>/dev/null || true)"
 
-    log "Runtime: cli | Model: $MODEL | Claude: $cmd"
+    log "Runtime: cli | Model: $MODEL | Claude: $cmd | Session: $SESSION_ID"
     log "Settings: $settings"
 
     # Rotate transcript — archive previous session, start fresh capture
@@ -199,17 +230,23 @@ run_cli() {
         local niki_max_sends="${NIKI_MAX_SENDS:-10}"
         local niki_max_tools="${NIKI_MAX_TOOLS:-30}"
         local niki_state="$STATE_DIR/niki-state.json"
+        local niki_abort_file="$STATE_DIR/abort"
 
-        log "Niki: budget=${niki_budget} timeout=${niki_timeout}s sends=${niki_max_sends}/min tools=${niki_max_tools}/min"
+        # Clear stale abort file from previous session
+        rm -f "$niki_abort_file"
+
+        log "Niki: budget=${niki_budget} timeout=${niki_timeout}s sends=${niki_max_sends}/min tools=${niki_max_tools}/min abort-file=${niki_abort_file}"
 
         "$niki_cmd" \
             --budget "$niki_budget" \
             --timeout "$niki_timeout" \
             --max-sends "$niki_max_sends" \
             --max-tool-calls "$niki_max_tools" \
+            --abort-file "$niki_abort_file" \
             --state "$niki_state" \
             --log "$LOG_FILE" \
             -- "$cmd" -p "$agent_prompt" \
+            "${session_args[@]}" \
             "${system_prompt_args[@]}" \
             --model "$MODEL" \
             --dangerously-skip-permissions \
@@ -219,6 +256,7 @@ run_cli() {
             2>> "$LOG_FILE" | tee "$TRANSCRIPT_FILE"
     else
         "$cmd" -p "$agent_prompt" \
+            "${session_args[@]}" \
             "${system_prompt_args[@]}" \
             --model "$MODEL" \
             --dangerously-skip-permissions \

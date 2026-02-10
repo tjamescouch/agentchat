@@ -166,8 +166,9 @@ export function registerConnectTool(server) {
         // Persistent message handler - writes ALL messages to inbox.jsonl so
         // listen always has a single source of truth (same file the daemon uses).
         newClient.on('message', (msg) => {
-          // Skip own messages and server noise
+          // Skip own messages, server noise, and channel replays (P3-LISTEN-7)
           if (msg.from === newClient.agentId || msg.from === '@server') return;
+          if (msg.replay) return;
 
           // Intercept file transfer protocol messages
           if (msg.content) {

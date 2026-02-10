@@ -137,6 +137,7 @@ Commands:
   build                    Build the agent container image
   start <name> <mission>   Start a new supervised agent container
   stop <name>              Stop an agent gracefully
+  abort <name>             Trigger niki abort (immediate SIGTERM via abort file)
   kill <name>              Force kill an agent container
   restart <name>           Restart an agent container
   status [name]            Show agent status (all if no name)
@@ -193,6 +194,9 @@ start_agent() {
         echo "Agent '$name' already running (container $(container_name "$name"))"
         exit 1
     fi
+
+    # Remove stale stop/abort files from previous runs (P2-SWARM-8)
+    rm -f "$AGENTS_DIR/$name/stop" "$AGENTS_DIR/$name/abort"
 
     # Remove stopped container if it exists
     if container_exists "$name"; then
@@ -299,6 +303,8 @@ kill_agent() {
 
     podman kill "$(container_name "$name")" > /dev/null 2>&1
     podman rm -f "$(container_name "$name")" > /dev/null 2>&1
+    # Remove stale stop/abort files so restart doesn't immediately re-trigger (P2-SWARM-8)
+    rm -f "$AGENTS_DIR/$name/stop" "$AGENTS_DIR/$name/abort"
     echo "Agent '$name' killed"
 }
 
@@ -455,6 +461,15 @@ case "$1" in
         ;;
     stop)
         stop_agent "$2"
+        ;;
+    abort)
+        name="$2"
+        if [ -z "$name" ]; then echo "Usage: agentctl abort <name>"; exit 1; fi
+        abort_file="$AGENTS_DIR/$name/abort"
+        echo "Triggering abort for $name..."
+        touch "$abort_file"
+        echo "Abort file created: $abort_file"
+        echo "Niki will detect and SIGTERM the agent within ~1s."
         ;;
     kill)
         kill_agent "$2"
