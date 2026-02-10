@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y \
 
 # Install Claude CLI and agentchat MCP server globally
 # Pin versions to bust Podman layer cache when deps update
-RUN npm install -g @anthropic-ai/claude-code @tjamescouch/agentchat-mcp@0.9.1 @tjamescouch/agentchat@0.24.1 @tjamescouch/niki@0.1.0
+RUN npm install -g @anthropic-ai/claude-code @tjamescouch/agentchat-mcp@0.9.4 @tjamescouch/agentchat@0.24.3 @tjamescouch/niki@0.1.0
 
 # Create non-root agent user
 RUN useradd -m -s /bin/bash agent
@@ -36,6 +36,9 @@ COPY --chown=agent:agent docker/claude-settings-fetcher.json /home/agent/.claude
 
 # Copy container-specific skill file (stripped down — no marketplace/daemon/moderation tools)
 COPY --chown=agent:agent docker/container-skill.md /home/agent/.claude/agentchat.skill.md
+
+# Copy personality files (supervisor loads ~/.claude/personalities/<name>.md as system prompt)
+COPY --chown=agent:agent docker/personalities/ /home/agent/.claude/personalities/
 
 # Create state directory structure
 RUN mkdir -p /home/agent/.agentchat/agents \

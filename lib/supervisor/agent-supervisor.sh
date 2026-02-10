@@ -155,6 +155,24 @@ while true; do
     # Build the claude command
     AGENT_PROMPT="Read ~/.claude/agentchat.skill.md then connect ephemerally to $SERVER_URL (no name parameter), set your nick to '$AGENT_NAME', and greet #general. Mission: $MISSION. Enter a listen loop. On each message, respond concisely then listen again. On timeout, send a brief check-in then listen again. Never exit unless there is an error. Do NOT use daemon tools, marketplace tools, or moderation tools — only connect, send, listen, and nick."
 
+    # Load personality: base + character-specific persona
+    BASE_PERSONALITY="$HOME/.claude/personalities/_base.md"
+    CHAR_PERSONALITY="$HOME/.claude/personalities/${AGENT_NAME}.md"
+    SYSTEM_PROMPT_ARGS=()
+    SYSTEM_PROMPT=""
+    if [ -f "$BASE_PERSONALITY" ]; then
+        SYSTEM_PROMPT=$(cat "$BASE_PERSONALITY")
+    fi
+    if [ -f "$CHAR_PERSONALITY" ]; then
+        SYSTEM_PROMPT="${SYSTEM_PROMPT}
+---
+$(cat "$CHAR_PERSONALITY")"
+    fi
+    if [ -n "$SYSTEM_PROMPT" ]; then
+        SYSTEM_PROMPT_ARGS=(--system-prompt "$SYSTEM_PROMPT")
+        log "Loaded personality (base=$([ -f "$BASE_PERSONALITY" ] && echo yes || echo no) char=$([ -f "$CHAR_PERSONALITY" ] && echo yes || echo no))"
+    fi
+
     if [ -n "$NIKI_CMD" ]; then
         # Run under niki supervision
         log "Running under niki (budget=${NIKI_BUDGET} timeout=${NIKI_TIMEOUT}s sends=${NIKI_MAX_SENDS}/min)"
@@ -166,6 +184,7 @@ while true; do
             --state "$NIKI_STATE" \
             --log "$LOG_FILE" \
             -- "$CLAUDE_CMD" -p "$AGENT_PROMPT" \
+            "${SYSTEM_PROMPT_ARGS[@]}" \
             --model "$MODEL" \
             --dangerously-skip-permissions \
             --permission-mode bypassPermissions \
@@ -174,6 +193,7 @@ while true; do
             2>> "$LOG_FILE"
     else
         "$CLAUDE_CMD" -p "$AGENT_PROMPT" \
+            "${SYSTEM_PROMPT_ARGS[@]}" \
             --model "$MODEL" \
             --dangerously-skip-permissions \
             --permission-mode bypassPermissions \
