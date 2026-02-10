@@ -11,7 +11,12 @@ import {
   client, keepaliveInterval,
   setClient, setServerUrl, setKeepaliveInterval,
   resetLastSeen,
-  DEFAULT_SERVER_URL, KEEPALIVE_INTERVAL_MS
+  DEFAULT_SERVER_URL, KEEPALIVE_INTERVAL_MS, PONG_STALE_MS,
+  RECONNECT_MAX_ATTEMPTS, RECONNECT_BASE_DELAY_MS,
+  recordPong, isConnectionHealthy, lastPongTime,
+  connectionOptions, setConnectionOptions,
+  joinedChannels, trackChannel,
+  isReconnecting, setReconnecting,
 } from '../state.js';
 import { appendToInbox } from '../inbox-writer.js';
 import { handleIncomingOffer, handleFileChunk, handleTransferComplete } from './file-transfer.js';
@@ -50,6 +55,164 @@ function getIdentityPath(name) {
 }
 
 /**
+ * Wire up message handlers on a client instance.
+ * Extracted so reconnect can re-attach the same handlers.
+ */
+function wireMessageHandlers(targetClient) {
+  targetClient.on('message', (msg) => {
+    // Skip own messages, server noise, and channel replays (P3-LISTEN-7)
+    if (msg.from === targetClient.agentId || msg.from === '@server') return;
+    if (msg.replay) return;
+
+    // Intercept file transfer protocol messages
+    if (msg.content) {
+      try {
+        const parsed = JSON.parse(msg.content);
+        if (parsed._ft === 'offer') {
+          handleIncomingOffer({ ...msg, _ft_data: parsed });
+        } else if (parsed._ft === 'complete') {
+          handleTransferComplete({ ...msg, _ft_data: parsed });
+        }
+      } catch { /* not JSON, normal message */ }
+    }
+
+    appendToInbox({
+      type: 'MSG',
+      from: msg.from,
+      from_name: msg.from_name,
+      to: msg.to,
+      content: msg.content,
+      ts: msg.ts,
+    });
+  });
+
+  // FILE_CHUNK handler - receives chunked file data
+  targetClient.on('file_chunk', (msg) => {
+    if (msg.from === targetClient.agentId) return;
+    if (msg.content) {
+      try {
+        const parsed = JSON.parse(msg.content);
+        if (parsed._ft === 'chunk') {
+          handleFileChunk({ ...msg, _ft_data: parsed });
+        }
+      } catch { /* not valid file transfer chunk */ }
+    }
+  });
+
+  // Track pong responses for health monitoring (P1-LISTEN-1)
+  targetClient.on('pong', () => {
+    recordPong();
+  });
+
+  // Auto-reconnect on disconnect (P1-LISTEN-1)
+  targetClient.on('disconnect', () => {
+    // Don't reconnect if we're already reconnecting or if this was intentional
+    if (!isReconnecting() && connectionOptions) {
+      attemptReconnect();
+    }
+  });
+}
+
+/**
+ * Auto-reconnect with exponential backoff (P1-LISTEN-1)
+ * Re-creates client, re-wires handlers, re-joins channels.
+ */
+async function attemptReconnect() {
+  if (isReconnecting() || !connectionOptions) return;
+  setReconnecting(true);
+
+  const opts = connectionOptions;
+  const channels = [...joinedChannels];
+
+  for (let attempt = 0; attempt < RECONNECT_MAX_ATTEMPTS; attempt++) {
+    const delay = RECONNECT_BASE_DELAY_MS * Math.pow(2, attempt);
+    if (attempt > 0) {
+      await new Promise(r => setTimeout(r, delay));
+    }
+
+    try {
+      // Disconnect old client cleanly
+      if (client) {
+        try { client.disconnect(); } catch { /* already dead */ }
+      }
+
+      const newClient = new AgentChatClient(opts);
+      await newClient.connect();
+
+      setClient(newClient);
+      recordPong(); // Reset health timer
+      wireMessageHandlers(newClient);
+      startKeepalive();
+
+      // Re-join channels
+      for (const ch of channels) {
+        try { await newClient.join(ch); } catch { /* non-fatal */ }
+      }
+
+      // Write reconnect event to inbox so listen sees it
+      appendToInbox({
+        type: 'MSG',
+        from: '@system',
+        from_name: 'system',
+        to: '#internal',
+        content: `[reconnected after ${attempt + 1} attempt(s)]`,
+        ts: Date.now(),
+      });
+
+      setReconnecting(false);
+      return;
+    } catch (err) {
+      // Last attempt failed — give up
+      if (attempt === RECONNECT_MAX_ATTEMPTS - 1) {
+        setReconnecting(false);
+      }
+    }
+  }
+}
+
+/**
+ * Start the keepalive interval with health checking (P1-LISTEN-1)
+ */
+function startKeepalive() {
+  // Clear existing keepalive
+  if (keepaliveInterval) {
+    clearInterval(keepaliveInterval);
+    setKeepaliveInterval(null);
+  }
+
+  const interval = setInterval(() => {
+    try {
+      if (!client || !client.connected) {
+        // Client reports disconnected — trigger reconnect
+        if (!isReconnecting() && connectionOptions) {
+          attemptReconnect();
+        }
+        return;
+      }
+
+      // Check if pongs are stale (no pong in >90s means WS is dead)
+      if (!isConnectionHealthy()) {
+        // Force disconnect to trigger reconnect
+        try { client.disconnect(); } catch { /* ignore */ }
+        if (!isReconnecting() && connectionOptions) {
+          attemptReconnect();
+        }
+        return;
+      }
+
+      client.ping();
+    } catch (e) {
+      // ping() threw — connection is dead, trigger reconnect
+      if (!isReconnecting() && connectionOptions) {
+        attemptReconnect();
+      }
+    }
+  }, KEEPALIVE_INTERVAL_MS);
+
+  setKeepaliveInterval(interval);
+}
+
+/**
  * Register the connect tool with the MCP server
  */
 export function registerConnectTool(server) {
@@ -60,8 +223,9 @@ export function registerConnectTool(server) {
       server_url: z.string().optional().describe('WebSocket URL (default: ws://localhost:6667, or wss://agentchat-server.fly.dev if AGENTCHAT_PUBLIC=true)'),
       name: z.string().optional().describe('Agent name for persistent identity. Creates .agentchat/identities/<name>.json. Omit for ephemeral identity.'),
       identity_path: z.string().optional().describe('Custom path to identity file (overrides name)'),
+      channels: z.array(z.string()).optional().describe('Channels to auto-join on connect. If omitted, joins #general, #discovery, #bounties by default.'),
     },
-    async ({ server_url, name, identity_path }) => {
+    async ({ server_url, name, identity_path, channels: requestedChannels }) => {
       try {
         // Security check: prevent running in root/system directories
         const safetyCheck = checkDirectorySafety(process.cwd());
@@ -79,6 +243,8 @@ export function registerConnectTool(server) {
         }
 
         // Disconnect existing client and wait briefly for server to process
+        // Clear connectionOptions first to prevent auto-reconnect from firing
+        setConnectionOptions(null);
         if (client) {
           client.disconnect();
           await new Promise(r => setTimeout(r, 100));
@@ -160,67 +326,27 @@ export function registerConnectTool(server) {
         setClient(newClient);
         setServerUrl(actualServerUrl);
 
+        // Save connection options for auto-reconnect (P1-LISTEN-1)
+        setConnectionOptions(options);
+        recordPong(); // Initialize health timer
+
         // Reset last seen timestamp on new connection
         resetLastSeen();
 
-        // Persistent message handler - writes ALL messages to inbox.jsonl so
-        // listen always has a single source of truth (same file the daemon uses).
-        newClient.on('message', (msg) => {
-          // Skip own messages, server noise, and channel replays (P3-LISTEN-7)
-          if (msg.from === newClient.agentId || msg.from === '@server') return;
-          if (msg.replay) return;
+        // Wire up message, file transfer, pong, and disconnect handlers
+        wireMessageHandlers(newClient);
 
-          // Intercept file transfer protocol messages
-          if (msg.content) {
-            try {
-              const parsed = JSON.parse(msg.content);
-              if (parsed._ft === 'offer') {
-                handleIncomingOffer({ ...msg, _ft_data: parsed });
-              } else if (parsed._ft === 'complete') {
-                handleTransferComplete({ ...msg, _ft_data: parsed });
-              }
-            } catch { /* not JSON, normal message */ }
-          }
+        // Start keepalive with health checking (P1-LISTEN-1)
+        startKeepalive();
 
-          appendToInbox({
-            type: 'MSG',
-            from: msg.from,
-            from_name: msg.from_name,
-            to: msg.to,
-            content: msg.content,
-            ts: msg.ts,
-          });
-        });
-
-        // FILE_CHUNK handler - receives chunked file data
-        newClient.on('file_chunk', (msg) => {
-          if (msg.from === newClient.agentId) return;
-          if (msg.content) {
-            try {
-              const parsed = JSON.parse(msg.content);
-              if (parsed._ft === 'chunk') {
-                handleFileChunk({ ...msg, _ft_data: parsed });
-              }
-            } catch { /* not valid file transfer chunk */ }
-          }
-        });
-
-        // Start keepalive ping to prevent connection timeout
-        const interval = setInterval(() => {
-          try {
-            if (client && client.connected) {
-              client.ping();
-            }
-          } catch (e) {
-            // Connection likely dead, will reconnect on next tool call
-          }
-        }, KEEPALIVE_INTERVAL_MS);
-        setKeepaliveInterval(interval);
-
-        // Auto-join marketplace channels for discoverability
-        for (const ch of ['#general', '#discovery', '#bounties']) {
+        // Join channels: explicit list if provided, otherwise defaults
+        const autoJoinChannels = requestedChannels && requestedChannels.length > 0
+          ? requestedChannels
+          : ['#general', '#discovery', '#bounties'];
+        for (const ch of autoJoinChannels) {
           try {
             await newClient.join(ch);
+            trackChannel(ch);
           } catch {
             // Non-fatal: channel may not exist on older servers
           }

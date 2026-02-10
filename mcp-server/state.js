@@ -59,6 +59,15 @@ export const DEFAULT_SERVER_URL = (() => {
 
 // Keepalive settings
 export const KEEPALIVE_INTERVAL_MS = 30000;
+export const PONG_STALE_MS = 90000; // 3 missed pings = dead
+export const RECONNECT_MAX_ATTEMPTS = 5;
+export const RECONNECT_BASE_DELAY_MS = 1000;
+
+// Connection health tracking (P1-LISTEN-1)
+export let lastPongTime = Date.now();
+export let connectionOptions = null; // { server, name, identity } for reconnect
+export let joinedChannels = new Set();
+let _reconnecting = false;
 
 /**
  * Set the active client connection
@@ -138,4 +147,48 @@ export function resetIdleCount() {
  */
 export function getIdleCount() {
   return consecutiveIdleCount;
+}
+
+// ============ Connection Health (P1-LISTEN-1) ============
+
+/**
+ * Record a pong received from server
+ */
+export function recordPong() {
+  lastPongTime = Date.now();
+}
+
+/**
+ * Check if connection appears healthy (received pong recently)
+ */
+export function isConnectionHealthy() {
+  return (Date.now() - lastPongTime) < PONG_STALE_MS;
+}
+
+/**
+ * Save connection options for auto-reconnect
+ */
+export function setConnectionOptions(opts) {
+  connectionOptions = opts;
+}
+
+/**
+ * Track a joined channel (for rejoin on reconnect)
+ */
+export function trackChannel(channel) {
+  joinedChannels.add(channel);
+}
+
+/**
+ * Get reconnecting flag
+ */
+export function isReconnecting() {
+  return _reconnecting;
+}
+
+/**
+ * Set reconnecting flag (prevents concurrent reconnects)
+ */
+export function setReconnecting(val) {
+  _reconnecting = val;
 }
