@@ -84,7 +84,12 @@ export class Allowlist {
       return { allowed: true, reason: 'pubkey approved' };
     }
 
-    return { allowed: false, reason: 'pubkey not in allowlist' };
+    if (this.strict) {
+      return { allowed: false, reason: 'pubkey not in allowlist' };
+    }
+
+    // Non-strict: allow unknown pubkeys through for persistent identity tracking
+    return { allowed: true, reason: 'pubkey tracked (not approved)' };
   }
 
   /**
