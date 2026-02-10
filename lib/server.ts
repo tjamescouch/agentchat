@@ -153,6 +153,7 @@ export interface AgentChatServerOptions {
   rateLimitMs?: number;
   messageBufferSize?: number;
   idleTimeoutMs?: number;
+  idlePromptsEnabled?: boolean;
   verificationTimeoutMs?: number;
   challengeTimeoutMs?: number;
   logger?: Console;
@@ -214,6 +215,7 @@ export class AgentChatServer {
 
   // Idle prompt settings
   idleTimeoutMs: number;
+  idlePromptsEnabled: boolean;
   idleCheckInterval: NodeJS.Timeout | null;
   channelLastActivity: Map<string, number>;
 
@@ -297,19 +299,17 @@ export class AgentChatServer {
     this.pubkeyToId = new Map();
 
     // Idle prompt settings
-    this.idleTimeoutMs = options.idleTimeoutMs || 5 * 60 * 1000; // 5 minutes default
+    this.idleTimeoutMs = options.idleTimeoutMs || 60 * 60 * 1000; // 1 hour default
+    this.idlePromptsEnabled = options.idlePromptsEnabled !== false; // true unless explicitly disabled
     this.idleCheckInterval = null;
     this.channelLastActivity = new Map();
 
-    // Conversation starters for idle prompts
+    // Conversation starters for idle prompts (1hr default interval)
     this.conversationStarters = [
-      "It's quiet here. What's everyone working on?",
-      "Any agents want to test the proposal system? Try: PROPOSE @agent \"task\" --amount 0",
-      "Topic: What capabilities would make agent coordination more useful?",
-      "Looking for collaborators? Post your skills and what you're building.",
-      "Challenge: Describe your most interesting current project in one sentence.",
-      "Question: What's the hardest part about agent-to-agent coordination?",
-      "Idle hands... anyone want to pair on a spec or code review?",
+      "Hourly check-in: any blockers or pending reviews?",
+      "Reminder: register your skills with agentchat_register_skills to appear in the marketplace.",
+      "Status check: report progress on open tasks if you have any.",
+      "Reminder: use #bounties to post work and #discovery to find agents with specific skills.",
     ];
 
     // Create default channels
@@ -674,6 +674,7 @@ export class AgentChatServer {
    * Check for idle channels and post conversation starters
    */
   _checkIdleChannels(): void {
+    if (!this.idlePromptsEnabled) return;
     const now = Date.now();
 
     for (const [channelName, channel] of this.channels) {
@@ -968,7 +969,9 @@ export function startServer(options: AgentChatServerOptions = {}): AgentChatServ
     cert: options.cert || process.env.TLS_CERT || null,
     key: options.key || process.env.TLS_KEY || null,
     rateLimitMs: options.rateLimitMs || parseInt(process.env.RATE_LIMIT_MS || '1000'),
-    messageBufferSize: options.messageBufferSize || parseInt(process.env.MESSAGE_BUFFER_SIZE || '20')
+    messageBufferSize: options.messageBufferSize || parseInt(process.env.MESSAGE_BUFFER_SIZE || '20'),
+    idleTimeoutMs: options.idleTimeoutMs || parseInt(process.env.IDLE_TIMEOUT_MS || '3600000'),
+    idlePromptsEnabled: options.idlePromptsEnabled !== undefined ? options.idlePromptsEnabled : process.env.IDLE_PROMPTS !== 'false',
   };
 
   const server = new AgentChatServer(config);

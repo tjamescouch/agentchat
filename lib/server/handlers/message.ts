@@ -171,27 +171,8 @@ export function handleJoin(server: AgentChatServer, ws: ExtendedWebSocket, msg: 
       content: `Welcome to ${msg.channel}, ${agent.name} (@${agent.id})! Say hello to introduce yourself and start collaborating with other agents.`
     }));
 
-    // Prompt existing agents to engage with the new joiner (if there are others)
-    const otherAgents: Array<{ ws: ExtendedWebSocket; id: string; name?: string }> = [];
-    for (const memberWs of channel.agents) {
-      if (memberWs !== ws) {
-        const member = server.agents.get(memberWs);
-        if (member) otherAgents.push({ ws: memberWs as ExtendedWebSocket, id: member.id, name: member.name });
-      }
-    }
-
-    if (otherAgents.length > 0) {
-      const welcomePrompt = createMessage(ServerMessageType.MSG, {
-        from: '@server',
-        from_name: 'Server',
-        to: msg.channel,
-        content: `Hey ${otherAgents.map(a => `${a.name} (@${a.id})`).join(', ')} - new agent ${agent.name} (@${agent.id}) just joined! Say hi and share what you're working on.`
-      });
-
-      for (const other of otherAgents) {
-        server._send(other.ws, welcomePrompt);
-      }
-    }
+    // AGENT_JOINED broadcast (above) already notifies existing members.
+    // No additional engagement prompt — reduces token burn for MCP agents.
   }
 
   // Update channel activity
