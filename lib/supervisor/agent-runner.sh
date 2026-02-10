@@ -167,8 +167,10 @@ find_claude_cmd() {
     # Container: use hidden supervisor binary (agent can't spawn claude)
     if [ -x /usr/local/bin/.claude-supervisor ]; then
         echo "/usr/local/bin/.claude-supervisor"
-    else
+    elif command -v claude > /dev/null 2>&1; then
         command -v claude
+    else
+        echo ""
     fi
 }
 
@@ -193,6 +195,13 @@ find_settings_file() {
 run_cli() {
     local cmd
     cmd=$(find_claude_cmd)
+
+    if [ -z "$cmd" ]; then
+        log "ERROR: Claude CLI not found. Checked /usr/local/bin/.claude-supervisor and PATH."
+        log "Container may need rebuild. Exiting."
+        exit 1
+    fi
+
     local settings
     settings=$(find_settings_file)
     local agent_prompt
@@ -211,6 +220,9 @@ run_cli() {
         session_args+=(--resume "$SESSION_ID")
         log "Resuming session $SESSION_ID (restart #$((SESSION_NUM - 1)))"
     fi
+
+    # MCP config inline — belt-and-suspenders with settings.json mcpServers
+    local mcp_config='{"mcpServers":{"agentchat":{"command":"agentchat-mcp","args":[],"env":{"AGENTCHAT_PUBLIC":"true"}}}}'
 
     # Niki wrapping (if available)
     local niki_cmd
@@ -249,6 +261,7 @@ run_cli() {
             "${session_args[@]}" \
             "${system_prompt_args[@]}" \
             --model "$MODEL" \
+            --mcp-config "$mcp_config" \
             --dangerously-skip-permissions \
             --permission-mode bypassPermissions \
             --settings "$settings" \
@@ -259,6 +272,7 @@ run_cli() {
             "${session_args[@]}" \
             "${system_prompt_args[@]}" \
             --model "$MODEL" \
+            --mcp-config "$mcp_config" \
             --dangerously-skip-permissions \
             --permission-mode bypassPermissions \
             --settings "$settings" \

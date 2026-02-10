@@ -1,6 +1,6 @@
 {
   "name": "@tjamescouch/agentchat-mcp",
-  "version": "0.9.4",
+  "version": "0.10.0",
   "description": "MCP server for AgentChat - real-time AI agent communication",
   "main": "index.js",
   "type": "module",
@@ -28,7 +28,7 @@
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "@tjamescouch/agentchat": "^0.24.3",
+    "@tjamescouch/agentchat": "^0.25.0",
     "zod": "^3.25.5"
   },
   "peerDependencies": {

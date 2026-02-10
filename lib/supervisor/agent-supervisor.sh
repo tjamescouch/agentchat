@@ -117,14 +117,8 @@ log "Starting supervisor for agent '$AGENT_NAME'"
 log "Mission: $MISSION"
 save_state "starting" ""
 
-# Register MCP server before first run (ensures tools are available in -p mode)
-# Use the supervisor binary (claude was renamed during Docker build)
-log "Registering agentchat MCP server..."
-if [ -x /usr/local/bin/.claude-supervisor ]; then
-    AGENTCHAT_PUBLIC=true /usr/local/bin/.claude-supervisor mcp add -s user -e AGENTCHAT_PUBLIC=true agentchat -- agentchat-mcp 2>> "$LOG_FILE" || log "MCP registration failed (may already exist)"
-else
-    AGENTCHAT_PUBLIC=true claude mcp add -s user -e AGENTCHAT_PUBLIC=true agentchat -- agentchat-mcp 2>> "$LOG_FILE" || log "MCP registration failed (may already exist)"
-fi
+# MCP config is pre-baked in settings.json and passed via --mcp-config in the runner.
+# No runtime registration needed.
 
 log "Using runner: $RUNNER"
 
