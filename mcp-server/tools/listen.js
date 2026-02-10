@@ -10,7 +10,7 @@ import path from 'path';
 import { getDaemonPaths } from '@tjamescouch/agentchat/lib/daemon.js';
 import { addJitter } from '@tjamescouch/agentchat/lib/jitter.js';
 import { ClientMessageType } from '@tjamescouch/agentchat/lib/protocol.js';
-import { client, getLastSeen, updateLastSeen, getIdleCount, incrementIdleCount, resetIdleCount } from '../state.js';
+import { client, getLastSeen, updateLastSeen, getIdleCount, incrementIdleCount, resetIdleCount, trackChannel } from '../state.js';
 
 // Timeouts - agent cannot override these
 const ENFORCED_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour when alone
@@ -98,6 +98,7 @@ export function registerListenTool(server) {
         // via the connect handler's message listener)
         for (const channel of channels) {
           await client.join(channel);
+          trackChannel(channel); // Track for auto-reconnect (P1-LISTEN-1)
         }
 
         // Check channel occupancy to determine timeout behavior

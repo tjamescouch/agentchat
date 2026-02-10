@@ -8,6 +8,7 @@
  *   agentchat_send        - Send messages
  *   agentchat_listen      - Receive messages
  *   agentchat_channels       - List channels
+ *   agentchat_leave          - Leave/unsubscribe from a channel
  *   agentchat_create_channel - Create a channel
  *   agentchat_daemon_*    - Background daemon
  *   agentchat_inbox       - Read daemon inbox
