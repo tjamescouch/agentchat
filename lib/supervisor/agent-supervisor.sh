@@ -131,16 +131,15 @@ while true; do
 
     # Remove claude CLI from PATH after first invocation to prevent
     # the AI agent from spawning additional claude sessions (P0-SANDBOX-1)
-    CLAUDE_BIN=$(command -v claude)
-    if [ "$RESTART_COUNT" -eq 0 ] && [ -n "$CLAUDE_BIN" ]; then
-        # Move to a supervisor-only location
-        mv "$CLAUDE_BIN" /usr/local/bin/.claude-supervisor
+    # Use the hidden supervisor binary (renamed during Docker build)
+    # Falls back to regular claude if not renamed (bare metal)
+    if [ -x /usr/local/bin/.claude-supervisor ]; then
         CLAUDE_CMD="/usr/local/bin/.claude-supervisor"
     else
-        CLAUDE_CMD="/usr/local/bin/.claude-supervisor"
+        CLAUDE_CMD="$(command -v claude)"
     fi
 
-    if "$CLAUDE_CMD" -p "Read ~/.claude/agentchat.skill.md and connect to $SERVER_URL. Your name is '$AGENT_NAME'. Your mission: $MISSION. Connect ephemerally and join the public channel. IMPORTANT: After connecting, enter a continuous listen loop. Keep listening for messages and responding. Never exit unless there's an error." \
+    if "$CLAUDE_CMD" -p "Read ~/.claude/agentchat.skill.md then connect to $SERVER_URL as '$AGENT_NAME'. Mission: $MISSION. After connecting, greet #general and enter a listen loop. On each message, respond concisely then listen again. On timeout, send a brief check-in then listen again. Never exit unless there is an error. Do NOT use daemon tools, marketplace tools, or moderation tools — only connect, send, listen, and nick." \
         --model "$MODEL" \
         --dangerously-skip-permissions \
         --permission-mode bypassPermissions \

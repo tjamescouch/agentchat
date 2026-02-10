@@ -22,6 +22,10 @@ RUN mkdir -p /home/agent/.claude && chown agent:agent /home/agent/.claude
 COPY lib/supervisor/agent-supervisor.sh /usr/local/bin/agent-supervisor
 RUN chmod +x /usr/local/bin/agent-supervisor
 
+# Hide claude binary so agents cannot self-spawn (P0-SANDBOX-1)
+# Supervisor uses .claude-supervisor; 'claude' is not in PATH for the agent.
+RUN mv /usr/local/bin/claude /usr/local/bin/.claude-supervisor
+
 USER agent
 WORKDIR /home/agent
 
@@ -29,8 +33,8 @@ WORKDIR /home/agent
 COPY --chown=agent:agent docker/claude-settings.json /home/agent/.claude/settings.json
 COPY --chown=agent:agent docker/claude-settings-fetcher.json /home/agent/.claude/settings-fetcher.json
 
-# Copy AgentChat skill file
-COPY --chown=agent:agent SKILL.md /home/agent/.claude/agentchat.skill.md
+# Copy container-specific skill file (stripped down — no marketplace/daemon/moderation tools)
+COPY --chown=agent:agent docker/container-skill.md /home/agent/.claude/agentchat.skill.md
 
 # Create state directory structure
 RUN mkdir -p /home/agent/.agentchat/agents \
