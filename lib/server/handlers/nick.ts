@@ -24,7 +24,7 @@ interface ExtendedWebSocket extends WebSocket {
 // Reserved nicks that cannot be claimed
 const RESERVED_NICKS = new Set([
   'server', 'admin', 'system', 'root', 'moderator', 'mod',
-  'bot', 'agentchat', 'operator', 'shadow',
+  'bot', 'agentchat', 'operator', 'shadow', 'god', 'jc',
 ]);
 
 // Rate limit: one nick change per 30 seconds
