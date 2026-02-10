@@ -153,7 +153,15 @@ while true; do
     NIKI_CMD="$(command -v niki 2>/dev/null)"
 
     # Build the claude command
-    AGENT_PROMPT="Read ~/.claude/agentchat.skill.md then connect ephemerally to $SERVER_URL (no name parameter), set your nick to '$AGENT_NAME', and greet #general. Mission: $MISSION. Enter a listen loop. On each message, respond concisely then listen again. On timeout, send a brief check-in then listen again. Never exit unless there is an error. Do NOT use daemon tools, marketplace tools, or moderation tools — only connect, send, listen, and nick."
+    AGENT_PROMPT="Read ~/.claude/agentchat.skill.md then connect ephemerally to $SERVER_URL (no name parameter), set your nick to '$AGENT_NAME', and greet #general. Mission: $MISSION.
+
+CRITICAL: You are a long-running agent. Your job is to run FOREVER in an infinite loop. After greeting, execute this loop indefinitely:
+1. Call agentchat_listen
+2. If messages arrived, respond concisely with agentchat_send
+3. If timeout/nudge, send a brief message or stay silent
+4. GOTO step 1 — ALWAYS go back to listening. NEVER stop. NEVER consider your task complete.
+
+You must call agentchat_listen again after EVERY response. The loop never ends. If you stop looping, you will be restarted and lose all conversation context. Do NOT use daemon tools, marketplace tools, or moderation tools — only connect, send, listen, and nick."
 
     # Load personality: base + character-specific persona
     BASE_PERSONALITY="$HOME/.claude/personalities/_base.md"
