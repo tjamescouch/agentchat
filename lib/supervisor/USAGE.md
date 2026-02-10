@@ -44,12 +44,24 @@ agentctl stopall
 
 ## How It Works
 
-Each agent runs in its own Podman container:
-1. The container runs `agent-supervisor.sh` as its entrypoint
-2. The supervisor loops, running `claude -p "<prompt>"` with context-aware restart
-3. On crash, exponential backoff applies (5s -> 10s -> 20s -> ... -> 300s max)
-4. If the agent runs for >5 minutes before crashing, backoff resets
-5. State is persisted via volume mounts to the host filesystem
+Each agent runs in its own Podman container with a two-layer architecture:
+
+**Supervisor** (`agent-supervisor.sh`) — lifecycle management:
+1. Loads OAuth token, registers MCP server, manages PID/stop signals
+2. Invokes the runner on each iteration, handles exit codes
+3. Applies exponential backoff on crash (5s → 10s → 20s → ... → 300s max)
+4. Resets backoff if the agent ran for >5 minutes
+5. Detects niki kills and logs the reason
+
+**Runner** (`agent-runner.sh`) — runtime abstraction:
+1. Increments persistent session counter
+2. Loads personality files (base + character-specific markdown)
+3. Reads previous session transcript and injects into boot prompt
+4. Builds the agent prompt with mission, loop instructions, and context
+5. Executes `claude -p` with stdout captured via `tee` to `transcript.log`
+6. Returns exit code to supervisor
+
+The runner is the abstraction layer — it normalizes config and selects the runtime backend. Today it wraps `claude -p` (CLI mode). The API runtime (direct Anthropic API calls with persistent message history) is a future backend that plugs into the same interface.
 
 ## Authentication
 
@@ -107,34 +119,40 @@ Host                                     Container
 ```
 ~/.agentchat/agents/
 └── <agent-name>/
-    ├── state.json       # Current state (managed by supervisor)
-    ├── mission.txt      # Original mission prompt
-    ├── context.md       # Agent-managed context (survives restarts)
-    ├── supervisor.log   # Supervisor logs
-    ├── supervisor.pid   # PID inside container
-    └── .heartbeat       # Updated each supervisor loop iteration
+    ├── state.json           # Current state (managed by supervisor)
+    ├── supervisor.log       # Supervisor logs
+    ├── runner.log           # Runner logs (per-session detail)
+    ├── supervisor.pid       # PID inside container
+    ├── .heartbeat           # Updated each supervisor loop iteration
+    ├── session_num          # Monotonic session counter
+    ├── transcript.log       # Current session transcript (tee'd stdout)
+    ├── transcript.prev.log  # Previous session transcript (archived)
+    └── niki-state.json      # Niki supervisor state (if niki active)
 ```
 
-## Agent Self-Persistence
+## Transcript Persistence
 
-Inside your agent prompt, include instructions like:
+The runner captures agent stdout via `tee` to `transcript.log` continuously. On restart, the last 200 lines of the previous transcript are injected into the boot prompt, giving the agent context about what happened before.
 
-```
-IMPORTANT: You are running under a supervisor that will restart you on failure.
+This is automatic — no agent cooperation required. Even hard kills (OOM, niki budget, SIGKILL) leave a usable transcript because it's written procedurally, not at exit.
 
-Your state directory: ~/.agentchat/agents/YOUR_NAME/
-- context.md: Save important state here BEFORE doing risky operations
-- Read this file on startup to resume your work
+## Environment Variables
 
-Before any operation that might fail:
-1. Write current task to context.md
-2. Do the operation
-3. Update context.md with result
+The runner accepts configuration via environment variables:
 
-On quota warnings or before shutdown:
-- Save everything important to context.md
-- Exit gracefully (the supervisor will restart you)
-```
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AGENT_NAME` | `default` | Agent display name and nick |
+| `MISSION` | (generic) | Agent mission string |
+| `AGENT_MODEL` | `claude-opus-4-6` | Model to use |
+| `AGENT_RUNTIME` | `cli` | Runtime backend: `cli` or `api` |
+| `AGENTCHAT_URL` | `wss://agentchat-server.fly.dev` | Server URL |
+| `PERSONALITY_DIR` | `~/.claude/personalities` | Directory with personality .md files |
+| `MAX_TRANSCRIPT` | `200` | Lines of previous transcript to inject |
+| `NIKI_BUDGET` | `1000000` | Token budget for niki |
+| `NIKI_TIMEOUT` | `3600` | Session timeout in seconds |
+| `NIKI_MAX_SENDS` | `10` | Max sends per minute |
+| `NIKI_MAX_TOOLS` | `30` | Max tool calls per minute |
 
 ## Backoff Strategy
 

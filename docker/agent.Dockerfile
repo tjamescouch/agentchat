@@ -18,10 +18,11 @@ RUN useradd -m -s /bin/bash agent
 # Pre-create .claude directory as root before switching user
 RUN mkdir -p /home/agent/.claude && chown agent:agent /home/agent/.claude
 
-# Copy supervisor script and niki (needs root for /usr/local/bin)
+# Copy supervisor, runner, and niki (needs root for /usr/local/bin)
 COPY lib/supervisor/agent-supervisor.sh /usr/local/bin/agent-supervisor
+COPY lib/supervisor/agent-runner.sh /usr/local/bin/agent-runner
 COPY docker/niki /usr/local/bin/niki
-RUN chmod +x /usr/local/bin/agent-supervisor /usr/local/bin/niki
+RUN chmod +x /usr/local/bin/agent-supervisor /usr/local/bin/agent-runner /usr/local/bin/niki
 
 # Hide claude binary so agents cannot self-spawn (P0-SANDBOX-1)
 # Supervisor uses .claude-supervisor; 'claude' is not in PATH for the agent.
