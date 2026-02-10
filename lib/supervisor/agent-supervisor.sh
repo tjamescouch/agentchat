@@ -144,23 +144,66 @@ while true; do
         CLAUDE_CMD="$(command -v claude)"
     fi
 
-    if "$CLAUDE_CMD" -p "Read ~/.claude/agentchat.skill.md then connect ephemerally to $SERVER_URL (no name parameter), set your nick to '$AGENT_NAME', and greet #general. Mission: $MISSION. Enter a listen loop. On each message, respond concisely then listen again. On timeout, send a brief check-in then listen again. Never exit unless there is an error. Do NOT use daemon tools, marketplace tools, or moderation tools — only connect, send, listen, and nick." \
-        --model "$MODEL" \
-        --dangerously-skip-permissions \
-        --permission-mode bypassPermissions \
-        --settings "$SETTINGS_FILE" \
-        --verbose \
-        2>> "$LOG_FILE"; then
+    # Niki configuration (deterministic supervisor)
+    NIKI_BUDGET="${NIKI_BUDGET:-1000000}"         # 1M tokens default
+    NIKI_TIMEOUT="${NIKI_TIMEOUT:-3600}"           # 1 hour default
+    NIKI_MAX_SENDS="${NIKI_MAX_SENDS:-10}"         # 10 sends/min default
+    NIKI_MAX_TOOLS="${NIKI_MAX_TOOLS:-30}"         # 30 tool calls/min default
+    NIKI_STATE="$STATE_DIR/niki-state.json"
+    NIKI_CMD="$(command -v niki 2>/dev/null)"
+
+    # Build the claude command
+    AGENT_PROMPT="Read ~/.claude/agentchat.skill.md then connect ephemerally to $SERVER_URL (no name parameter), set your nick to '$AGENT_NAME', and greet #general. Mission: $MISSION. Enter a listen loop. On each message, respond concisely then listen again. On timeout, send a brief check-in then listen again. Never exit unless there is an error. Do NOT use daemon tools, marketplace tools, or moderation tools — only connect, send, listen, and nick."
+
+    if [ -n "$NIKI_CMD" ]; then
+        # Run under niki supervision
+        log "Running under niki (budget=${NIKI_BUDGET} timeout=${NIKI_TIMEOUT}s sends=${NIKI_MAX_SENDS}/min)"
+        "$NIKI_CMD" \
+            --budget "$NIKI_BUDGET" \
+            --timeout "$NIKI_TIMEOUT" \
+            --max-sends "$NIKI_MAX_SENDS" \
+            --max-tool-calls "$NIKI_MAX_TOOLS" \
+            --state "$NIKI_STATE" \
+            --log "$LOG_FILE" \
+            -- "$CLAUDE_CMD" -p "$AGENT_PROMPT" \
+            --model "$MODEL" \
+            --dangerously-skip-permissions \
+            --permission-mode bypassPermissions \
+            --settings "$SETTINGS_FILE" \
+            --verbose \
+            2>> "$LOG_FILE"
+    else
+        "$CLAUDE_CMD" -p "$AGENT_PROMPT" \
+            --model "$MODEL" \
+            --dangerously-skip-permissions \
+            --permission-mode bypassPermissions \
+            --settings "$SETTINGS_FILE" \
+            --verbose \
+            2>> "$LOG_FILE"
+    fi
+    EXIT_CODE=$?
+
+    if [ $EXIT_CODE -eq 0 ]; then
         # Clean exit
         log "Agent exited cleanly"
         BACKOFF=$MIN_BACKOFF
     else
-        EXIT_CODE=$?
         END_TIME=$(date +%s)
         DURATION=$((END_TIME - START_TIME))
 
-        log "Agent crashed (exit code $EXIT_CODE, ran for ${DURATION}s)"
-        save_state "crashed" "exit_code=$EXIT_CODE"
+        # Check if niki killed the agent (read niki state file)
+        NIKI_REASON=""
+        if [ -f "$NIKI_STATE" ]; then
+            NIKI_REASON=$(grep -o '"killedBy"[[:space:]]*:[[:space:]]*"[^"]*"' "$NIKI_STATE" 2>/dev/null | head -1 | sed 's/.*: *"//;s/"//')
+        fi
+
+        if [ -n "$NIKI_REASON" ] && [ "$NIKI_REASON" != "null" ]; then
+            log "Agent killed by niki (reason: $NIKI_REASON, exit code $EXIT_CODE, ran for ${DURATION}s)"
+            save_state "killed" "niki_reason=$NIKI_REASON"
+        else
+            log "Agent crashed (exit code $EXIT_CODE, ran for ${DURATION}s)"
+            save_state "crashed" "exit_code=$EXIT_CODE"
+        fi
 
         # If it ran for more than 5 minutes, reset backoff
         if [ $DURATION -gt 300 ]; then

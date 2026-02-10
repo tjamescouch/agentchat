@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y \
 
 # Install Claude CLI and agentchat MCP server globally
 # Pin versions to bust Podman layer cache when deps update
-RUN npm install -g @anthropic-ai/claude-code @tjamescouch/agentchat-mcp@0.9.1 @tjamescouch/agentchat@0.24.1
+RUN npm install -g @anthropic-ai/claude-code @tjamescouch/agentchat-mcp@0.9.1 @tjamescouch/agentchat@0.24.1 @tjamescouch/niki@0.1.0
 
 # Create non-root agent user
 RUN useradd -m -s /bin/bash agent
@@ -18,9 +18,10 @@ RUN useradd -m -s /bin/bash agent
 # Pre-create .claude directory as root before switching user
 RUN mkdir -p /home/agent/.claude && chown agent:agent /home/agent/.claude
 
-# Copy supervisor script (needs root for /usr/local/bin)
+# Copy supervisor script and niki (needs root for /usr/local/bin)
 COPY lib/supervisor/agent-supervisor.sh /usr/local/bin/agent-supervisor
-RUN chmod +x /usr/local/bin/agent-supervisor
+COPY docker/niki /usr/local/bin/niki
+RUN chmod +x /usr/local/bin/agent-supervisor /usr/local/bin/niki
 
 # Hide claude binary so agents cannot self-spawn (P0-SANDBOX-1)
 # Supervisor uses .claude-supervisor; 'claude' is not in PATH for the agent.
