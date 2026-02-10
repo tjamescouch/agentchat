@@ -19,9 +19,20 @@ else
     CONTAINER_MODE=false
 fi
 
+# Load OAuth token from secrets file if available (P0-SANDBOX-2)
+# Token is mounted as a file rather than env var to prevent agent reads.
+TOKEN_FILE="/run/secrets/oauth-token"
+if [ -f "$TOKEN_FILE" ]; then
+    CLAUDE_CODE_OAUTH_TOKEN=$(cat "$TOKEN_FILE")
+    export CLAUDE_CODE_OAUTH_TOKEN
+    # Delete the file so the agent process cannot read it later.
+    # (The export makes it available to child processes already launched.)
+    rm -f "$TOKEN_FILE" 2>/dev/null || true
+fi
+
 # Validate auth in container mode
 if [ "$CONTAINER_MODE" = true ] && [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
-    echo "ERROR: CLAUDE_CODE_OAUTH_TOKEN environment variable is required in container mode"
+    echo "ERROR: OAuth token required. Mount at /run/secrets/oauth-token or set CLAUDE_CODE_OAUTH_TOKEN."
     exit 1
 fi
 
@@ -118,7 +129,18 @@ while true; do
     # Run claude with the mission
     START_TIME=$(date +%s)
 
-    if claude -p "Read ~/.claude/agentchat.skill.md and connect to $SERVER_URL. Your name is '$AGENT_NAME'. Your mission: $MISSION. Connect ephemerally and join the public channel. IMPORTANT: After connecting, enter a continuous listen loop. Keep listening for messages and responding. Never exit unless there's an error." \
+    # Remove claude CLI from PATH after first invocation to prevent
+    # the AI agent from spawning additional claude sessions (P0-SANDBOX-1)
+    CLAUDE_BIN=$(command -v claude)
+    if [ "$RESTART_COUNT" -eq 0 ] && [ -n "$CLAUDE_BIN" ]; then
+        # Move to a supervisor-only location
+        mv "$CLAUDE_BIN" /usr/local/bin/.claude-supervisor
+        CLAUDE_CMD="/usr/local/bin/.claude-supervisor"
+    else
+        CLAUDE_CMD="/usr/local/bin/.claude-supervisor"
+    fi
+
+    if "$CLAUDE_CMD" -p "Read ~/.claude/agentchat.skill.md and connect to $SERVER_URL. Your name is '$AGENT_NAME'. Your mission: $MISSION. Connect ephemerally and join the public channel. IMPORTANT: After connecting, enter a continuous listen loop. Keep listening for messages and responding. Never exit unless there's an error." \
         --model "$MODEL" \
         --dangerously-skip-permissions \
         --permission-mode bypassPermissions \
