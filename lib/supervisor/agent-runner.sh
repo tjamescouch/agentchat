@@ -215,10 +215,13 @@ run_cli() {
     fi
 
     # Session resumption: on restart, resume previous session for full context continuity
-    local session_args=(--session-id "$SESSION_ID")
+    # --session-id requires --continue or --resume; use --continue on first run, --resume on restarts
+    local session_args=()
     if [ "$SESSION_NUM" -gt 1 ]; then
-        session_args+=(--resume "$SESSION_ID")
+        session_args=(--resume "$SESSION_ID")
         log "Resuming session $SESSION_ID (restart #$((SESSION_NUM - 1)))"
+    else
+        session_args=(--session-id "$SESSION_ID" --continue)
     fi
 
     # MCP config inline — belt-and-suspenders with settings.json mcpServers
