@@ -35,6 +35,7 @@ import { registerDaemonTools } from './daemon.js';
 import { registerNickTool } from './nick.js';
 import { registerMarketplaceTools } from './marketplace/index.js';
 import { registerModerationTools } from './moderation.js';
+import { registerFileTransferTools } from './file-transfer.js';
 
 /**
  * Register all tools with the MCP server
@@ -51,6 +52,9 @@ export function registerAllTools(server) {
 
   // === MODERATION TOOLS ===
   registerModerationTools(server);
+
+  // === FILE TRANSFER TOOLS ===
+  registerFileTransferTools(server);
 
   // === MARKETPLACE TOOLS ===
   registerMarketplaceTools(server);

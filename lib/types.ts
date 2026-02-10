@@ -469,6 +469,13 @@ export interface ServerMsgMessage extends BaseMessage {
   sig?: string;
 }
 
+export interface ServerFileChunkMessage extends BaseMessage {
+  type: ServerMessageType.FILE_CHUNK;
+  from: string;
+  to: string;
+  content: string;
+}
+
 export interface JoinedMessage extends BaseMessage {
   type: ServerMessageType.JOINED;
   channel: string;
@@ -680,7 +687,8 @@ export type ServerMessage =
   | ChallengeMessage
   | NickChangedMessage
   | SessionDisplacedMessage
-  | SettlementCompleteMessage;
+  | SettlementCompleteMessage
+  | ServerFileChunkMessage;
 
 // ============ Validation Result ============
 
