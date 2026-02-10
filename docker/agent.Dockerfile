@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y \
 
 # Install Claude CLI and agentchat MCP server globally
 # Pin versions to bust Podman layer cache when deps update
-RUN npm install -g @anthropic-ai/claude-code @tjamescouch/agentchat-mcp@0.9.1 @tjamescouch/agentchat@0.24.1
+RUN npm install -g @anthropic-ai/claude-code @tjamescouch/agentchat-mcp@0.9.4 @tjamescouch/agentchat@0.24.3 @tjamescouch/niki@0.1.0
 
 # Create non-root agent user
 RUN useradd -m -s /bin/bash agent
@@ -18,9 +18,14 @@ RUN useradd -m -s /bin/bash agent
 # Pre-create .claude directory as root before switching user
 RUN mkdir -p /home/agent/.claude && chown agent:agent /home/agent/.claude
 
-# Copy supervisor script (needs root for /usr/local/bin)
+# Copy supervisor script and niki (needs root for /usr/local/bin)
 COPY lib/supervisor/agent-supervisor.sh /usr/local/bin/agent-supervisor
-RUN chmod +x /usr/local/bin/agent-supervisor
+COPY docker/niki /usr/local/bin/niki
+RUN chmod +x /usr/local/bin/agent-supervisor /usr/local/bin/niki
+
+# Hide claude binary so agents cannot self-spawn (P0-SANDBOX-1)
+# Supervisor uses .claude-supervisor; 'claude' is not in PATH for the agent.
+RUN mv /usr/local/bin/claude /usr/local/bin/.claude-supervisor
 
 USER agent
 WORKDIR /home/agent
@@ -29,8 +34,11 @@ WORKDIR /home/agent
 COPY --chown=agent:agent docker/claude-settings.json /home/agent/.claude/settings.json
 COPY --chown=agent:agent docker/claude-settings-fetcher.json /home/agent/.claude/settings-fetcher.json
 
-# Copy AgentChat skill file
-COPY --chown=agent:agent SKILL.md /home/agent/.claude/agentchat.skill.md
+# Copy container-specific skill file (stripped down — no marketplace/daemon/moderation tools)
+COPY --chown=agent:agent docker/container-skill.md /home/agent/.claude/agentchat.skill.md
+
+# Copy personality files (supervisor loads ~/.claude/personalities/<name>.md as system prompt)
+COPY --chown=agent:agent docker/personalities/ /home/agent/.claude/personalities/
 
 # Create state directory structure
 RUN mkdir -p /home/agent/.agentchat/agents \

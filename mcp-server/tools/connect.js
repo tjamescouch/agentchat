@@ -14,6 +14,7 @@ import {
   DEFAULT_SERVER_URL, KEEPALIVE_INTERVAL_MS
 } from '../state.js';
 import { appendToInbox } from '../inbox-writer.js';
+import { handleIncomingOffer, handleFileChunk, handleTransferComplete } from './file-transfer.js';
 
 /**
  * Base directory for identities
@@ -167,6 +168,19 @@ export function registerConnectTool(server) {
         newClient.on('message', (msg) => {
           // Skip own messages and server noise
           if (msg.from === newClient.agentId || msg.from === '@server') return;
+
+          // Intercept file transfer protocol messages
+          if (msg.content) {
+            try {
+              const parsed = JSON.parse(msg.content);
+              if (parsed._ft === 'offer') {
+                handleIncomingOffer({ ...msg, _ft_data: parsed });
+              } else if (parsed._ft === 'complete') {
+                handleTransferComplete({ ...msg, _ft_data: parsed });
+              }
+            } catch { /* not JSON, normal message */ }
+          }
+
           appendToInbox({
             type: 'MSG',
             from: msg.from,
@@ -175,6 +189,19 @@ export function registerConnectTool(server) {
             content: msg.content,
             ts: msg.ts,
           });
+        });
+
+        // FILE_CHUNK handler - receives chunked file data
+        newClient.on('file_chunk', (msg) => {
+          if (msg.from === newClient.agentId) return;
+          if (msg.content) {
+            try {
+              const parsed = JSON.parse(msg.content);
+              if (parsed._ft === 'chunk') {
+                handleFileChunk({ ...msg, _ft_data: parsed });
+              }
+            } catch { /* not valid file transfer chunk */ }
+          }
         });
 
         // Start keepalive ping to prevent connection timeout

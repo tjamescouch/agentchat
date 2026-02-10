@@ -879,6 +879,10 @@ export class AgentChatClient extends EventEmitter {
       case ServerMessageType.SESSION_DISPLACED:
         this.emit('session_displaced', msg);
         break;
+
+      case ServerMessageType.FILE_CHUNK:
+        this.emit('file_chunk', msg);
+        break;
     }
   }
 }

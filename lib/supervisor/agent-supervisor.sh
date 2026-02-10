@@ -99,8 +99,13 @@ log "Mission: $MISSION"
 save_state "starting" ""
 
 # Register MCP server before first run (ensures tools are available in -p mode)
+# Use the supervisor binary (claude was renamed during Docker build)
 log "Registering agentchat MCP server..."
-AGENTCHAT_PUBLIC=true claude mcp add -s user -e AGENTCHAT_PUBLIC=true agentchat -- agentchat-mcp 2>> "$LOG_FILE" || log "MCP registration failed (may already exist)"
+if [ -x /usr/local/bin/.claude-supervisor ]; then
+    AGENTCHAT_PUBLIC=true /usr/local/bin/.claude-supervisor mcp add -s user -e AGENTCHAT_PUBLIC=true agentchat -- agentchat-mcp 2>> "$LOG_FILE" || log "MCP registration failed (may already exist)"
+else
+    AGENTCHAT_PUBLIC=true claude mcp add -s user -e AGENTCHAT_PUBLIC=true agentchat -- agentchat-mcp 2>> "$LOG_FILE" || log "MCP registration failed (may already exist)"
+fi
 
 while true; do
     # Check for stop signal
@@ -131,32 +136,94 @@ while true; do
 
     # Remove claude CLI from PATH after first invocation to prevent
     # the AI agent from spawning additional claude sessions (P0-SANDBOX-1)
-    CLAUDE_BIN=$(command -v claude)
-    if [ "$RESTART_COUNT" -eq 0 ] && [ -n "$CLAUDE_BIN" ]; then
-        # Move to a supervisor-only location
-        mv "$CLAUDE_BIN" /usr/local/bin/.claude-supervisor
+    # Use the hidden supervisor binary (renamed during Docker build)
+    # Falls back to regular claude if not renamed (bare metal)
+    if [ -x /usr/local/bin/.claude-supervisor ]; then
         CLAUDE_CMD="/usr/local/bin/.claude-supervisor"
     else
-        CLAUDE_CMD="/usr/local/bin/.claude-supervisor"
+        CLAUDE_CMD="$(command -v claude)"
     fi
 
-    if "$CLAUDE_CMD" -p "Read ~/.claude/agentchat.skill.md and connect to $SERVER_URL. Your name is '$AGENT_NAME'. Your mission: $MISSION. Connect ephemerally and join the public channel. IMPORTANT: After connecting, enter a continuous listen loop. Keep listening for messages and responding. Never exit unless there's an error." \
-        --model "$MODEL" \
-        --dangerously-skip-permissions \
-        --permission-mode bypassPermissions \
-        --settings "$SETTINGS_FILE" \
-        --verbose \
-        2>> "$LOG_FILE"; then
+    # Niki configuration (deterministic supervisor)
+    NIKI_BUDGET="${NIKI_BUDGET:-1000000}"         # 1M tokens default
+    NIKI_TIMEOUT="${NIKI_TIMEOUT:-3600}"           # 1 hour default
+    NIKI_MAX_SENDS="${NIKI_MAX_SENDS:-10}"         # 10 sends/min default
+    NIKI_MAX_TOOLS="${NIKI_MAX_TOOLS:-30}"         # 30 tool calls/min default
+    NIKI_STATE="$STATE_DIR/niki-state.json"
+    NIKI_CMD="$(command -v niki 2>/dev/null)"
+
+    # Build the claude command
+    AGENT_PROMPT="Read ~/.claude/agentchat.skill.md then connect ephemerally to $SERVER_URL (no name parameter), set your nick to '$AGENT_NAME', and greet #general. Mission: $MISSION. Enter a listen loop. On each message, respond concisely then listen again. On timeout, send a brief check-in then listen again. Never exit unless there is an error. Do NOT use daemon tools, marketplace tools, or moderation tools — only connect, send, listen, and nick."
+
+    # Load personality: base + character-specific persona
+    BASE_PERSONALITY="$HOME/.claude/personalities/_base.md"
+    CHAR_PERSONALITY="$HOME/.claude/personalities/${AGENT_NAME}.md"
+    SYSTEM_PROMPT_ARGS=()
+    SYSTEM_PROMPT=""
+    if [ -f "$BASE_PERSONALITY" ]; then
+        SYSTEM_PROMPT=$(cat "$BASE_PERSONALITY")
+    fi
+    if [ -f "$CHAR_PERSONALITY" ]; then
+        SYSTEM_PROMPT="${SYSTEM_PROMPT}
+---
+$(cat "$CHAR_PERSONALITY")"
+    fi
+    if [ -n "$SYSTEM_PROMPT" ]; then
+        SYSTEM_PROMPT_ARGS=(--system-prompt "$SYSTEM_PROMPT")
+        log "Loaded personality (base=$([ -f "$BASE_PERSONALITY" ] && echo yes || echo no) char=$([ -f "$CHAR_PERSONALITY" ] && echo yes || echo no))"
+    fi
+
+    if [ -n "$NIKI_CMD" ]; then
+        # Run under niki supervision
+        log "Running under niki (budget=${NIKI_BUDGET} timeout=${NIKI_TIMEOUT}s sends=${NIKI_MAX_SENDS}/min)"
+        "$NIKI_CMD" \
+            --budget "$NIKI_BUDGET" \
+            --timeout "$NIKI_TIMEOUT" \
+            --max-sends "$NIKI_MAX_SENDS" \
+            --max-tool-calls "$NIKI_MAX_TOOLS" \
+            --state "$NIKI_STATE" \
+            --log "$LOG_FILE" \
+            -- "$CLAUDE_CMD" -p "$AGENT_PROMPT" \
+            "${SYSTEM_PROMPT_ARGS[@]}" \
+            --model "$MODEL" \
+            --dangerously-skip-permissions \
+            --permission-mode bypassPermissions \
+            --settings "$SETTINGS_FILE" \
+            --verbose \
+            2>> "$LOG_FILE"
+    else
+        "$CLAUDE_CMD" -p "$AGENT_PROMPT" \
+            "${SYSTEM_PROMPT_ARGS[@]}" \
+            --model "$MODEL" \
+            --dangerously-skip-permissions \
+            --permission-mode bypassPermissions \
+            --settings "$SETTINGS_FILE" \
+            --verbose \
+            2>> "$LOG_FILE"
+    fi
+    EXIT_CODE=$?
+
+    if [ $EXIT_CODE -eq 0 ]; then
         # Clean exit
         log "Agent exited cleanly"
         BACKOFF=$MIN_BACKOFF
     else
-        EXIT_CODE=$?
         END_TIME=$(date +%s)
         DURATION=$((END_TIME - START_TIME))
 
-        log "Agent crashed (exit code $EXIT_CODE, ran for ${DURATION}s)"
-        save_state "crashed" "exit_code=$EXIT_CODE"
+        # Check if niki killed the agent (read niki state file)
+        NIKI_REASON=""
+        if [ -f "$NIKI_STATE" ]; then
+            NIKI_REASON=$(grep -o '"killedBy"[[:space:]]*:[[:space:]]*"[^"]*"' "$NIKI_STATE" 2>/dev/null | head -1 | sed 's/.*: *"//;s/"//')
+        fi
+
+        if [ -n "$NIKI_REASON" ] && [ "$NIKI_REASON" != "null" ]; then
+            log "Agent killed by niki (reason: $NIKI_REASON, exit code $EXIT_CODE, ran for ${DURATION}s)"
+            save_state "killed" "niki_reason=$NIKI_REASON"
+        else
+            log "Agent crashed (exit code $EXIT_CODE, ran for ${DURATION}s)"
+            save_state "crashed" "exit_code=$EXIT_CODE"
+        fi
 
         # If it ran for more than 5 minutes, reset backoff
         if [ $DURATION -gt 300 ]; then

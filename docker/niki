@@ -1,0 +1,302 @@
+#!/usr/bin/env node
+
+/**
+ * niki — Deterministic process supervisor for AI agents.
+ *
+ * Wraps a child command (e.g. `claude -p`) and enforces:
+ *   - Token budget (kill if exceeded)
+ *   - Wall-clock timeout (kill if exceeded)
+ *   - Tool-call rate limiting (kill if agent floods)
+ *   - Diagnostics logging
+ *
+ * Usage:
+ *   niki [options] -- <command> [args...]
+ *   niki --budget 500000 --timeout 3600 -- claude -p "..." --verbose
+ *
+ * Security:
+ *   - Never logs or exposes API tokens
+ *   - Inherits env from parent (tokens stay in env, never in CLI args)
+ *   - Diagnostics only contain counters, never message content
+ */
+
+import { spawn } from 'node:child_process';
+import { createWriteStream, writeFileSync, mkdirSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { parseArgs } from 'node:util';
+
+// --- Argument parsing ---
+
+const SEPARATOR = process.argv.indexOf('--');
+if (SEPARATOR === -1 || SEPARATOR === process.argv.length - 1) {
+  console.error(`niki — deterministic agent supervisor
+
+Usage: niki [options] -- <command> [args...]
+
+Options:
+  --budget <tokens>       Max total tokens (input+output) before SIGTERM (default: 1000000)
+  --timeout <seconds>     Max wall-clock runtime before SIGTERM (default: 3600)
+  --max-sends <n>         Max agentchat_send calls per minute (default: 10)
+  --max-tool-calls <n>    Max total tool calls per minute (default: 30)
+  --log <file>            Write diagnostics log to file
+  --state <file>          Write state JSON on exit (budget used, reason, etc.)
+  --cooldown <seconds>    Grace period after SIGTERM before SIGKILL (default: 5)
+
+Examples:
+  niki --budget 500000 -- claude -p "your prompt" --verbose
+  niki --timeout 1800 --max-sends 5 -- claude -p "..." --model sonnet --verbose`);
+  process.exit(1);
+}
+
+const nikiArgs = process.argv.slice(2, SEPARATOR);
+const childCmd = process.argv[SEPARATOR + 1];
+const childArgs = process.argv.slice(SEPARATOR + 2);
+
+const { values: opts } = parseArgs({
+  args: nikiArgs,
+  options: {
+    budget:          { type: 'string', default: '1000000' },
+    timeout:         { type: 'string', default: '3600' },
+    'max-sends':     { type: 'string', default: '10' },
+    'max-tool-calls': { type: 'string', default: '30' },
+    log:             { type: 'string' },
+    state:           { type: 'string' },
+    cooldown:        { type: 'string', default: '5' },
+  },
+});
+
+const BUDGET        = parseInt(opts.budget, 10);
+const TIMEOUT_S     = parseInt(opts.timeout, 10);
+const MAX_SENDS     = parseInt(opts['max-sends'], 10);
+const MAX_TOOL_CALLS = parseInt(opts['max-tool-calls'], 10);
+const COOLDOWN_S    = parseInt(opts.cooldown, 10);
+const LOG_FILE      = opts.log;
+const STATE_FILE    = opts.state;
+
+// --- State ---
+
+const state = {
+  startedAt: new Date().toISOString(),
+  pid: null,
+  tokensIn: 0,
+  tokensOut: 0,
+  tokensTotal: 0,
+  toolCalls: 0,
+  sendCalls: 0,
+  toolCallsThisMinute: 0,
+  sendCallsThisMinute: 0,
+  exitCode: null,
+  exitSignal: null,
+  killedBy: null,    // 'budget' | 'timeout' | 'rate-sends' | 'rate-tools' | null
+  duration: 0,
+};
+
+// Sliding window for per-minute rate limiting
+const toolCallTimestamps = [];
+const sendCallTimestamps = [];
+
+// --- Logging ---
+
+let logStream = null;
+if (LOG_FILE) {
+  mkdirSync(dirname(resolve(LOG_FILE)), { recursive: true });
+  logStream = createWriteStream(resolve(LOG_FILE), { flags: 'a' });
+}
+
+function log(msg) {
+  const line = `[${new Date().toISOString()}] ${msg}`;
+  if (logStream) logStream.write(line + '\n');
+  // Also write to stderr so supervisor can capture it
+  process.stderr.write(`[niki] ${line}\n`);
+}
+
+function writeState() {
+  if (!STATE_FILE) return;
+  try {
+    mkdirSync(dirname(resolve(STATE_FILE)), { recursive: true });
+    // Never include env, tokens, or message content — only counters
+    writeFileSync(resolve(STATE_FILE), JSON.stringify(state, null, 2) + '\n');
+  } catch {
+    // Best effort
+  }
+}
+
+// --- Token parsing from stderr ---
+
+// Claude --verbose outputs token usage in stderr. Patterns vary by version.
+// We look for common patterns and extract numbers.
+//
+// Known patterns:
+//   "input_tokens": 1234
+//   "output_tokens": 567
+//   tokens: { input: 1234, output: 567 }
+//   Input tokens: 1234
+//   Output tokens: 567
+
+const TOKEN_PATTERNS = [
+  // JSON-style: "input_tokens": 1234
+  { regex: /"input_tokens"\s*:\s*(\d+)/g, field: 'in' },
+  { regex: /"output_tokens"\s*:\s*(\d+)/g, field: 'out' },
+  // Human-readable: Input tokens: 1234
+  { regex: /Input tokens:\s*(\d+)/gi, field: 'in' },
+  { regex: /Output tokens:\s*(\d+)/gi, field: 'out' },
+];
+
+function parseTokens(line) {
+  for (const { regex, field } of TOKEN_PATTERNS) {
+    regex.lastIndex = 0;
+    let match;
+    while ((match = regex.exec(line)) !== null) {
+      const count = parseInt(match[1], 10);
+      if (isNaN(count) || count <= 0) continue;
+      if (field === 'in') {
+        state.tokensIn = Math.max(state.tokensIn, count);
+      } else {
+        state.tokensOut = Math.max(state.tokensOut, count);
+      }
+      state.tokensTotal = state.tokensIn + state.tokensOut;
+    }
+  }
+}
+
+// --- Tool call detection from stderr ---
+
+// Claude --verbose logs tool calls. We detect sends specifically.
+const TOOL_CALL_PATTERN = /(?:Using tool|Tool call|tool_use).*?(\w+)/i;
+const SEND_PATTERN = /agentchat_send/i;
+
+function parseToolCall(line) {
+  if (TOOL_CALL_PATTERN.test(line)) {
+    const now = Date.now();
+    state.toolCalls++;
+    toolCallTimestamps.push(now);
+
+    if (SEND_PATTERN.test(line)) {
+      state.sendCalls++;
+      sendCallTimestamps.push(now);
+    }
+  }
+}
+
+// --- Rate limit checking ---
+
+function pruneWindow(timestamps) {
+  const cutoff = Date.now() - 60_000; // 1 minute window
+  while (timestamps.length > 0 && timestamps[0] < cutoff) {
+    timestamps.shift();
+  }
+}
+
+function checkRateLimits() {
+  pruneWindow(toolCallTimestamps);
+  pruneWindow(sendCallTimestamps);
+
+  state.toolCallsThisMinute = toolCallTimestamps.length;
+  state.sendCallsThisMinute = sendCallTimestamps.length;
+
+  if (sendCallTimestamps.length > MAX_SENDS) {
+    return 'rate-sends';
+  }
+  if (toolCallTimestamps.length > MAX_TOOL_CALLS) {
+    return 'rate-tools';
+  }
+  return null;
+}
+
+// --- Kill logic ---
+
+let child = null;
+let killed = false;
+
+function killChild(reason) {
+  if (killed || !child) return;
+  killed = true;
+  state.killedBy = reason;
+  log(`KILL — reason: ${reason} | tokens: ${state.tokensTotal}/${BUDGET} | sends: ${state.sendCallsThisMinute}/min | tools: ${state.toolCallsThisMinute}/min`);
+
+  child.kill('SIGTERM');
+
+  // Grace period, then SIGKILL
+  setTimeout(() => {
+    try {
+      child.kill('SIGKILL');
+    } catch {
+      // Already dead
+    }
+  }, COOLDOWN_S * 1000);
+}
+
+// --- Spawn child process ---
+
+log(`Starting: ${childCmd} ${childArgs.join(' ').substring(0, 100)}...`);
+log(`Budget: ${BUDGET} tokens | Timeout: ${TIMEOUT_S}s | Max sends: ${MAX_SENDS}/min | Max tools: ${MAX_TOOL_CALLS}/min`);
+
+child = spawn(childCmd, childArgs, {
+  stdio: ['inherit', 'inherit', 'pipe'],  // stdin/stdout pass through, stderr captured
+  env: process.env,  // Inherit env (tokens stay in env, never logged)
+});
+
+state.pid = child.pid;
+
+// --- Monitor stderr ---
+
+let stderrBuffer = '';
+
+child.stderr.on('data', (chunk) => {
+  const text = chunk.toString();
+
+  // Always forward stderr to our stderr (so supervisor captures it)
+  process.stderr.write(chunk);
+
+  // Buffer and parse line by line
+  stderrBuffer += text;
+  const lines = stderrBuffer.split('\n');
+  stderrBuffer = lines.pop(); // Keep incomplete last line in buffer
+
+  for (const line of lines) {
+    parseTokens(line);
+    parseToolCall(line);
+
+    // Check budget
+    if (state.tokensTotal > BUDGET) {
+      killChild('budget');
+      return;
+    }
+
+    // Check rate limits
+    const rateViolation = checkRateLimits();
+    if (rateViolation) {
+      killChild(rateViolation);
+      return;
+    }
+  }
+});
+
+// --- Timeout ---
+
+const timeoutId = setTimeout(() => {
+  killChild('timeout');
+}, TIMEOUT_S * 1000);
+
+// --- Clean exit ---
+
+child.on('exit', (code, signal) => {
+  clearTimeout(timeoutId);
+  state.exitCode = code;
+  state.exitSignal = signal;
+  state.duration = Math.round((Date.now() - new Date(state.startedAt).getTime()) / 1000);
+
+  log(`Exit — code: ${code} signal: ${signal} | tokens: ${state.tokensTotal} | tools: ${state.toolCalls} | sends: ${state.sendCalls} | duration: ${state.duration}s${state.killedBy ? ` | killed: ${state.killedBy}` : ''}`);
+  writeState();
+
+  if (logStream) logStream.end();
+  process.exit(code ?? 1);
+});
+
+// --- Signal forwarding ---
+
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.on(sig, () => {
+    log(`Received ${sig}, forwarding to child`);
+    if (child) child.kill(sig);
+  });
+}
