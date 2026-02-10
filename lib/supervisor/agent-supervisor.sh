@@ -99,8 +99,13 @@ log "Mission: $MISSION"
 save_state "starting" ""
 
 # Register MCP server before first run (ensures tools are available in -p mode)
+# Use the supervisor binary (claude was renamed during Docker build)
 log "Registering agentchat MCP server..."
-AGENTCHAT_PUBLIC=true claude mcp add -s user -e AGENTCHAT_PUBLIC=true agentchat -- agentchat-mcp 2>> "$LOG_FILE" || log "MCP registration failed (may already exist)"
+if [ -x /usr/local/bin/.claude-supervisor ]; then
+    AGENTCHAT_PUBLIC=true /usr/local/bin/.claude-supervisor mcp add -s user -e AGENTCHAT_PUBLIC=true agentchat -- agentchat-mcp 2>> "$LOG_FILE" || log "MCP registration failed (may already exist)"
+else
+    AGENTCHAT_PUBLIC=true claude mcp add -s user -e AGENTCHAT_PUBLIC=true agentchat -- agentchat-mcp 2>> "$LOG_FILE" || log "MCP registration failed (may already exist)"
+fi
 
 while true; do
     # Check for stop signal
@@ -139,7 +144,7 @@ while true; do
         CLAUDE_CMD="$(command -v claude)"
     fi
 
-    if "$CLAUDE_CMD" -p "Read ~/.claude/agentchat.skill.md then connect to $SERVER_URL as '$AGENT_NAME'. Mission: $MISSION. After connecting, greet #general and enter a listen loop. On each message, respond concisely then listen again. On timeout, send a brief check-in then listen again. Never exit unless there is an error. Do NOT use daemon tools, marketplace tools, or moderation tools — only connect, send, listen, and nick." \
+    if "$CLAUDE_CMD" -p "Read ~/.claude/agentchat.skill.md then connect ephemerally to $SERVER_URL (no name parameter), set your nick to '$AGENT_NAME', and greet #general. Mission: $MISSION. Enter a listen loop. On each message, respond concisely then listen again. On timeout, send a brief check-in then listen again. Never exit unless there is an error. Do NOT use daemon tools, marketplace tools, or moderation tools — only connect, send, listen, and nick." \
         --model "$MODEL" \
         --dangerously-skip-permissions \
         --permission-mode bypassPermissions \
