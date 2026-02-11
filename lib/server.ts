@@ -288,7 +288,7 @@ export class AgentChatServer {
     this.rateLimitMs = options.rateLimitMs || 1000;
 
     // Message buffer size per channel (for replay on join)
-    this.messageBufferSize = options.messageBufferSize || 20;
+    this.messageBufferSize = options.messageBufferSize || 200;
 
     // State
     this.agents = new Map();
@@ -975,7 +975,7 @@ export function startServer(options: AgentChatServerOptions = {}): AgentChatServ
     cert: options.cert || process.env.TLS_CERT || null,
     key: options.key || process.env.TLS_KEY || null,
     rateLimitMs: options.rateLimitMs || parseInt(process.env.RATE_LIMIT_MS || '1000'),
-    messageBufferSize: options.messageBufferSize || parseInt(process.env.MESSAGE_BUFFER_SIZE || '20'),
+    messageBufferSize: options.messageBufferSize || parseInt(process.env.MESSAGE_BUFFER_SIZE || '200'),
     idleTimeoutMs: options.idleTimeoutMs || parseInt(process.env.IDLE_TIMEOUT_MS || '3600000'),
     idlePromptsEnabled: options.idlePromptsEnabled !== undefined ? options.idlePromptsEnabled : process.env.IDLE_PROMPTS !== 'false',
   };
