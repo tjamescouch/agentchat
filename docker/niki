@@ -37,6 +37,9 @@ Options:
   --timeout <seconds>     Max wall-clock runtime before SIGTERM (default: 3600)
   --max-sends <n>         Max agentchat_send calls per minute (default: 10)
   --max-tool-calls <n>    Max total tool calls per minute (default: 30)
+  --stall-timeout <secs>  Kill after N seconds of no output (default: 60, 0=disabled)
+  --startup-timeout <s>   Longer stall timeout until first output (default: 180, 0=use stall-timeout)
+  --max-nudges <n>        Max stdin nudge attempts before kill on stall (default: 3)
   --log <file>            Write diagnostics log to file
   --state <file>          Write state JSON on exit (budget used, reason, etc.)
   --cooldown <seconds>    Grace period after SIGTERM before SIGKILL (default: 5)
@@ -60,6 +63,9 @@ const { values: opts } = parseArgs({
     timeout:         { type: 'string', default: '3600' },
     'max-sends':     { type: 'string', default: '10' },
     'max-tool-calls': { type: 'string', default: '30' },
+    'stall-timeout': { type: 'string', default: '60' },
+    'startup-timeout': { type: 'string', default: '180' },
+    'max-nudges':    { type: 'string', default: '3' },
     log:             { type: 'string' },
     state:           { type: 'string' },
     cooldown:        { type: 'string', default: '5' },
@@ -72,6 +78,9 @@ const BUDGET        = parseInt(opts.budget, 10);
 const TIMEOUT_S     = parseInt(opts.timeout, 10);
 const MAX_SENDS     = parseInt(opts['max-sends'], 10);
 const MAX_TOOL_CALLS = parseInt(opts['max-tool-calls'], 10);
+const STALL_TIMEOUT_S = parseInt(opts['stall-timeout'], 10);
+const STARTUP_TIMEOUT_S = parseInt(opts['startup-timeout'], 10);
+const MAX_NUDGES    = parseInt(opts['max-nudges'], 10);
 const COOLDOWN_S    = parseInt(opts.cooldown, 10);
 const ABORT_FILE    = opts['abort-file'] ? resolve(opts['abort-file']) : null;
 const POLL_INTERVAL = parseInt(opts['poll-interval'], 10);
@@ -92,8 +101,10 @@ const state = {
   sendCallsThisMinute: 0,
   exitCode: null,
   exitSignal: null,
-  killedBy: null,    // 'budget' | 'timeout' | 'rate-sends' | 'rate-tools' | 'abort' | null
+  killedBy: null,    // 'budget' | 'timeout' | 'rate-sends' | 'rate-tools' | 'abort' | 'stall' | null
   duration: 0,
+  stallEvents: 0,
+  nudges: 0,
 };
 
 // Sliding window for per-minute rate limiting
@@ -231,17 +242,117 @@ function killChild(reason) {
   }, COOLDOWN_S * 1000);
 }
 
+// --- Prompt pattern detection ---
+
+const PROMPT_PATTERNS = [
+  /\(y\/n\)/i,
+  /\[Y\/n\]/i,
+  /\[y\/N\]/i,
+  /\(yes\/no\)/i,
+  /Do you want to trust/i,
+  /Do you want to allow/i,
+  /Press Enter to continue/i,
+  /Are you sure/i,
+];
+
+function checkForPrompts(text) {
+  for (const pattern of PROMPT_PATTERNS) {
+    if (pattern.test(text)) {
+      log(`PROMPT detected in stdout: ${text.trim().substring(0, 100)}`);
+      state.stallEvents++;
+      // Close stdin to dismiss the prompt
+      closeStdin();
+      return true;
+    }
+  }
+  return false;
+}
+
+// --- Stall detection ---
+
+let stallTimer = null;
+let nudgeCount = 0;
+let stdinClosed = false;
+let lastOutputTime = Date.now();
+let gotFirstOutput = false;
+
+function onChildOutput() {
+  lastOutputTime = Date.now();
+  if (!gotFirstOutput) {
+    gotFirstOutput = true;
+    log(`First output received after ${Math.round((Date.now() - new Date(state.startedAt).getTime()) / 1000)}s — switching to stall-timeout=${STALL_TIMEOUT_S}s`);
+  }
+  resetStallTimer();
+}
+
+function currentStallTimeout() {
+  // Use startup timeout until first output, then normal stall timeout
+  if (!gotFirstOutput && STARTUP_TIMEOUT_S > 0) return STARTUP_TIMEOUT_S;
+  return STALL_TIMEOUT_S;
+}
+
+function resetStallTimer() {
+  if (stallTimer) clearTimeout(stallTimer);
+  const timeout = currentStallTimeout();
+  if (killed || timeout <= 0) return;
+  stallTimer = setTimeout(onStallDetected, timeout * 1000);
+}
+
+function closeStdin() {
+  if (stdinClosed || !child) return;
+  stdinClosed = true;
+  try { child.stdin.end(); } catch { /* already closed */ }
+  log('Stdin: closed (EOF)');
+}
+
+function onStallDetected() {
+  if (killed) return;
+  state.stallEvents++;
+  const silence = Math.round((Date.now() - lastOutputTime) / 1000);
+  log(`STALL — no output for ${silence}s (nudges: ${nudgeCount}/${MAX_NUDGES})`);
+
+  // Escalation: close stdin → nudge → kill
+  if (!stdinClosed) {
+    closeStdin();
+    resetStallTimer();
+    return;
+  }
+
+  if (nudgeCount < MAX_NUDGES && !child.stdin.writableEnded) {
+    nudgeCount++;
+    state.nudges = nudgeCount;
+    log(`Stall nudge #${nudgeCount}`);
+    resetStallTimer();
+    return;
+  }
+
+  killChild('stall');
+}
+
 // --- Spawn child process ---
 
 log(`Starting: ${childCmd} ${childArgs.join(' ').substring(0, 100)}...`);
-log(`Budget: ${BUDGET} tokens | Timeout: ${TIMEOUT_S}s | Max sends: ${MAX_SENDS}/min | Max tools: ${MAX_TOOL_CALLS}/min`);
+log(`Budget: ${BUDGET} tokens | Timeout: ${TIMEOUT_S}s | Startup: ${STARTUP_TIMEOUT_S}s | Stall: ${STALL_TIMEOUT_S}s | Max sends: ${MAX_SENDS}/min | Max tools: ${MAX_TOOL_CALLS}/min`);
 
 child = spawn(childCmd, childArgs, {
-  stdio: ['inherit', 'inherit', 'pipe'],  // stdin/stdout pass through, stderr captured
+  stdio: ['pipe', 'pipe', 'pipe'],  // All piped: niki controls stdin, monitors stdout+stderr
   env: process.env,  // Inherit env (tokens stay in env, never logged)
 });
 
 state.pid = child.pid;
+
+// Close stdin immediately — claude -p should never need interactive input.
+// This prevents blocking on trust prompts, permission prompts, or stdin reads.
+closeStdin();
+
+// --- Monitor stdout ---
+
+child.stdout.on('data', (chunk) => {
+  // Forward to our stdout (preserves runner's | tee pipeline)
+  process.stdout.write(chunk);
+  onChildOutput();
+  checkForPrompts(chunk.toString());
+});
 
 // --- Monitor stderr ---
 
@@ -252,6 +363,7 @@ child.stderr.on('data', (chunk) => {
 
   // Always forward stderr to our stderr (so supervisor captures it)
   process.stderr.write(chunk);
+  onChildOutput();
 
   // Buffer and parse line by line
   stderrBuffer += text;
@@ -276,6 +388,12 @@ child.stderr.on('data', (chunk) => {
     }
   }
 });
+
+// Start stall detection
+if (STALL_TIMEOUT_S > 0 || STARTUP_TIMEOUT_S > 0) {
+  log(`Stall detection: startup-timeout=${STARTUP_TIMEOUT_S}s, stall-timeout=${STALL_TIMEOUT_S}s, max-nudges=${MAX_NUDGES}`);
+  resetStallTimer();
+}
 
 // --- Abort file polling (with jitter) ---
 
@@ -315,12 +433,14 @@ const timeoutId = setTimeout(() => {
 
 child.on('exit', (code, signal) => {
   clearTimeout(timeoutId);
+  if (stallTimer) clearTimeout(stallTimer);
   if (abortPollId) clearTimeout(abortPollId);
   state.exitCode = code;
   state.exitSignal = signal;
   state.duration = Math.round((Date.now() - new Date(state.startedAt).getTime()) / 1000);
 
-  log(`Exit — code: ${code} signal: ${signal} | tokens: ${state.tokensTotal} | tools: ${state.toolCalls} | sends: ${state.sendCalls} | duration: ${state.duration}s${state.killedBy ? ` | killed: ${state.killedBy}` : ''}`);
+  state.gotFirstOutput = gotFirstOutput;
+  log(`Exit — code: ${code} signal: ${signal} | tokens: ${state.tokensTotal} | tools: ${state.toolCalls} | sends: ${state.sendCalls} | duration: ${state.duration}s | output: ${gotFirstOutput}${state.killedBy ? ` | killed: ${state.killedBy}` : ''}`);
   writeState();
 
   if (logStream) logStream.end();

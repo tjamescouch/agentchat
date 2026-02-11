@@ -22,6 +22,9 @@
 #   NIKI_TIMEOUT        Timeout in seconds for niki (default: 3600)
 #   NIKI_MAX_SENDS      Max sends/min for niki (default: 10)
 #   NIKI_MAX_TOOLS      Max tool calls/min for niki (default: 30)
+#   NIKI_STALL_TIMEOUT  Seconds of no output before stall kill (default: 60, 0=disabled)
+#   NIKI_STARTUP_TIMEOUT Longer stall timeout until first output (default: 180, 0=use stall-timeout)
+#   NIKI_MAX_NUDGES     Max stdin nudge attempts on stall (default: 3)
 #
 # Exit codes:
 #   0   Clean exit
@@ -214,14 +217,22 @@ run_cli() {
         system_prompt_args=(--system-prompt "$system_prompt")
     fi
 
-    # Session resumption: on restart, resume previous session for full context continuity
-    # --session-id requires --continue or --resume; use --continue on first run, --resume on restarts
+    # Session management:
+    # --session-id UUID    → creates new session (fails if exists: "already in use")
+    # --resume UUID        → resumes existing (fails if missing: "no conversation found")
+    # --session-id + --continue → errors: "requires --fork-session"
+    #
+    # Strategy: use a marker file to track whether the session has been created.
+    # If marker exists → --resume. If not → --session-id (create).
+    # On "no conversation found" failure, delete marker so next attempt creates fresh.
     local session_args=()
-    if [ "$SESSION_NUM" -gt 1 ]; then
+    local session_marker="$STATE_DIR/session_created"
+    if [ -f "$session_marker" ]; then
         session_args=(--resume "$SESSION_ID")
         log "Resuming session $SESSION_ID (restart #$((SESSION_NUM - 1)))"
     else
-        session_args=(--session-id "$SESSION_ID" --continue)
+        session_args=(--session-id "$SESSION_ID")
+        log "Creating new session $SESSION_ID"
     fi
 
     # MCP config inline — belt-and-suspenders with settings.json mcpServers
@@ -244,19 +255,27 @@ run_cli() {
         local niki_timeout="${NIKI_TIMEOUT:-3600}"
         local niki_max_sends="${NIKI_MAX_SENDS:-10}"
         local niki_max_tools="${NIKI_MAX_TOOLS:-30}"
+        local niki_stall_timeout="${NIKI_STALL_TIMEOUT:-60}"
+        local niki_max_nudges="${NIKI_MAX_NUDGES:-3}"
         local niki_state="$STATE_DIR/niki-state.json"
         local niki_abort_file="$STATE_DIR/abort"
 
         # Clear stale abort file from previous session
         rm -f "$niki_abort_file"
 
-        log "Niki: budget=${niki_budget} timeout=${niki_timeout}s sends=${niki_max_sends}/min tools=${niki_max_tools}/min abort-file=${niki_abort_file}"
+        local niki_startup_timeout="${NIKI_STARTUP_TIMEOUT:-180}"
 
+        log "Niki: budget=${niki_budget} timeout=${niki_timeout}s sends=${niki_max_sends}/min tools=${niki_max_tools}/min startup=${niki_startup_timeout}s stall=${niki_stall_timeout}s abort-file=${niki_abort_file}"
+
+        set +e
         "$niki_cmd" \
             --budget "$niki_budget" \
             --timeout "$niki_timeout" \
             --max-sends "$niki_max_sends" \
             --max-tool-calls "$niki_max_tools" \
+            --stall-timeout "$niki_stall_timeout" \
+            --startup-timeout "$niki_startup_timeout" \
+            --max-nudges "$niki_max_nudges" \
             --abort-file "$niki_abort_file" \
             --state "$niki_state" \
             --log "$LOG_FILE" \
@@ -270,7 +289,10 @@ run_cli() {
             --settings "$settings" \
             --verbose \
             2>> "$LOG_FILE" | tee "$TRANSCRIPT_FILE"
+        local exit_code=${PIPESTATUS[0]}
+        set -e
     else
+        set +e
         "$cmd" -p "$agent_prompt" \
             "${session_args[@]}" \
             "${system_prompt_args[@]}" \
@@ -281,7 +303,37 @@ run_cli() {
             --settings "$settings" \
             --verbose \
             2>> "$LOG_FILE" | tee "$TRANSCRIPT_FILE"
+        local exit_code=${PIPESTATUS[0]}
+        set -e
     fi
+
+    # Session marker management:
+    # Only mark session as created if claude actually produced output (session was established).
+    # If killed before any output (cold-start stall), don't mark — next attempt creates fresh.
+    local got_output="false"
+    if [ -f "$niki_state" ]; then
+        got_output=$(python3 -c "import json; print('true' if json.load(open('$niki_state')).get('gotFirstOutput', False) else 'false')" 2>/dev/null || echo "false")
+    fi
+
+    if [ "$got_output" = "true" ]; then
+        # Session was established (claude produced output) — mark for --resume on restart
+        if [ ! -f "$session_marker" ]; then
+            log "Session $SESSION_ID established — marking for resume on restart"
+        fi
+        touch "$session_marker"
+    elif [ -f "$session_marker" ]; then
+        # Had a marker but got no output — session may be lost (container rebuild, etc.)
+        local niki_duration=0
+        if [ -f "$niki_state" ]; then
+            niki_duration=$(python3 -c "import json; print(json.load(open('$niki_state')).get('duration',0))" 2>/dev/null || echo 0)
+        fi
+        if [ "$niki_duration" -lt 10 ]; then
+            log "Session $SESSION_ID appears lost (no output in ${niki_duration}s) — clearing marker for fresh create"
+            rm -f "$session_marker"
+        fi
+    fi
+
+    return "$exit_code"
 }
 
 # ============ Runtime: API (direct Anthropic API) ============
