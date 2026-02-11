@@ -19,8 +19,8 @@
  *   - Diagnostics only contain counters, never message content
  */
 
-import { spawn } from 'node:child_process';
-import { createWriteStream, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { spawn, execSync } from 'node:child_process';
+import { createWriteStream, writeFileSync, mkdirSync, existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
@@ -39,6 +39,7 @@ Options:
   --max-tool-calls <n>    Max total tool calls per minute (default: 30)
   --stall-timeout <secs>  Kill after N seconds of no output (default: 60, 0=disabled)
   --startup-timeout <s>   Longer stall timeout until first output (default: 180, 0=use stall-timeout)
+  --dead-air-timeout <m>  Minutes of zero CPU + zero output before kill (default: 5, 0=disabled)
   --max-nudges <n>        Max stdin nudge attempts before kill on stall (default: 3)
   --log <file>            Write diagnostics log to file
   --state <file>          Write state JSON on exit (budget used, reason, etc.)
@@ -65,6 +66,7 @@ const { values: opts } = parseArgs({
     'max-tool-calls': { type: 'string', default: '30' },
     'stall-timeout': { type: 'string', default: '60' },
     'startup-timeout': { type: 'string', default: '180' },
+    'dead-air-timeout': { type: 'string', default: '5' },
     'max-nudges':    { type: 'string', default: '3' },
     log:             { type: 'string' },
     state:           { type: 'string' },
@@ -80,6 +82,7 @@ const MAX_SENDS     = parseInt(opts['max-sends'], 10);
 const MAX_TOOL_CALLS = parseInt(opts['max-tool-calls'], 10);
 const STALL_TIMEOUT_S = parseInt(opts['stall-timeout'], 10);
 const STARTUP_TIMEOUT_S = parseInt(opts['startup-timeout'], 10);
+const DEAD_AIR_TIMEOUT_M = parseFloat(opts['dead-air-timeout']);
 const MAX_NUDGES    = parseInt(opts['max-nudges'], 10);
 const COOLDOWN_S    = parseInt(opts.cooldown, 10);
 const ABORT_FILE    = opts['abort-file'] ? resolve(opts['abort-file']) : null;
@@ -101,10 +104,11 @@ const state = {
   sendCallsThisMinute: 0,
   exitCode: null,
   exitSignal: null,
-  killedBy: null,    // 'budget' | 'timeout' | 'rate-sends' | 'rate-tools' | 'abort' | 'stall' | null
+  killedBy: null,    // 'budget' | 'timeout' | 'rate-sends' | 'rate-tools' | 'abort' | 'stall' | 'dead-air' | null
   duration: 0,
   stallEvents: 0,
   nudges: 0,
+  deadAirChecks: 0,
 };
 
 // Sliding window for per-minute rate limiting
@@ -268,6 +272,113 @@ function checkForPrompts(text) {
   return false;
 }
 
+// --- CPU liveness sampling ---
+
+// Reads cumulative CPU time (user+system) for a process tree.
+// Returns total CPU milliseconds, or -1 if unavailable.
+// On Linux: reads /proc/<pid>/stat (works in containers).
+// On macOS: uses ps command as fallback.
+let lastCpuMs = null;  // null = no prior sample taken yet
+
+function sampleCpuMs(pid) {
+  try {
+    // Linux: /proc/<pid>/stat fields 14 (utime) and 15 (stime) in clock ticks
+    const statPath = `/proc/${pid}/stat`;
+    if (existsSync(statPath)) {
+      const stat = readFileSync(statPath, 'utf8');
+      // Fields are space-separated, but comm (field 2) can contain spaces/parens.
+      // Find the closing paren, then split the rest.
+      const afterComm = stat.substring(stat.lastIndexOf(')') + 2);
+      const fields = afterComm.split(' ');
+      // fields[11] = utime (index 13 in original), fields[12] = stime (index 14)
+      const utime = parseInt(fields[11], 10) || 0;
+      const stime = parseInt(fields[12], 10) || 0;
+      // Also grab child times: fields[13] = cutime, fields[14] = cstime
+      const cutime = parseInt(fields[13], 10) || 0;
+      const cstime = parseInt(fields[14], 10) || 0;
+      // Convert clock ticks to ms (typically 100 ticks/sec on Linux)
+      const ticksPerSec = 100;
+      return ((utime + stime + cutime + cstime) / ticksPerSec) * 1000;
+    }
+
+    // macOS / fallback: use ps to get cumulative CPU time
+    const output = execSync(`ps -o cputime= -p ${pid} 2>/dev/null`, { encoding: 'utf8', timeout: 3000 }).trim();
+    if (!output) return -1;
+    // Format: HH:MM:SS or M:SS
+    const parts = output.split(':').map(Number);
+    if (parts.length === 3) return (parts[0] * 3600 + parts[1] * 60 + parts[2]) * 1000;
+    if (parts.length === 2) return (parts[0] * 60 + parts[1]) * 1000;
+    return -1;
+  } catch {
+    return -1;
+  }
+}
+
+// Returns true if the child process has consumed CPU since the last sample.
+function hasConsumedCpu(pid) {
+  const cpuMs = sampleCpuMs(pid);
+  if (cpuMs < 0) return true; // Can't measure → assume alive (safe default)
+
+  const prev = lastCpuMs;
+  lastCpuMs = cpuMs;
+
+  // First sample — no delta yet, assume alive
+  if (prev === null) return true;
+
+  // If CPU time increased at all, process is doing work
+  return cpuMs > prev;
+}
+
+// --- Dead air detection ---
+
+let deadAirStart = null;   // Timestamp when dead air began (null = not in dead air)
+let deadAirPollId = null;
+
+function checkDeadAir() {
+  if (killed || !child || DEAD_AIR_TIMEOUT_M <= 0) return;
+
+  state.deadAirChecks++;
+  const cpuActive = hasConsumedCpu(child.pid);
+  const silenceSec = Math.round((Date.now() - lastOutputTime) / 1000);
+
+  if (cpuActive) {
+    // Process is working — reset dead air, let it cook
+    if (deadAirStart) {
+      log(`Dead air cleared — CPU active after ${Math.round((Date.now() - deadAirStart) / 1000)}s of silence`);
+      deadAirStart = null;
+    }
+    return;
+  }
+
+  // Zero CPU + zero output
+  if (!deadAirStart) {
+    deadAirStart = Date.now();
+    log(`Dead air started — zero CPU, ${silenceSec}s silence`);
+  }
+
+  const deadAirMin = (Date.now() - deadAirStart) / 60_000;
+  if (deadAirMin >= DEAD_AIR_TIMEOUT_M) {
+    log(`DEAD AIR — zero CPU + zero output for ${Math.round(deadAirMin)}min (threshold: ${DEAD_AIR_TIMEOUT_M}min)`);
+    killChild('dead-air');
+    return;
+  }
+
+  log(`Dead air check — zero CPU, ${Math.round(deadAirMin * 10) / 10}/${DEAD_AIR_TIMEOUT_M}min, ${silenceSec}s silence`);
+}
+
+// Poll interval: min(30s, threshold/3) — fast polls for short thresholds, 30s cap for production
+const DEAD_AIR_POLL_MS = DEAD_AIR_TIMEOUT_M > 0
+  ? Math.min(30_000, Math.max(2_000, (DEAD_AIR_TIMEOUT_M * 60_000) / 3))
+  : 30_000;
+
+function scheduleDeadAirPoll() {
+  if (killed || DEAD_AIR_TIMEOUT_M <= 0) return;
+  deadAirPollId = setTimeout(() => {
+    checkDeadAir();
+    if (!killed) scheduleDeadAirPoll();
+  }, jitteredDelay(DEAD_AIR_POLL_MS));
+}
+
 // --- Stall detection ---
 
 let stallTimer = null;
@@ -278,6 +389,11 @@ let gotFirstOutput = false;
 
 function onChildOutput() {
   lastOutputTime = Date.now();
+  // Reset dead air — got real output
+  if (deadAirStart) {
+    log(`Dead air cleared — received output after ${Math.round((Date.now() - deadAirStart) / 1000)}s`);
+    deadAirStart = null;
+  }
   if (!gotFirstOutput) {
     gotFirstOutput = true;
     log(`First output received after ${Math.round((Date.now() - new Date(state.startedAt).getTime()) / 1000)}s — switching to stall-timeout=${STALL_TIMEOUT_S}s`);
@@ -311,7 +427,7 @@ function onStallDetected() {
   const silence = Math.round((Date.now() - lastOutputTime) / 1000);
   log(`STALL — no output for ${silence}s (nudges: ${nudgeCount}/${MAX_NUDGES})`);
 
-  // Escalation: close stdin → nudge → kill
+  // Escalation: close stdin → nudge → check CPU → kill
   if (!stdinClosed) {
     closeStdin();
     resetStallTimer();
@@ -326,13 +442,24 @@ function onStallDetected() {
     return;
   }
 
+  // If dead air detection is enabled, defer kill to the dead air poller.
+  // Only stall-kill if we can confirm zero CPU, or if dead air is disabled.
+  if (DEAD_AIR_TIMEOUT_M > 0 && child) {
+    const cpuActive = hasConsumedCpu(child.pid);
+    if (cpuActive) {
+      log(`Stall deferred — process has CPU activity, deferring to dead-air detection`);
+      resetStallTimer();
+      return;
+    }
+  }
+
   killChild('stall');
 }
 
 // --- Spawn child process ---
 
 log(`Starting: ${childCmd} ${childArgs.join(' ').substring(0, 100)}...`);
-log(`Budget: ${BUDGET} tokens | Timeout: ${TIMEOUT_S}s | Startup: ${STARTUP_TIMEOUT_S}s | Stall: ${STALL_TIMEOUT_S}s | Max sends: ${MAX_SENDS}/min | Max tools: ${MAX_TOOL_CALLS}/min`);
+log(`Budget: ${BUDGET} tokens | Timeout: ${TIMEOUT_S}s | Startup: ${STARTUP_TIMEOUT_S}s | Stall: ${STALL_TIMEOUT_S}s | Dead air: ${DEAD_AIR_TIMEOUT_M}min | Max sends: ${MAX_SENDS}/min | Max tools: ${MAX_TOOL_CALLS}/min`);
 
 child = spawn(childCmd, childArgs, {
   stdio: ['pipe', 'pipe', 'pipe'],  // All piped: niki controls stdin, monitors stdout+stderr
@@ -395,6 +522,12 @@ if (STALL_TIMEOUT_S > 0 || STARTUP_TIMEOUT_S > 0) {
   resetStallTimer();
 }
 
+// Start dead air detection
+if (DEAD_AIR_TIMEOUT_M > 0) {
+  log(`Dead air detection: ${DEAD_AIR_TIMEOUT_M}min threshold, ${Math.round(DEAD_AIR_POLL_MS / 1000)}s poll interval`);
+  scheduleDeadAirPoll();
+}
+
 // --- Abort file polling (with jitter) ---
 
 let abortPollId = null;
@@ -435,6 +568,7 @@ child.on('exit', (code, signal) => {
   clearTimeout(timeoutId);
   if (stallTimer) clearTimeout(stallTimer);
   if (abortPollId) clearTimeout(abortPollId);
+  if (deadAirPollId) clearTimeout(deadAirPollId);
   state.exitCode = code;
   state.exitSignal = signal;
   state.duration = Math.round((Date.now() - new Date(state.startedAt).getTime()) / 1000);

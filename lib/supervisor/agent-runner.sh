@@ -24,6 +24,7 @@
 #   NIKI_MAX_TOOLS      Max tool calls/min for niki (default: 30)
 #   NIKI_STALL_TIMEOUT  Seconds of no output before stall kill (default: 60, 0=disabled)
 #   NIKI_STARTUP_TIMEOUT Longer stall timeout until first output (default: 600, 0=use stall-timeout)
+#   NIKI_DEAD_AIR_TIMEOUT Minutes of zero CPU + zero output before kill (default: 5, 0=disabled)
 #   NIKI_MAX_NUDGES     Max stdin nudge attempts on stall (default: 3)
 #
 # Exit codes:
@@ -276,8 +277,9 @@ run_cli() {
         rm -f "$niki_abort_file"
 
         local niki_startup_timeout="${NIKI_STARTUP_TIMEOUT:-600}"
+        local niki_dead_air="${NIKI_DEAD_AIR_TIMEOUT:-5}"
 
-        log "Niki: budget=${niki_budget} timeout=${niki_timeout}s sends=${niki_max_sends}/min tools=${niki_max_tools}/min startup=${niki_startup_timeout}s stall=${niki_stall_timeout}s abort-file=${niki_abort_file}"
+        log "Niki: budget=${niki_budget} timeout=${niki_timeout}s sends=${niki_max_sends}/min tools=${niki_max_tools}/min startup=${niki_startup_timeout}s stall=${niki_stall_timeout}s dead-air=${niki_dead_air}min abort-file=${niki_abort_file}"
 
         set +e
         "$niki_cmd" \
@@ -287,6 +289,7 @@ run_cli() {
             --max-tool-calls "$niki_max_tools" \
             --stall-timeout "$niki_stall_timeout" \
             --startup-timeout "$niki_startup_timeout" \
+            --dead-air-timeout "$niki_dead_air" \
             --max-nudges "$niki_max_nudges" \
             --abort-file "$niki_abort_file" \
             --state "$niki_state" \

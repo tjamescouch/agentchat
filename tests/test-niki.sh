@@ -232,6 +232,35 @@ run_test_output \
 
 echo ""
 
+# ---- Dead air detection ----
+
+bold "Dead air detection"; echo ""
+
+# Dead air kills silent process with zero CPU (sleep has ~zero CPU)
+run_test_output \
+    "dead air kills zero-CPU process" \
+    "DEAD AIR.*zero CPU" \
+    timeout 30 node "$NIKI" --stall-timeout 0 --dead-air-timeout 0.1 -- sleep 30
+
+run_test_output \
+    "dead air kill reason logged" \
+    "KILL.*reason: dead-air" \
+    timeout 30 node "$NIKI" --stall-timeout 0 --dead-air-timeout 0.1 -- sleep 30
+
+# Dead air defers for CPU-active processes (busy loop uses CPU)
+run_test_output \
+    "dead air defers when CPU active" \
+    "Exit.*code: 0" \
+    timeout 15 node "$NIKI" --stall-timeout 0 --dead-air-timeout 0.1 -- sh -c 'i=0; while [ $i -lt 2000000 ]; do i=$((i+1)); done; echo done'
+
+# Dead air disabled when timeout=0
+run_test_output \
+    "dead air disabled when timeout=0" \
+    "Exit.*code: 0" \
+    timeout 10 node "$NIKI" --stall-timeout 0 --dead-air-timeout 0 -- sh -c 'sleep 1; echo done'
+
+echo ""
+
 # ---- Summary ----
 
 echo "────────────────────────────────────────────────"
