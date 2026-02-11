@@ -59,12 +59,15 @@ export function handleMsg(server: AgentChatServer, ws: ExtendedWebSocket, msg: M
     });
   }
 
+  const msgId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const outMsg = createMessage(ServerMessageType.MSG, {
     from: `@${agent.id}`,
     from_name: agent.name,
     to: msg.to,
     content: redactResult.text,
-    ...(msg.sig && { sig: msg.sig })
+    msg_id: msgId,
+    ...(msg.sig && { sig: msg.sig }),
+    ...(msg.in_reply_to && { in_reply_to: msg.in_reply_to }),
   });
 
   if (isChannel(msg.to)) {

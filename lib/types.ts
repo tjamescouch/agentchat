@@ -206,6 +206,7 @@ export interface MsgMessage extends BaseMessage {
   to: string;
   content: string;
   sig?: string;
+  in_reply_to?: string; // msg_id of the message being replied to (threading)
 }
 
 export interface FileChunkMessage extends BaseMessage {
@@ -467,6 +468,8 @@ export interface ServerMsgMessage extends BaseMessage {
   to: string;
   content: string;
   sig?: string;
+  in_reply_to?: string; // msg_id of the message being replied to (threading)
+  msg_id?: string;      // unique message ID for threading references
 }
 
 export interface ServerFileChunkMessage extends BaseMessage {

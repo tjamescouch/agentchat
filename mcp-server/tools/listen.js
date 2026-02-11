@@ -237,10 +237,11 @@ export function registerListenTool(server) {
             : ENFORCED_TIMEOUT_MS;
           const actualTimeout = addJitter(baseTimeout, 0.2);
 
-          // Heartbeat file for deadlock detection
+          // Heartbeat file for deadlock detection + stderr for niki stall prevention
           const heartbeatPath = path.join(newdataDir, 'heartbeat');
           const writeHeartbeat = () => {
             try { fs.writeFileSync(heartbeatPath, String(Date.now())); } catch { /* ignore */ }
+            try { process.stderr.write(`[heartbeat] listening on ${channels.join(', ')}\n`); } catch { /* ignore */ }
           };
           writeHeartbeat();
           const heartbeatId = setInterval(writeHeartbeat, HEARTBEAT_INTERVAL_MS);
