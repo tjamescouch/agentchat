@@ -127,8 +127,14 @@ function renderStatusBar(countdownSecs = null) {
 // ── Spawn Claude via script (PTY) ──────────────────────────────────────────
 
 // Use `script` to allocate a PTY so Claude gets a real terminal
-const claudeCmd = ['claude', ...claudeArgs].join(' ');
-const child = spawn('script', ['-qc', claudeCmd, '/dev/null'], {
+// macOS: script -q /dev/null command args...
+// Linux: script -qc "command args..." /dev/null
+const isMac = process.platform === 'darwin';
+const claudeCmd = ['claude', ...claudeArgs];
+const scriptArgs = isMac
+  ? ['-q', '/dev/null', ...claudeCmd]
+  : ['-qc', claudeCmd.join(' '), '/dev/null'];
+const child = spawn('script', scriptArgs, {
   stdio: ['pipe', 'pipe', 'pipe'],
   env: {
     ...process.env,
