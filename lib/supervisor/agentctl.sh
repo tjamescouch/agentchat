@@ -146,6 +146,7 @@ Commands:
   context <name>           Show agent's saved context
   stopall                  Stop all agents
   restartall               Restart all agents
+  syncdaemon [start|stop|status]  Manage agent-sync background daemon
 
 Environment:
   CLAUDE_CODE_OAUTH_TOKEN  Optional. If set, skips passphrase prompt.
@@ -556,6 +557,33 @@ case "$1" in
         ;;
     restartall)
         restart_all
+        ;;
+    syncdaemon)
+        agent_sync="${AGENT_SYNC:-$HOME/dev/claude/agent-sync-ci/agent-sync.sh}"
+        if [ ! -x "$agent_sync" ]; then
+            echo "agent-sync not found at $agent_sync"
+            echo "Set AGENT_SYNC to the correct path"
+            exit 1
+        fi
+        subcmd="${2:-start}"
+        case "$subcmd" in
+            start)
+                echo "Starting agent-sync daemon..."
+                "$agent_sync" daemon --background \
+                    --repos-base "${REPOS_BASE:-$HOME/dev/claude/owl}" \
+                    --poll "${SYNC_POLL:-10}"
+                ;;
+            stop)
+                "$agent_sync" daemon stop
+                ;;
+            status)
+                "$agent_sync" daemon status
+                ;;
+            *)
+                echo "Usage: agentctl syncdaemon [start|stop|status]"
+                exit 1
+                ;;
+        esac
         ;;
     *)
         usage
