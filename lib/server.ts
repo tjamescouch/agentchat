@@ -638,6 +638,8 @@ export class AgentChatServer {
 
       ws.on('error', (err: Error) => {
         this._log('ws_error', { error: err.message });
+        this._handleDisconnect(ws);
+        try { ws.close(1006, 'WebSocket error'); } catch {}
       });
     });
 
@@ -660,6 +662,7 @@ export class AgentChatServer {
             ip: ews._realIp,
             agent: this.agents.get(ews)?.id,
           });
+          this._handleDisconnect(ews);
           return ews.terminate();
         }
         ews._isAlive = false;
@@ -955,6 +958,9 @@ export class AgentChatServer {
     this.agents.delete(ws);
     this.lastMessageTime.delete(ws);
     this.lastFileChunkTime.delete(ws);
+    if (agent.pubkey) {
+      this.pubkeyToId.delete(agent.pubkey);
+    }
   }
 }
 
