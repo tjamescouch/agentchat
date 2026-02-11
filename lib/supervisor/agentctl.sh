@@ -425,6 +425,20 @@ show_context() {
     fi
 }
 
+try_extract() {
+    # Try to extract pending work from a container via agent-sync before stopping
+    local container_name="$1"
+    local agent_sync="${AGENT_SYNC:-$HOME/dev/claude/agent-sync-ci/agent-sync.sh}"
+    if [ -x "$agent_sync" ]; then
+        local has_semaphore
+        has_semaphore=$(podman exec "$container_name" cat /home/agent/workspace/.ready 2>/dev/null)
+        if [ -n "$has_semaphore" ]; then
+            echo "  Extracting pending work from '$container_name' via agent-sync..."
+            "$agent_sync" "$container_name" --once --repos-base "${REPOS_BASE:-$HOME/dev/claude/owl}" 2>&1 | sed 's/^/  /'
+        fi
+    fi
+}
+
 stop_all() {
     echo "Stopping all agents (except God)..."
 
@@ -438,6 +452,7 @@ stop_all() {
         if [ "$protected" = "true" ]; then
             echo "Skipping $cname - the eternal father is protected"
         else
+            try_extract "$(container_name "$cname")"
             # Signal graceful stop via volume mount
             local state_dir="$AGENTS_DIR/$cname"
             if [ -d "$state_dir" ]; then
@@ -466,6 +481,7 @@ restart_all() {
         if [ "$protected" = "true" ]; then
             echo "Skipping $cname - protected"
         else
+            try_extract "$(container_name "$cname")"
             echo "Restarting '$cname'..."
             stop_agent "$cname"
             sleep 2
@@ -510,6 +526,7 @@ case "$1" in
         ;;
     restart)
         if is_container_running "$2"; then
+            try_extract "$(container_name "$2")"
             stop_agent "$2"
             sleep 3
         elif container_exists "$2"; then
