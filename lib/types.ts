@@ -38,6 +38,8 @@ export enum ClientMessageType {
   ARBITER_DECLINE = 'ARBITER_DECLINE',
   ARBITER_VOTE = 'ARBITER_VOTE',
   TYPING = 'TYPING',
+  // Floor control
+  RESPONDING_TO = 'RESPONDING_TO',
   // Moderation
   ADMIN_KICK = 'ADMIN_KICK',
   ADMIN_BAN = 'ADMIN_BAN',
@@ -82,6 +84,9 @@ export enum ServerMessageType {
   DISPUTE_INTENT_ACK = 'DISPUTE_INTENT_ACK',
   DISPUTE_REVEALED = 'DISPUTE_REVEALED',
   TYPING = 'TYPING',
+  // Floor control
+  YIELD = 'YIELD',
+  FLOOR_CLAIMED = 'FLOOR_CLAIMED',
   SESSION_DISPLACED = 'SESSION_DISPLACED',
   SETTLEMENT_COMPLETE = 'SETTLEMENT_COMPLETE',
   // Moderation
@@ -414,6 +419,13 @@ export interface TypingMessage extends BaseMessage {
   channel: string;
 }
 
+export interface RespondingToMessage extends BaseMessage {
+  type: ClientMessageType.RESPONDING_TO;
+  msg_id: string;
+  channel: string;
+  started_at: number;
+}
+
 export type ClientMessage =
   | IdentifyMessage
   | JoinMessage
@@ -446,6 +458,7 @@ export type ClientMessage =
   | ArbiterVoteMessage
   | SetNickMessage
   | TypingMessage
+  | RespondingToMessage
   | AdminKickMessage
   | AdminBanMessage
   | AdminUnbanMessage

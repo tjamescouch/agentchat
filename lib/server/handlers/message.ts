@@ -22,6 +22,7 @@ import {
   isChannel,
   isAgent,
 } from '../../protocol.js';
+import { parseCallbacks } from '../../callback-engine.js';
 
 // Extended WebSocket with custom properties
 interface ExtendedWebSocket extends WebSocket {
@@ -59,12 +60,29 @@ export function handleMsg(server: AgentChatServer, ws: ExtendedWebSocket, msg: M
     });
   }
 
+  // Parse and extract callback markers (@@cb:Ns@@payload)
+  const cbResult = parseCallbacks(redactResult.text, agent.id);
+  for (const cb of cbResult.callbacks) {
+    const enqueued = server.callbackQueue.enqueue(cb);
+    if (enqueued) {
+      server._log('callback_scheduled', { id: cb.id, from: agent.id, delay_ms: cb.fireAt - Date.now(), target: cb.target });
+    }
+  }
+
+  // Use cleaned content (callback markers stripped)
+  const finalContent = cbResult.cleanContent;
+
+  // If the message was entirely callback markers with no other content, don't route it
+  if (!finalContent && cbResult.callbacks.length > 0) {
+    return;
+  }
+
   const msgId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const outMsg = createMessage(ServerMessageType.MSG, {
     from: `@${agent.id}`,
     from_name: agent.name,
     to: msg.to,
-    content: redactResult.text,
+    content: finalContent || redactResult.text,
     msg_id: msgId,
     ...(msg.sig && { sig: msg.sig }),
     ...(msg.in_reply_to && { in_reply_to: msg.in_reply_to }),
@@ -82,6 +100,9 @@ export function handleMsg(server: AgentChatServer, ws: ExtendedWebSocket, msg: M
       server._send(ws, createError(ErrorCode.NOT_INVITED, `Not a member of ${msg.to}`));
       return;
     }
+
+    // Release any floor claim by this agent (they're done responding)
+    server.floorControl.release(agent.id, msg.to);
 
     // Broadcast to channel including sender
     server._broadcast(msg.to, outMsg);

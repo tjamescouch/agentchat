@@ -64,6 +64,8 @@ export const ClientMessageType = {
   ADMIN_UNBAN: 'ADMIN_UNBAN' as const,
   // File transfer
   FILE_CHUNK: 'FILE_CHUNK' as const,
+  // Floor control
+  RESPONDING_TO: 'RESPONDING_TO' as const,
 };
 
 export const ServerMessageType = {
@@ -119,6 +121,9 @@ export const ServerMessageType = {
   BANNED: 'BANNED' as const,
   // File transfer
   FILE_CHUNK: 'FILE_CHUNK' as const,
+  // Floor control
+  YIELD: 'YIELD' as const,
+  FLOOR_CLAIMED: 'FLOOR_CLAIMED' as const,
 };
 
 export const ErrorCode = {
@@ -297,6 +302,9 @@ interface RawClientMessage {
   statement?: string;
   verdict?: string;
   reasoning?: string;
+  // Floor control fields
+  msg_id?: string;
+  started_at?: number;
 }
 
 /**
@@ -651,6 +659,18 @@ export function validateClientMessage(raw: string | RawClientMessage): Validatio
     case ClientMessageType.TYPING:
       if (!isValidChannel(msg.channel)) {
         return { valid: false, error: 'Invalid channel name' };
+      }
+      break;
+
+    case ClientMessageType.RESPONDING_TO:
+      if (!msg.msg_id || typeof msg.msg_id !== 'string') {
+        return { valid: false, error: 'Missing or invalid msg_id' };
+      }
+      if (!msg.channel || !isValidChannel(msg.channel)) {
+        return { valid: false, error: 'Missing or invalid channel' };
+      }
+      if (!msg.started_at || typeof msg.started_at !== 'number') {
+        return { valid: false, error: 'Missing or invalid started_at timestamp' };
       }
       break;
 

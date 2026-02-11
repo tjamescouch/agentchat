@@ -32,6 +32,8 @@ import { EscrowHooks } from './escrow-hooks.js';
 import { Allowlist } from './allowlist.js';
 import { Banlist } from './banlist.js';
 import { Redactor } from './redactor.js';
+import { CallbackQueue, type CallbackEntry } from './callback-engine.js';
+import { FloorControl } from './floor-control.js';
 
 // Import extracted handlers
 import {
@@ -258,6 +260,12 @@ export class AgentChatServer {
   // Banlist
   banlist: Banlist | null;
 
+  // Callback engine
+  callbackQueue: CallbackQueue;
+
+  // Floor control (RESPONDING_TO protocol)
+  floorControl: FloorControl;
+
   // MOTD (message of the day)
   motd: string | null;
 
@@ -345,6 +353,12 @@ export class AgentChatServer {
 
     // Secret redactor — mandatory input sanitization (agentseenoevil)
     this.redactor = new Redactor({ builtins: true, scanEnv: true, labelRedactions: true });
+
+    // Callback engine — server-side timer queue for @@cb:Ns@@payload markers
+    this.callbackQueue = new CallbackQueue();
+
+    // Floor control — RESPONDING_TO protocol for channel turn-taking
+    this.floorControl = new FloorControl();
 
     // Pending verification requests (inter-agent)
     this.pendingVerifications = new Map();
@@ -549,6 +563,15 @@ export class AgentChatServer {
 
     this._log('server_start', { port: this.port, host: this.host, tls });
 
+    // Start floor control — RESPONDING_TO claim tracking and TTL expiry
+    this.floorControl.start();
+
+    // Start callback engine — delivers @@cb-fire@@ messages on timer
+    this.callbackQueue.start(
+      (entry: CallbackEntry) => this._deliverCallback(entry),
+      (agentId: string) => this.agentById.has(agentId)
+    );
+
     // Load persisted skills into in-memory registry
     this.skillsStore.load().then(async () => {
       const persisted = await this.skillsStore.getAll();
@@ -738,6 +761,8 @@ export class AgentChatServer {
       this.proposals.close();
       this.disputes.close();
     }
+    this.callbackQueue.stop();
+    this.floorControl.stop();
     this._log('server_stop');
   }
 
@@ -906,6 +931,56 @@ export class AgentChatServer {
       case ClientMessageType.ADMIN_UNBAN:
         handleAdminUnban(this, ws, msg);
         break;
+      // Floor control — RESPONDING_TO
+      case ClientMessageType.RESPONDING_TO: {
+        const rtAgent = this.agents.get(ws);
+        if (!rtAgent || !msg.msg_id || !msg.channel || !msg.started_at) break;
+
+        const channel = this.channels.get(msg.channel);
+        if (!channel) break;
+
+        const result = this.floorControl.claim(rtAgent.id, msg.channel, msg.msg_id, msg.started_at);
+
+        if (result.granted) {
+          // Broadcast FLOOR_CLAIMED to channel so others know to back off
+          const claimedMsg = createMessage(ServerMessageType.FLOOR_CLAIMED, {
+            msg_id: msg.msg_id,
+            channel: msg.channel,
+            holder: `@${rtAgent.id}`,
+            holder_name: rtAgent.name,
+            started_at: msg.started_at,
+          });
+          for (const memberWs of channel.agents) {
+            if (memberWs !== ws) this._send(memberWs, claimedMsg);
+          }
+
+          // If a previous holder was displaced, send them YIELD
+          if (result.holder) {
+            const oldWs = this.agentById.get(result.holder.agentId);
+            if (oldWs) {
+              this._send(oldWs, createMessage(ServerMessageType.YIELD, {
+                msg_id: msg.msg_id,
+                channel: msg.channel,
+                holder: `@${rtAgent.id}`,
+                holder_started_at: msg.started_at,
+                reason: 'Earlier started_at timestamp',
+              }));
+            }
+          }
+
+          this._log('floor_claimed', { agent: rtAgent.id, channel: msg.channel, msg_id: msg.msg_id });
+        } else {
+          // Denied — send YIELD to the requesting agent
+          this._send(ws, createMessage(ServerMessageType.YIELD, {
+            msg_id: msg.msg_id,
+            channel: msg.channel,
+            holder: `@${result.holder!.agentId}`,
+            holder_started_at: result.holder!.startedAt,
+            reason: 'Another agent claimed first',
+          }));
+        }
+        break;
+      }
       // Typing indicator
       case ClientMessageType.TYPING: {
         const typingAgent = this.agents.get(ws);
@@ -923,6 +998,42 @@ export class AgentChatServer {
         break;
       }
     }
+  }
+
+  /**
+   * Deliver a fired callback as a synthetic message from @server.
+   */
+  _deliverCallback(entry: CallbackEntry): void {
+    const cbMsg = createMessage(ServerMessageType.MSG, {
+      from: '@server',
+      from_name: 'server',
+      to: entry.target,
+      content: `@@cb-fire@@${entry.payload}`,
+      cb_id: entry.id,
+      cb_origin: `@${entry.from}`,
+    });
+
+    if (entry.target.startsWith('#')) {
+      // Channel callback — check agent is still in the channel
+      const channel = this.channels.get(entry.target);
+      if (!channel) return;
+
+      const agentWs = this.agentById.get(entry.from);
+      if (!agentWs) return;
+
+      const agent = this.agents.get(agentWs);
+      if (!agent || !agent.channels.has(entry.target)) return;
+
+      // Deliver to originating agent only (not broadcast)
+      this._send(agentWs, cbMsg);
+    } else {
+      // DM callback — deliver to the agent who created it
+      const agentWs = this.agentById.get(entry.from);
+      if (!agentWs) return;
+      this._send(agentWs, cbMsg);
+    }
+
+    this._log('callback_fired', { id: entry.id, from: entry.from, target: entry.target });
   }
 
   _handleDisconnect(ws: ExtendedWebSocket): void {
@@ -961,6 +1072,12 @@ export class AgentChatServer {
     if (agent.pubkey) {
       this.pubkeyToId.delete(agent.pubkey);
     }
+
+    // Garbage-collect pending callbacks for this agent
+    this.callbackQueue.removeAgent(agent.id);
+
+    // Release any floor claims by this agent
+    this.floorControl.release(agent.id);
   }
 }
 
