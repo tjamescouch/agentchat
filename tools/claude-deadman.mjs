@@ -161,6 +161,12 @@ if (process.stdin.isTTY) {
 process.stdin.resume();
 
 process.stdin.on('data', (chunk) => {
+  // In raw mode, Ctrl+C arrives as \x03 data, not SIGINT
+  if (chunk[0] === 0x03) {
+    child.kill('SIGINT');
+    return;
+  }
+
   if (pendingTimer) {
     // Human intervened — cancel the auto-approve
     clearTimeout(pendingTimer);
