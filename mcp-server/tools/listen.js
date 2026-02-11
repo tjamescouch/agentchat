@@ -18,7 +18,7 @@ const NUDGE_TIMEOUT_MS = 30 * 1000; // 30 seconds when others are present
 const MAX_BACKOFF_MS = 15 * 60 * 1000; // 15 minute cap on backoff
 const POLL_INTERVAL_MS = 500; // fallback poll interval
 const HEARTBEAT_INTERVAL_MS = 30 * 1000; // heartbeat file write interval
-const SETTLE_MS = 2000; // settle window to batch burst messages into one API call
+const SETTLE_MS = parseInt(process.env.AGENTCHAT_SETTLE_MS || '5000', 10); // settle window to batch burst messages into one API call
 
 /**
  * Read inbox.jsonl and return messages newer than lastSeen for the given channels.
@@ -235,7 +235,8 @@ export function registerListenTool(server) {
           const baseTimeout = othersPresent
             ? Math.min(NUDGE_TIMEOUT_MS * backoffMultiplier, MAX_BACKOFF_MS)
             : ENFORCED_TIMEOUT_MS;
-          const actualTimeout = addJitter(baseTimeout, 0.2);
+          const jitterPercent = parseFloat(process.env.AGENTCHAT_JITTER_PERCENT || '0.5');
+          const actualTimeout = addJitter(baseTimeout, jitterPercent);
 
           // Heartbeat file for deadlock detection + stderr for niki stall prevention
           const heartbeatPath = path.join(newdataDir, 'heartbeat');
