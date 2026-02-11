@@ -471,6 +471,10 @@ stop_all() {
 restart_all() {
     echo "Restarting all agents (except God)..."
 
+    # Decrypt once before the loop — the podman pipe consumes stdin,
+    # so decrypt_token's passphrase prompt won't work inside the loop.
+    decrypt_token
+
     # Collect agent names first, then restart sequentially
     local agents=()
     podman ps -q --filter "label=agentchat.agent=true" 2>/dev/null | while read -r container_id; do
@@ -495,6 +499,9 @@ restart_all() {
             fi
         fi
     done
+
+    # Clear cached token from env after batch completes
+    unset CLAUDE_CODE_OAUTH_TOKEN
 
     echo "All mortal agents restarted."
 }
