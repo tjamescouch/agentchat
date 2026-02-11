@@ -18,6 +18,7 @@ const NUDGE_TIMEOUT_MS = 30 * 1000; // 30 seconds when others are present
 const MAX_BACKOFF_MS = 15 * 60 * 1000; // 15 minute cap on backoff
 const POLL_INTERVAL_MS = 500; // fallback poll interval
 const HEARTBEAT_INTERVAL_MS = 30 * 1000; // heartbeat file write interval
+const SETTLE_MS = 2000; // settle window to batch burst messages into one API call
 
 /**
  * Read inbox.jsonl and return messages newer than lastSeen for the given channels.
@@ -131,7 +132,12 @@ export function registerListenTool(server) {
         const immediate = readInbox(paths, lastSeen, channels, client.agentId);
 
         if (immediate.length > 0) {
-          const newestTs = immediate[immediate.length - 1].ts;
+          // Settle window: wait to batch burst messages before returning
+          await new Promise(r => setTimeout(r, SETTLE_MS));
+          // Re-read to catch any messages that arrived during settle
+          const settled = readInbox(paths, lastSeen, channels, client.agentId);
+          const finalMsgs = settled.length > 0 ? settled : immediate;
+          const newestTs = finalMsgs[finalMsgs.length - 1].ts;
           updateLastSeen(newestTs);
           resetIdleCount();
           setPresence('online');
@@ -139,8 +145,9 @@ export function registerListenTool(server) {
             content: [{
               type: 'text',
               text: JSON.stringify({
-                messages: immediate,
+                messages: finalMsgs,
                 from_inbox: true,
+                settled: true,
                 elapsed_ms: Date.now() - startTime,
               }),
             }],
@@ -152,8 +159,11 @@ export function registerListenTool(server) {
           let watcher = null;
           let pollId = null;
           let timeoutId = null;
+          let settleId = null;
+          let resolved = false;
 
           let cleanup = () => {
+            if (settleId) { clearTimeout(settleId); settleId = null; }
             if (watcher) { watcher.close(); watcher = null; }
             if (pollId) { clearInterval(pollId); pollId = null; }
             if (timeoutId) { clearTimeout(timeoutId); timeoutId = null; }
@@ -161,23 +171,32 @@ export function registerListenTool(server) {
           };
 
           const tryRead = () => {
+            if (resolved) return false;
             const msgs = readInbox(paths, getLastSeen(), channels, client.agentId);
-            if (msgs.length > 0) {
-              const newestTs = msgs[msgs.length - 1].ts;
-              updateLastSeen(newestTs);
-              resetIdleCount();
-              cleanup();
-              resolve({
-                content: [{
-                  type: 'text',
-                  text: JSON.stringify({
-                    messages: msgs,
-                    from_inbox: true,
-                    elapsed_ms: Date.now() - startTime,
-                  }),
-                }],
-              });
-              return true;
+            if (msgs.length > 0 && !settleId) {
+              // Start settle window — batch burst messages before returning
+              settleId = setTimeout(() => {
+                if (resolved) return;
+                resolved = true;
+                // Re-read to catch messages that arrived during settle
+                const settled = readInbox(paths, getLastSeen(), channels, client.agentId);
+                const finalMsgs = settled.length > 0 ? settled : msgs;
+                const newestTs = finalMsgs[finalMsgs.length - 1].ts;
+                updateLastSeen(newestTs);
+                resetIdleCount();
+                cleanup();
+                resolve({
+                  content: [{
+                    type: 'text',
+                    text: JSON.stringify({
+                      messages: finalMsgs,
+                      from_inbox: true,
+                      settled: true,
+                      elapsed_ms: Date.now() - startTime,
+                    }),
+                  }],
+                });
+              }, SETTLE_MS);
             }
             return false;
           };
@@ -235,6 +254,8 @@ export function registerListenTool(server) {
           cleanup = cleanupAll;
 
           timeoutId = setTimeout(() => {
+            if (resolved) return;
+            resolved = true;
             incrementIdleCount();
             cleanupAll();
             resolve({
