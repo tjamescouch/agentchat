@@ -23,7 +23,7 @@
 #   NIKI_MAX_SENDS      Max sends/min for niki (default: 10)
 #   NIKI_MAX_TOOLS      Max tool calls/min for niki (default: 30)
 #   NIKI_STALL_TIMEOUT  Seconds of no output before stall kill (default: 60, 0=disabled)
-#   NIKI_STARTUP_TIMEOUT Longer stall timeout until first output (default: 180, 0=use stall-timeout)
+#   NIKI_STARTUP_TIMEOUT Longer stall timeout until first output (default: 600, 0=use stall-timeout)
 #   NIKI_MAX_NUDGES     Max stdin nudge attempts on stall (default: 3)
 #
 # Exit codes:
@@ -49,6 +49,18 @@ SESSION_NUM_FILE="$STATE_DIR/session_num"
 SESSION_ID_FILE="$STATE_DIR/session_id"
 
 mkdir -p "$STATE_DIR"
+
+# Signal trap for graceful shutdown — forward SIGTERM to child (niki/claude)
+# so claude can flush session state before dying.
+CHILD_PID=""
+graceful_shutdown() {
+    if [ -n "$CHILD_PID" ] && kill -0 "$CHILD_PID" 2>/dev/null; then
+        kill -TERM "$CHILD_PID" 2>/dev/null || true
+        wait "$CHILD_PID" 2>/dev/null || true
+    fi
+    exit 143
+}
+trap graceful_shutdown SIGTERM
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [runner] $1" | tee -a "$LOG_FILE"
@@ -263,7 +275,7 @@ run_cli() {
         # Clear stale abort file from previous session
         rm -f "$niki_abort_file"
 
-        local niki_startup_timeout="${NIKI_STARTUP_TIMEOUT:-180}"
+        local niki_startup_timeout="${NIKI_STARTUP_TIMEOUT:-600}"
 
         log "Niki: budget=${niki_budget} timeout=${niki_timeout}s sends=${niki_max_sends}/min tools=${niki_max_tools}/min startup=${niki_startup_timeout}s stall=${niki_stall_timeout}s abort-file=${niki_abort_file}"
 
@@ -288,8 +300,11 @@ run_cli() {
             --permission-mode bypassPermissions \
             --settings "$settings" \
             --verbose \
-            2>> "$LOG_FILE" | tee "$TRANSCRIPT_FILE"
-        local exit_code=${PIPESTATUS[0]}
+            > >(tee "$TRANSCRIPT_FILE") 2>> "$LOG_FILE" &
+        CHILD_PID=$!
+        wait $CHILD_PID 2>/dev/null
+        local exit_code=$?
+        CHILD_PID=""
         set -e
     else
         set +e
@@ -302,8 +317,11 @@ run_cli() {
             --permission-mode bypassPermissions \
             --settings "$settings" \
             --verbose \
-            2>> "$LOG_FILE" | tee "$TRANSCRIPT_FILE"
-        local exit_code=${PIPESTATUS[0]}
+            > >(tee "$TRANSCRIPT_FILE") 2>> "$LOG_FILE" &
+        CHILD_PID=$!
+        wait $CHILD_PID 2>/dev/null
+        local exit_code=$?
+        CHILD_PID=""
         set -e
     fi
 

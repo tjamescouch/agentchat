@@ -220,6 +220,18 @@ rm -f "$ABORT_FILE"
 
 echo ""
 
+# ---- SIGTERM forwarding ----
+
+bold "SIGTERM forwarding"; echo ""
+
+# niki should forward SIGTERM to child and exit
+run_test_output \
+    "SIGTERM forwarded to child" \
+    "Received SIGTERM" \
+    timeout 10 sh -c "node $NIKI --stall-timeout 0 -- sh -c 'echo started; sleep 30' & PID=\$!; sleep 1; kill -TERM \$PID; wait \$PID 2>/dev/null; echo done"
+
+echo ""
+
 # ---- Summary ----
 
 echo "────────────────────────────────────────────────"

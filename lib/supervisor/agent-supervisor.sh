@@ -86,8 +86,25 @@ save_state() {
 EOF
 }
 
+RUNNER_PID=""
+
 cleanup() {
     log "Supervisor shutting down"
+    # Forward SIGTERM to runner so niki → claude can flush session state
+    if [ -n "$RUNNER_PID" ] && kill -0 "$RUNNER_PID" 2>/dev/null; then
+        log "Forwarding SIGTERM to runner (PID $RUNNER_PID)"
+        kill -TERM "$RUNNER_PID" 2>/dev/null || true
+        # Wait for graceful shutdown (claude session flush)
+        local i=0
+        while [ $i -lt 8 ] && kill -0 "$RUNNER_PID" 2>/dev/null; do
+            sleep 1
+            i=$((i + 1))
+        done
+        if kill -0 "$RUNNER_PID" 2>/dev/null; then
+            log "Runner still alive after ${i}s, force killing"
+            kill -KILL "$RUNNER_PID" 2>/dev/null || true
+        fi
+    fi
     save_state "stopped" ""
     rm -f "$PID_FILE"
     exit 0
@@ -142,8 +159,14 @@ while true; do
     export AGENT_NAME MISSION STATE_DIR LOG_FILE
 
     # Run the agent via the runner abstraction layer
-    "$RUNNER"
+    # Background + wait so SIGTERM trap can interrupt and forward signal
+    "$RUNNER" &
+    RUNNER_PID=$!
+    set +e
+    wait $RUNNER_PID 2>/dev/null
     EXIT_CODE=$?
+    set -e
+    RUNNER_PID=""
 
     if [ $EXIT_CODE -eq 0 ]; then
         # Clean exit
