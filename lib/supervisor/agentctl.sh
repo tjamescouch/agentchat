@@ -145,6 +145,7 @@ Commands:
   list                     List all agents
   context <name>           Show agent's saved context
   stopall                  Stop all agents
+  restartall               Restart all agents
 
 Environment:
   CLAUDE_CODE_OAUTH_TOKEN  Optional. If set, skips passphrase prompt.
@@ -451,6 +452,36 @@ stop_all() {
     echo "All mortal agents stopped."
 }
 
+restart_all() {
+    echo "Restarting all agents (except God)..."
+
+    # Collect agent names first, then restart sequentially
+    local agents=()
+    podman ps -q --filter "label=agentchat.agent=true" 2>/dev/null | while read -r container_id; do
+        local cname
+        cname=$(podman inspect --format '{{index .Config.Labels "agentchat.name"}}' "$container_id" 2>/dev/null)
+        local protected
+        protected=$(podman inspect --format '{{index .Config.Labels "agentchat.protected"}}' "$container_id" 2>/dev/null)
+
+        if [ "$protected" = "true" ]; then
+            echo "Skipping $cname - protected"
+        else
+            echo "Restarting '$cname'..."
+            stop_agent "$cname"
+            sleep 2
+            local mission
+            mission=$(cat "$AGENTS_DIR/$cname/mission.txt" 2>/dev/null)
+            if [ -z "$mission" ]; then
+                echo "WARNING: No mission for '$cname', skipping start"
+            else
+                start_agent "$cname" "$mission"
+            fi
+        fi
+    done
+
+    echo "All mortal agents restarted."
+}
+
 # Main
 case "$1" in
     setup-token)
@@ -505,6 +536,9 @@ case "$1" in
         ;;
     stopall)
         stop_all
+        ;;
+    restartall)
+        restart_all
         ;;
     *)
         usage
