@@ -126,24 +126,35 @@ function renderStatusBar(countdownSecs = null) {
 
 // ── Spawn Claude via script (PTY) ──────────────────────────────────────────
 
-// Use `script` to allocate a PTY so Claude gets a real terminal
-// macOS: script -q /dev/null command args...
-// Linux: script -qc "command args..." /dev/null
+// Spawn Claude — use `script` for PTY on Linux, direct spawn on macOS
+// (macOS `script` requires a real TTY on stdin, which conflicts with piped I/O)
 const isMac = process.platform === 'darwin';
-const claudeCmd = ['claude', ...claudeArgs];
-const scriptArgs = isMac
-  ? ['-q', '/dev/null', ...claudeCmd]
-  : ['-qc', claudeCmd.join(' '), '/dev/null'];
-const child = spawn('script', scriptArgs, {
-  stdio: ['pipe', 'pipe', 'pipe'],
-  env: {
-    ...process.env,
-    FORCE_COLOR: '1',
-    COLUMNS: String(cols),
-    LINES: String(rows - 1), // Reserve bottom line for status bar
-    TERM: process.env.TERM || 'xterm-256color',
-  },
-});
+let child;
+if (isMac) {
+  // Direct spawn — Claude won't get a PTY but the deadman controls still work
+  child = spawn('claude', claudeArgs, {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: {
+      ...process.env,
+      FORCE_COLOR: '1',
+      COLUMNS: String(cols),
+      LINES: String(rows - 1),
+    },
+  });
+} else {
+  // Linux: use script for a real PTY
+  const claudeCmd = ['claude', ...claudeArgs].join(' ');
+  child = spawn('script', ['-qc', claudeCmd, '/dev/null'], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: {
+      ...process.env,
+      FORCE_COLOR: '1',
+      COLUMNS: String(cols),
+      LINES: String(rows - 1),
+      TERM: process.env.TERM || 'xterm-256color',
+    },
+  });
+}
 
 let pendingTimer = null;
 let pendingPromptText = '';
