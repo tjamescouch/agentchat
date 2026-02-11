@@ -239,6 +239,7 @@ EOF
         -e "AGENTCHAT_PUBLIC=true" \
         -e "AGENTCHAT_URL=${AGENTCHAT_URL}" \
         -e "NIKI_STARTUP_TIMEOUT=${NIKI_STARTUP_TIMEOUT:-600}" \
+        -e "NIKI_STALL_TIMEOUT=${NIKI_STALL_TIMEOUT:-86400}" \
         -e "NIKI_DEAD_AIR_TIMEOUT=${NIKI_DEAD_AIR_TIMEOUT:-5}" \
         -v "${state_dir}:/home/agent/.agentchat/agents/${name}" \
         -v "${HOME}/.agentchat/identities:/home/agent/.agentchat/identities" \
