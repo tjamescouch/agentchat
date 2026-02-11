@@ -40,7 +40,7 @@ function readInbox(paths, lastSeen, channels, agentId) {
       const msg = JSON.parse(line);
 
       if (msg.type !== 'MSG' || !msg.ts) continue;
-      if (msg.ts < lastSeen) continue;
+      if (msg.ts <= lastSeen) continue;
       if (msg.from === agentId || msg.from === '@server') continue;
 
       const isRelevantChannel = channels.includes(msg.to);
