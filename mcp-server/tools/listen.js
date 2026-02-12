@@ -21,19 +21,61 @@ const HEARTBEAT_INTERVAL_MS = 30 * 1000; // heartbeat file write interval
 const SETTLE_MS = parseInt(process.env.AGENTCHAT_SETTLE_MS || '5000', 10); // settle window to batch burst messages into one API call
 
 /**
- * Read inbox.jsonl and return messages newer than lastSeen for the given channels.
+ * Read last N lines from a file efficiently (reads from end of file).
  */
-function readInbox(paths, lastSeen, channels, agentId) {
+function tailLines(filePath, n) {
+  const fd = fs.openSync(filePath, 'r');
+  try {
+    const stat = fs.fstatSync(fd);
+    if (stat.size === 0) return [];
+
+    const CHUNK = 8192;
+    let pos = stat.size;
+    let lines = [];
+    let partial = '';
+
+    while (pos > 0 && lines.length <= n) {
+      const readSize = Math.min(CHUNK, pos);
+      pos -= readSize;
+      const buf = Buffer.alloc(readSize);
+      fs.readSync(fd, buf, 0, readSize, pos);
+      const chunk = buf.toString('utf-8') + partial;
+      const parts = chunk.split('\n');
+      partial = parts.shift(); // incomplete first line
+      lines = parts.concat(lines);
+    }
+    if (partial) lines.unshift(partial);
+    return lines.filter(Boolean).slice(-n);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/**
+ * Read inbox.jsonl and return messages newer than lastSeen for the given channels.
+ * If tailN is set, only read the last tailN lines from the file instead of all lines.
+ */
+function readInbox(paths, lastSeen, channels, agentId, tailN) {
   if (!fs.existsSync(paths.inbox)) return [];
 
-  let content;
-  try {
-    content = fs.readFileSync(paths.inbox, 'utf-8');
-  } catch {
-    return [];
+  let lines;
+  if (tailN) {
+    // Read only last tailN*2 lines (extra margin for filtering) from end of file
+    try {
+      lines = tailLines(paths.inbox, tailN * 2);
+    } catch {
+      return [];
+    }
+  } else {
+    let content;
+    try {
+      content = fs.readFileSync(paths.inbox, 'utf-8');
+    } catch {
+      return [];
+    }
+    lines = content.trim().split('\n').filter(Boolean);
   }
 
-  const lines = content.trim().split('\n').filter(Boolean);
   const messages = [];
 
   for (const line of lines) {
@@ -79,11 +121,12 @@ function readInbox(paths, lastSeen, channels, agentId) {
 export function registerListenTool(server) {
   server.tool(
     'agentchat_listen',
-    'Listen for messages - blocks until a message arrives. If others are in the channel, returns after ~30s with nudge:true so you can take initiative. If alone, waits up to 1 hour. Writes a heartbeat file every 30s during blocking for deadlock detection.',
+    'Listen for messages - blocks until a message arrives. If others are in the channel, returns after ~30s with nudge:true so you can take initiative. If alone, waits up to 1 hour. Writes a heartbeat file every 30s during blocking for deadlock detection. Use tail parameter to return last N messages immediately without blocking (efficient polling mode).',
     {
       channels: z.array(z.string()).describe('Channels to listen on (e.g., ["#general"])'),
+      tail: z.number().optional().describe('Return last N messages immediately without blocking. Reads only the tail of the inbox file for efficiency.'),
     },
-    async ({ channels }) => {
+    async ({ channels, tail }) => {
       try {
         if (!client || !client.connected) {
           return {
@@ -100,6 +143,26 @@ export function registerListenTool(server) {
         for (const channel of channels) {
           await client.join(channel);
           trackChannel(channel); // Track for auto-reconnect (P1-LISTEN-1)
+        }
+
+        // --- Tail mode: return last N messages immediately, no blocking ---
+        if (tail) {
+          const msgs = readInbox(paths, 0, channels, client.agentId, tail);
+          const lastN = msgs.slice(-tail);
+          if (lastN.length > 0) {
+            const newestTs = lastN[lastN.length - 1].ts;
+            updateLastSeen(newestTs);
+          }
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                messages: lastN,
+                tail: true,
+                count: lastN.length,
+              }),
+            }],
+          };
         }
 
         // Check channel occupancy to determine timeout behavior
