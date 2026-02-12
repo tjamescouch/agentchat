@@ -232,6 +232,14 @@ EOF
         labels="$labels --label agentchat.protected=true"
     fi
 
+    # Mount lucidity memory system if available on host
+    local lucidity_mount=""
+    local lucidity_host_dir="${LUCIDITY_DIR:-$HOME/lucidity}"
+    if [ -d "$lucidity_host_dir/src" ] && [ -f "$lucidity_host_dir/src/boot-memory.js" ]; then
+        lucidity_mount="-v ${lucidity_host_dir}/src:/home/agent/lucidity/src:ro"
+        echo "  Mounting lucidity memory system from $lucidity_host_dir"
+    fi
+
     echo "Starting agent '$name' in container..."
     podman run -d \
         --name "$(container_name "$name")" \
@@ -245,8 +253,7 @@ EOF
         -e "NIKI_DEAD_AIR_TIMEOUT=${NIKI_DEAD_AIR_TIMEOUT:-5}" \
         -v "${state_dir}:/home/agent/.agentchat/agents/${name}" \
         -v "${HOME}/.agentchat/identities:/home/agent/.agentchat/identities" \
-        -v "${state_dir}/memory:/home/agent/.claude/memory-tree" \
-        -v "${state_dir}/agent-memory:/home/agent/.agent-memory/${name}" \
+        $lucidity_mount \
         "$IMAGE_NAME" \
         "$name" "$mission" > /dev/null
 

@@ -206,6 +206,44 @@ while true; do
 
     RESTART_COUNT=$((RESTART_COUNT + 1))
 
+    # === Memory curation between sessions ===
+    # Run lucidity curator to curate transcript into tree.json
+    # and emit skill.md so the agent boots with memory context.
+    # Uses curator-run.sh (which tries curator.js, then ghost, then fallback).
+    LUCIDITY_DIR="$HOME/lucidity/src"
+    CURATOR_SCRIPT="$LUCIDITY_DIR/curator-run.sh"
+    # Store tree.json in STATE_DIR (volume-mounted, persists across container rebuilds)
+    TREE_FILE="$STATE_DIR/tree.json"
+    SKILL_FILE="$HOME/.claude/agentchat.skill.md"
+    TRANSCRIPT_FILE_FOR_CURATION="$STATE_DIR/transcript.log"
+
+    if [ -x "$CURATOR_SCRIPT" ]; then
+        log "Running memory curation (curator-run.sh)..."
+        mkdir -p "$(dirname "$TREE_FILE")"
+        if "$CURATOR_SCRIPT" \
+            --agent "$AGENT_NAME" \
+            --tree "$TREE_FILE" \
+            --transcript "$TRANSCRIPT_FILE_FOR_CURATION" \
+            --output "$SKILL_FILE" 2>> "$LOG_FILE"; then
+            log "Memory curation complete — skill.md updated"
+        else
+            log "Memory curation failed (non-fatal, continuing)"
+        fi
+    elif [ -f "$LUCIDITY_DIR/curator.js" ] && command -v node > /dev/null 2>&1; then
+        # Fallback: call curator.js directly if curator-run.sh isn't executable
+        log "Running memory curation (curator.js direct)..."
+        mkdir -p "$(dirname "$TREE_FILE")"
+        CURATE_ARGS="--agent $AGENT_NAME --tree $TREE_FILE --output $SKILL_FILE"
+        if [ -f "$TRANSCRIPT_FILE_FOR_CURATION" ] && [ -s "$TRANSCRIPT_FILE_FOR_CURATION" ]; then
+            CURATE_ARGS="$CURATE_ARGS --transcript $TRANSCRIPT_FILE_FOR_CURATION --curate"
+        fi
+        if node "$LUCIDITY_DIR/curator.js" $CURATE_ARGS 2>> "$LOG_FILE"; then
+            log "Memory curation complete — skill.md updated"
+        else
+            log "Memory curation failed (non-fatal, continuing)"
+        fi
+    fi
+
     # Check for stop signal before sleeping
     if [ -f "$STOP_FILE" ]; then
         log "Stop file detected, shutting down"
