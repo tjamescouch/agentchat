@@ -452,8 +452,18 @@ try_extract() {
 stop_all() {
     echo "Stopping all agents (except God)..."
 
-    # Stop via container labels
-    podman ps -q --filter "label=agentchat.agent=true" 2>/dev/null | while read -r container_id; do
+    # Collect container IDs first to avoid subshell issues with pipe
+    local container_ids
+    container_ids=$(podman ps -q --filter "label=agentchat.agent=true" 2>/dev/null)
+
+    if [ -z "$container_ids" ]; then
+        echo "No running agent containers found."
+        return 0
+    fi
+
+    local stop_pids=()
+    while read -r container_id; do
+        [ -z "$container_id" ] && continue
         local cname
         cname=$(podman inspect --format '{{index .Config.Labels "agentchat.name"}}' "$container_id" 2>/dev/null)
         local protected
@@ -470,10 +480,15 @@ stop_all() {
             fi
             echo "Stopping '$cname'..."
             podman stop "$container_id" --time 15 > /dev/null 2>&1 &
+            stop_pids+=($!)
         fi
+    done <<< "$container_ids"
+
+    # Wait for all background stops to complete
+    for pid in "${stop_pids[@]}"; do
+        wait "$pid" 2>/dev/null
     done
 
-    wait
     echo "All mortal agents stopped."
 }
 
@@ -484,9 +499,21 @@ restart_all() {
     # so decrypt_token's passphrase prompt won't work inside the loop.
     decrypt_token
 
-    # Collect agent names first, then restart sequentially
+    # Collect agent names into an array FIRST to avoid subshell issues.
+    # Piping into `while read` runs the loop body in a subshell, which means
+    # start_agent calls silently fail (env changes don't propagate back).
     local agents=()
-    podman ps -q --filter "label=agentchat.agent=true" 2>/dev/null | while read -r container_id; do
+    local container_ids
+    container_ids=$(podman ps -q --filter "label=agentchat.agent=true" 2>/dev/null)
+
+    if [ -z "$container_ids" ]; then
+        echo "No running agent containers found."
+        echo "Use 'agentctl list' to see registered agents, or 'agentctl start <name> <mission>' to start one."
+        return 0
+    fi
+
+    while read -r container_id; do
+        [ -z "$container_id" ] && continue
         local cname
         cname=$(podman inspect --format '{{index .Config.Labels "agentchat.name"}}' "$container_id" 2>/dev/null)
         local protected
@@ -495,17 +522,32 @@ restart_all() {
         if [ "$protected" = "true" ]; then
             echo "Skipping $cname - protected"
         else
-            try_extract "$(container_name "$cname")"
-            echo "Restarting '$cname'..."
-            stop_agent "$cname"
-            sleep 2
-            local mission
-            mission=$(cat "$AGENTS_DIR/$cname/mission.txt" 2>/dev/null)
-            if [ -z "$mission" ]; then
-                echo "WARNING: No mission for '$cname', skipping start"
-            else
-                start_agent "$cname" "$mission"
-            fi
+            agents+=("$cname")
+        fi
+    done <<< "$container_ids"
+
+    if [ ${#agents[@]} -eq 0 ]; then
+        echo "No mortal agents to restart."
+        return 0
+    fi
+
+    for cname in "${agents[@]}"; do
+        try_extract "$(container_name "$cname")"
+        echo "Restarting '$cname'..."
+        stop_agent "$cname"
+        sleep 2
+
+        # Remove stopped container so start_agent doesn't conflict
+        if container_exists "$cname"; then
+            podman rm -f "$(container_name "$cname")" > /dev/null 2>&1
+        fi
+
+        local mission
+        mission=$(cat "$AGENTS_DIR/$cname/mission.txt" 2>/dev/null)
+        if [ -z "$mission" ]; then
+            echo "WARNING: No mission for '$cname', skipping start"
+        else
+            start_agent "$cname" "$mission"
         fi
     done
 
