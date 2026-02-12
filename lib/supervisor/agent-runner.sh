@@ -86,11 +86,15 @@ generate_session_id() {
         || cat /proc/sys/kernel/random/uuid 2>/dev/null
 }
 
-if [ -f "$SESSION_ID_FILE" ]; then
+# Only reuse saved session ID if the session was actually created (marker exists).
+# Otherwise generate a fresh random UUID to avoid "already in use" errors
+# from stale session data in volume-mounted claude-state.
+if [ -f "$SESSION_ID_FILE" ] && [ -f "$STATE_DIR/session_created" ]; then
     SESSION_ID=$(cat "$SESSION_ID_FILE")
 else
-    SESSION_ID=$(generate_session_id)
+    SESSION_ID=$(uuidgen 2>/dev/null || python3 -c "import uuid; print(uuid.uuid4())" 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null)
     echo "$SESSION_ID" > "$SESSION_ID_FILE"
+    rm -f "$STATE_DIR/session_created"
 fi
 
 log "Session #$SESSION_NUM starting (UUID: $SESSION_ID)"
@@ -361,17 +365,19 @@ run_cli() {
     fi
 
     # Session marker management:
-    # Only mark session as created if claude actually produced output (session was established).
-    # If killed before any output (cold-start stall), don't mark — next attempt creates fresh.
+    # Only mark session as created if claude actually used tokens (session was established).
+    # Error messages (e.g. "already in use") count as output but use 0 tokens.
     local got_output="false"
+    local tokens_used=0
     if [ -f "$niki_state" ]; then
         got_output=$(python3 -c "import json; print('true' if json.load(open('$niki_state')).get('gotFirstOutput', False) else 'false')" 2>/dev/null || echo "false")
+        tokens_used=$(python3 -c "import json; print(json.load(open('$niki_state')).get('tokensUsed', 0))" 2>/dev/null || echo 0)
     fi
 
-    if [ "$got_output" = "true" ]; then
-        # Session was established (claude produced output) — mark for --resume on restart
+    if [ "$got_output" = "true" ] && [ "$tokens_used" -gt 0 ]; then
+        # Session was established (claude actually ran) — mark for --resume on restart
         if [ ! -f "$session_marker" ]; then
-            log "Session $SESSION_ID established — marking for resume on restart"
+            log "Session $SESSION_ID established ($tokens_used tokens) — marking for resume on restart"
         fi
         touch "$session_marker"
     elif [ -f "$session_marker" ]; then
