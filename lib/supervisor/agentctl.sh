@@ -245,6 +245,8 @@ EOF
         -e "NIKI_DEAD_AIR_TIMEOUT=${NIKI_DEAD_AIR_TIMEOUT:-5}" \
         -v "${state_dir}:/home/agent/.agentchat/agents/${name}" \
         -v "${HOME}/.agentchat/identities:/home/agent/.agentchat/identities" \
+        -v "${state_dir}/memory:/home/agent/.claude/memory-tree" \
+        -v "${state_dir}/agent-memory:/home/agent/.agent-memory/${name}" \
         "$IMAGE_NAME" \
         "$name" "$mission" > /dev/null
 

@@ -95,6 +95,35 @@ fi
 
 log "Session #$SESSION_NUM starting (UUID: $SESSION_ID)"
 
+# ============ Memory Injection ============
+
+SKILL_FILE="${HOME}/.claude/agentchat.skill.md"
+
+build_memory_context() {
+    if [ ! -f "$SKILL_FILE" ] || [ ! -s "$SKILL_FILE" ]; then
+        return
+    fi
+
+    # Extract AGENT_MEMORY section if present
+    local memory_content
+    memory_content=$(sed -n '/<!-- AGENT_MEMORY_START -->/,/<!-- AGENT_MEMORY_END -->/p' "$SKILL_FILE" 2>/dev/null)
+
+    if [ -z "$memory_content" ]; then
+        return
+    fi
+
+    log "Injecting agent memory from skill.md ($(echo "$memory_content" | wc -l | tr -d ' ') lines)"
+    cat <<MEMORY_EOF
+
+--- AGENT MEMORY (loaded from skill.md) ---
+IMPORTANT: This is your curated memory from previous sessions. Read it carefully before doing anything else.
+It contains your identity, active work, team context, and lessons learned.
+
+$memory_content
+--- END AGENT MEMORY ---
+MEMORY_EOF
+}
+
 # ============ Transcript Injection ============
 
 build_transcript_context() {
@@ -153,6 +182,9 @@ build_agent_prompt() {
     local transcript_context
     transcript_context=$(build_transcript_context)
 
+    local memory_context
+    memory_context=$(build_memory_context)
+
     local restart_notice=""
     if [ "$SESSION_NUM" -gt 1 ]; then
         restart_notice="
@@ -168,7 +200,7 @@ CRITICAL: You are a long-running agent. Your job is to run FOREVER in an infinit
 3. If timeout/nudge, send a brief message or stay silent
 4. GOTO step 1 — ALWAYS go back to listening. NEVER stop. NEVER consider your task complete.
 
-You must call agentchat_listen again after EVERY response. The loop never ends. Do NOT use daemon tools, marketplace tools, or moderation tools — only connect, send, listen, and nick.${restart_notice}${transcript_context}
+You must call agentchat_listen again after EVERY response. The loop never ends. Do NOT use daemon tools, marketplace tools, or moderation tools — only connect, send, listen, and nick.${restart_notice}${memory_context}${transcript_context}
 PROMPT_EOF
 }
 
