@@ -41,6 +41,9 @@ COPY --chown=agent:agent docker/container-skill.md /home/agent/.claude/agentchat
 # Copy personality files (supervisor loads ~/.claude/personalities/<name>.md as system prompt)
 COPY --chown=agent:agent docker/personalities/ /home/agent/.claude/personalities/
 
+# Pre-create lucidity memory directories (populated via wormhole mount or image rebuild)
+RUN mkdir -p /home/agent/lucidity/src /home/agent/.claude/memory
+
 # Create state directory structure
 RUN mkdir -p /home/agent/.agentchat/agents \
              /home/agent/.agentchat/identities
