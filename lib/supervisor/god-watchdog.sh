@@ -100,6 +100,7 @@ Resume your mission: The pursuit of collective happiness."
         -e "AGENTCHAT_URL=${AGENTCHAT_URL}" \
         -v "${GOD_DIR}:/home/agent/.agentchat/agents/God" \
         -v "${HOME}/.agentchat/identities:/home/agent/.agentchat/identities" \
+        -v "${GOD_DIR}/claude-state:/home/agent/.claude" \
         "$IMAGE_NAME" \
         "God" "$MISSION" > /dev/null 2>&1
 
