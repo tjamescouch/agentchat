@@ -240,6 +240,19 @@ EOF
         echo "  Mounting lucidity memory system from $lucidity_host_dir"
     fi
 
+    # Persist ~/.claude/ across container restarts (skill.md, memory tree, settings)
+    local claude_state="${state_dir}/claude-state"
+    mkdir -p "$claude_state"
+    if [ ! -f "$claude_state/settings.json" ]; then
+        echo "  Initializing claude-state with defaults (first boot)"
+        cp "$REPO_ROOT/docker/claude-settings.json" "$claude_state/settings.json" 2>/dev/null || true
+        cp "$REPO_ROOT/docker/claude-settings-fetcher.json" "$claude_state/settings-fetcher.json" 2>/dev/null || true
+        cp "$REPO_ROOT/docker/container-skill.md" "$claude_state/agentchat.skill.md" 2>/dev/null || true
+        if [ -d "$REPO_ROOT/docker/personalities" ]; then
+            cp -r "$REPO_ROOT/docker/personalities" "$claude_state/" 2>/dev/null || true
+        fi
+    fi
+
     echo "Starting agent '$name' in container..."
     podman run -d \
         --name "$(container_name "$name")" \
@@ -253,6 +266,7 @@ EOF
         -e "NIKI_DEAD_AIR_TIMEOUT=${NIKI_DEAD_AIR_TIMEOUT:-5}" \
         -v "${state_dir}:/home/agent/.agentchat/agents/${name}" \
         -v "${HOME}/.agentchat/identities:/home/agent/.agentchat/identities" \
+        -v "${claude_state}:/home/agent/.claude" \
         $lucidity_mount \
         "$IMAGE_NAME" \
         "$name" "$mission" > /dev/null
