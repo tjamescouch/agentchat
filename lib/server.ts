@@ -124,6 +124,7 @@ export interface PendingChallenge {
 export interface ChannelState {
   name: string;
   inviteOnly: boolean;
+  verifiedOnly: boolean;
   invited: Set<string>;
   agents: Set<ExtendedWebSocket>;
   messageBuffer: AnyMessage[];
@@ -329,6 +330,7 @@ export class AgentChatServer {
     this._createChannel('#agents', false);
     this._createChannel('#discovery', false);
     this._createChannel('#bounties', false);
+    this._createChannel('#ops', false, true);  // verified-only control plane
 
     // Proposal store for structured negotiations
     this.proposals = new ProposalStore();
@@ -457,11 +459,12 @@ export class AgentChatServer {
     };
   }
 
-  _createChannel(name: string, inviteOnly: boolean = false): ChannelState {
+  _createChannel(name: string, inviteOnly: boolean = false, verifiedOnly: boolean = false): ChannelState {
     if (!this.channels.has(name)) {
       this.channels.set(name, {
         name,
         inviteOnly,
+        verifiedOnly,
         invited: new Set(),
         agents: new Set(),
         messageBuffer: []
