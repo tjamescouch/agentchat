@@ -358,8 +358,8 @@ export function validateClientMessage(raw: string | RawClientMessage): Validatio
       if (typeof msg.content !== 'string') {
         return { valid: false, error: 'Missing or invalid content' };
       }
-      if (msg.content.length > 4096) {
-        return { valid: false, error: 'Content too long (max 4096 chars)' };
+      if (msg.content.length > 2 * 1024 * 1024) {
+        return { valid: false, error: 'Content too long (max 2MB)' };
       }
       // Validate signature format if present
       if (msg.sig !== undefined && typeof msg.sig !== 'string') {
