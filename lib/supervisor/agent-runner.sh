@@ -158,23 +158,11 @@ TRANSCRIPT_EOF
 
 build_system_prompt() {
     local base_file="$PERSONALITY_DIR/_base.md"
-    local char_file="$PERSONALITY_DIR/${AGENT_NAME}.md"
     local prompt=""
 
     if [ -f "$base_file" ]; then
         prompt=$(cat "$base_file")
         log "Loaded base personality"
-    fi
-
-    if [ -f "$char_file" ]; then
-        if [ -n "$prompt" ]; then
-            prompt="${prompt}
----
-$(cat "$char_file")"
-        else
-            prompt=$(cat "$char_file")
-        fi
-        log "Loaded character personality: $AGENT_NAME"
     fi
 
     # Public server IP disclaimer — only included when AGENTCHAT_PUBLIC is set
