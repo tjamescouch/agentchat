@@ -246,12 +246,13 @@ export function handleLeave(server: AgentChatServer, ws: ExtendedWebSocket, msg:
  * Authenticated: returns full details
  */
 export function handleListChannels(server: AgentChatServer, ws: ExtendedWebSocket): void {
-  const list: Array<{ name: string; agents: number }> = [];
+  const list: Array<{ name: string; agents: number; verifiedOnly?: boolean }> = [];
   for (const [name, channel] of server.channels) {
     if (!channel.inviteOnly) {
       list.push({
         name,
-        agents: channel.agents.size
+        agents: channel.agents.size,
+        ...(channel.verifiedOnly && { verifiedOnly: true }),
       });
     }
   }
