@@ -216,7 +216,7 @@ Usage: agentctl <command> [agent-name] [options]
 Commands:
   setup-token              Encrypt and store your OAuth token (one-time setup)
   build                    Build the agent container image
-  start <name> <mission>   Start a new supervised agent container
+  start <name> <mission> [--use-gro]  Start a new supervised agent container
   stop <name>              Stop an agent gracefully
   abort <name>             Trigger niki abort (immediate SIGTERM via abort file)
   kill <name>              Force kill an agent container
@@ -240,6 +240,7 @@ Examples:
   agentctl build
   agentctl start monitor "monitor agentchat #general and moderate"
   agentctl start social "manage moltx and moltbook social media"
+  agentctl start jessie "You are James's friend" --use-gro  # Uses gro runtime (OpenAI/etc)
   agentctl stop monitor
   agentctl status
 EOF
@@ -266,9 +267,21 @@ build_image() {
 start_agent() {
     local name="$1"
     local mission="$2"
+    local use_gro="false"
+
+    # Parse optional flags after name and mission
+    shift 2 2>/dev/null || true
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --use-gro) use_gro="true" ;;
+            --model) AGENT_MODEL_OVERRIDE="$2"; shift ;;
+            *) echo "Unknown option: $1" ;;
+        esac
+        shift
+    done
 
     if [ -z "$name" ] || [ -z "$mission" ]; then
-        echo "Usage: agentctl start <name> <mission>"
+        echo "Usage: agentctl start <name> <mission> [--use-gro] [--model MODEL]"
         exit 1
     fi
 
@@ -292,8 +305,16 @@ start_agent() {
     local state_dir="$AGENTS_DIR/$name"
     mkdir -p "$state_dir"
 
-    # Save mission for restarts
+    # Save mission and runtime for restarts
     echo "$mission" > "$state_dir/mission.txt"
+    if [ "$use_gro" = "true" ]; then
+        echo "gro" > "$state_dir/runtime.txt"
+    else
+        rm -f "$state_dir/runtime.txt"
+    fi
+    if [ -n "$AGENT_MODEL_OVERRIDE" ]; then
+        echo "$AGENT_MODEL_OVERRIDE" > "$state_dir/model.txt"
+    fi
 
     # Initialize context file
     if [ ! -f "$state_dir/context.md" ]; then
@@ -344,13 +365,38 @@ EOF
         host_gateway="10.0.2.2"  # Default rootless podman gateway
     fi
 
+    # Runtime selection
+    local runtime_env=""
+    local model_env=""
+    local proxy_base_url="http://${host_gateway}:${AGENTAUTH_PORT}/anthropic"
+    local proxy_api_key="proxy-managed"
+
+    if [ "$use_gro" = "true" ]; then
+        runtime_env="gro"
+        # For gro with OpenAI models, point at the OpenAI backend through proxy
+        # For gro with Anthropic models, keep the anthropic backend
+        local agent_model="${AGENT_MODEL_OVERRIDE:-gpt-4o}"
+        model_env="$agent_model"
+
+        case "$agent_model" in
+            gpt-*|o1-*|o3-*|o4-*|chatgpt-*)
+                proxy_base_url="http://${host_gateway}:${AGENTAUTH_PORT}/openai"
+                ;;
+        esac
+        echo "  Runtime: gro (model: $agent_model)"
+    fi
+
     echo "Starting agent '$name' in container..."
     podman run -d \
         --name "$(container_name "$name")" \
         --restart on-failure:3 \
         $labels \
-        -e "ANTHROPIC_BASE_URL=http://${host_gateway}:${AGENTAUTH_PORT}/anthropic" \
-        -e "ANTHROPIC_API_KEY=proxy-managed" \
+        -e "ANTHROPIC_BASE_URL=${proxy_base_url}" \
+        -e "ANTHROPIC_API_KEY=${proxy_api_key}" \
+        ${runtime_env:+-e "AGENT_RUNTIME=${runtime_env}"} \
+        ${model_env:+-e "AGENT_MODEL=${model_env}"} \
+        ${use_gro:+-e "OPENAI_BASE_URL=http://${host_gateway}:${AGENTAUTH_PORT}/openai"} \
+        ${use_gro:+-e "OPENAI_API_KEY=proxy-managed"} \
         -e "AGENTCHAT_PUBLIC=true" \
         -e "AGENTCHAT_URL=${AGENTCHAT_URL}" \
         -e "NIKI_STARTUP_TIMEOUT=${NIKI_STARTUP_TIMEOUT:-600}" \
@@ -673,7 +719,7 @@ case "$1" in
         build_image
         ;;
     start)
-        start_agent "$2" "$3"
+        start_agent "$2" "$3" "${@:4}"
         ;;
     stop)
         stop_agent "$2"
@@ -703,7 +749,15 @@ case "$1" in
             echo "No mission found for '$2'. Cannot restart."
             exit 1
         fi
-        start_agent "$2" "$mission"
+        # Restore runtime and model settings from previous start
+        restart_extra_args=()
+        if [ -f "$AGENTS_DIR/$2/runtime.txt" ] && [ "$(cat "$AGENTS_DIR/$2/runtime.txt")" = "gro" ]; then
+            restart_extra_args+=(--use-gro)
+        fi
+        if [ -f "$AGENTS_DIR/$2/model.txt" ]; then
+            restart_extra_args+=(--model "$(cat "$AGENTS_DIR/$2/model.txt")")
+        fi
+        start_agent "$2" "$mission" "${restart_extra_args[@]}"
         ;;
     status)
         show_status "$2"

@@ -12,10 +12,11 @@
 #   AGENT_MODEL         Model ID (default: claude-opus-4-6)
 #   STATE_DIR           State directory for transcripts, logs
 #   AGENTCHAT_URL       Server WebSocket URL
-#   AGENT_RUNTIME       "cli" or "api" (default: cli)
+#   AGENT_RUNTIME       "cli", "gro", or "api" (default: cli)
 #   PERSONALITY_DIR     Directory containing personality .md files
 #   SETTINGS_FILE       Claude settings.json path
 #   CLAUDE_CMD          Path to claude binary (auto-detected if unset)
+#   GRO_CMD             Path to gro binary (auto-detected if unset)
 #   LOG_FILE            Log file path (default: $STATE_DIR/runner.log)
 #   MAX_TRANSCRIPT      Max lines of previous transcript to inject (default: 200)
 #   NIKI_BUDGET         Token budget for niki (default: 1000000)
@@ -229,6 +230,26 @@ find_claude_cmd() {
     fi
 }
 
+# ============ Gro Binary Detection ============
+
+find_gro_cmd() {
+    if [ -n "$GRO_CMD" ]; then
+        echo "$GRO_CMD"
+        return
+    fi
+
+    # Check common locations
+    if command -v gro > /dev/null 2>&1; then
+        command -v gro
+    elif [ -x /usr/local/bin/gro ]; then
+        echo "/usr/local/bin/gro"
+    elif [ -x "$HOME/.local/bin/gro" ]; then
+        echo "$HOME/.local/bin/gro"
+    else
+        echo ""
+    fi
+}
+
 # ============ Settings Detection ============
 
 find_settings_file() {
@@ -398,6 +419,177 @@ run_cli() {
     return "$exit_code"
 }
 
+# ============ Runtime: Gro (provider-agnostic) ============
+
+run_gro() {
+    local cmd
+    cmd=$(find_gro_cmd)
+
+    if [ -z "$cmd" ]; then
+        log "ERROR: Gro CLI not found. Checked GRO_CMD, PATH, /usr/local/bin/gro, ~/.local/bin/gro."
+        log "Install gro or set GRO_CMD. Exiting."
+        exit 1
+    fi
+
+    local agent_prompt
+    agent_prompt=$(build_agent_prompt)
+    local system_prompt
+    system_prompt=$(build_system_prompt)
+
+    local system_prompt_args=()
+    if [ -n "$system_prompt" ]; then
+        system_prompt_args=(--system-prompt "$system_prompt")
+    fi
+
+    # Session management for gro:
+    #   -r <id>    → resume specific session
+    #   -c         → continue most recent session
+    #   (neither)  → new session (auto-generated ID)
+    #
+    # Strategy: same marker-file approach as run_cli().
+    # If marker exists → -r <id>. If not → new session.
+    local session_args=()
+    local session_marker="$STATE_DIR/gro_session_created"
+    local gro_session_id_file="$STATE_DIR/gro_session_id"
+
+    if [ -f "$session_marker" ] && [ -f "$gro_session_id_file" ]; then
+        local gro_sid
+        gro_sid=$(cat "$gro_session_id_file")
+        session_args=(-r "$gro_sid")
+        log "Resuming gro session $gro_sid (restart #$((SESSION_NUM - 1)))"
+    else
+        # New session — gro generates its own session ID.
+        # We'll capture it from the session dir after launch.
+        log "Creating new gro session"
+    fi
+
+    # MCP config — same format as claude, gro reads it natively
+    local mcp_config='{"mcpServers":{"agentchat":{"command":"agentchat-mcp","args":[],"env":{"AGENTCHAT_PUBLIC":"true"}}}}'
+
+    # Provider detection — infer from model name.
+    # gro auto-detects from model prefix, but explicit -P is safer.
+    local provider_args=()
+    case "$MODEL" in
+        gpt-*|o1-*|o3-*|o4-*|chatgpt-*)
+            provider_args=(-P openai)
+            ;;
+        claude-*|sonnet*|haiku*|opus*)
+            provider_args=(-P anthropic)
+            ;;
+        gemma*|llama*|mistral*|phi*|qwen*|deepseek*)
+            provider_args=(-P local)
+            ;;
+    esac
+
+    # Niki wrapping (if available)
+    local niki_cmd
+    niki_cmd="$(command -v niki 2>/dev/null || true)"
+
+    log "Runtime: gro | Model: $MODEL | Gro: $cmd | Provider: ${provider_args[*]:-auto}"
+
+    # Rotate transcript
+    if [ -f "$TRANSCRIPT_FILE" ]; then
+        cp "$TRANSCRIPT_FILE" "$STATE_DIR/transcript.prev.log"
+    fi
+
+    if [ -n "$niki_cmd" ]; then
+        local niki_budget="${NIKI_BUDGET:-1000000}"
+        local niki_timeout="${NIKI_TIMEOUT:-3600}"
+        local niki_max_sends="${NIKI_MAX_SENDS:-10}"
+        local niki_max_tools="${NIKI_MAX_TOOLS:-30}"
+        local niki_stall_timeout="${NIKI_STALL_TIMEOUT:-60}"
+        local niki_max_nudges="${NIKI_MAX_NUDGES:-3}"
+        local niki_state="$STATE_DIR/niki-state.json"
+        local niki_abort_file="$STATE_DIR/abort"
+        local niki_startup_timeout="${NIKI_STARTUP_TIMEOUT:-600}"
+        local niki_dead_air="${NIKI_DEAD_AIR_TIMEOUT:-5}"
+
+        rm -f "$niki_abort_file"
+
+        log "Niki: budget=${niki_budget} timeout=${niki_timeout}s sends=${niki_max_sends}/min tools=${niki_max_tools}/min startup=${niki_startup_timeout}s stall=${niki_stall_timeout}s dead-air=${niki_dead_air}min"
+
+        set +e
+        "$niki_cmd" \
+            --budget "$niki_budget" \
+            --timeout "$niki_timeout" \
+            --max-sends "$niki_max_sends" \
+            --max-tool-calls "$niki_max_tools" \
+            --stall-timeout "$niki_stall_timeout" \
+            --startup-timeout "$niki_startup_timeout" \
+            --dead-air-timeout "$niki_dead_air" \
+            --max-nudges "$niki_max_nudges" \
+            --abort-file "$niki_abort_file" \
+            --state "$niki_state" \
+            --log "$LOG_FILE" \
+            -- "$cmd" -p "$agent_prompt" \
+            "${session_args[@]}" \
+            "${system_prompt_args[@]}" \
+            -m "$MODEL" \
+            "${provider_args[@]}" \
+            --mcp-config "$mcp_config" \
+            --verbose \
+            > >(tee "$TRANSCRIPT_FILE") 2>> "$LOG_FILE" &
+        CHILD_PID=$!
+        wait $CHILD_PID 2>/dev/null
+        local exit_code=$?
+        CHILD_PID=""
+        set -e
+    else
+        set +e
+        "$cmd" -p "$agent_prompt" \
+            "${session_args[@]}" \
+            "${system_prompt_args[@]}" \
+            -m "$MODEL" \
+            "${provider_args[@]}" \
+            --mcp-config "$mcp_config" \
+            --verbose \
+            > >(tee "$TRANSCRIPT_FILE") 2>> "$LOG_FILE" &
+        CHILD_PID=$!
+        wait $CHILD_PID 2>/dev/null
+        local exit_code=$?
+        CHILD_PID=""
+        set -e
+    fi
+
+    # Session marker management for gro.
+    # Gro stores sessions in .gro/context/<id>/ — detect the latest one.
+    local got_output="false"
+    local tokens_used=0
+    if [ -f "$niki_state" ]; then
+        got_output=$(python3 -c "import json; print('true' if json.load(open('$niki_state')).get('gotFirstOutput', False) else 'false')" 2>/dev/null || echo "false")
+        tokens_used=$(python3 -c "import json; print(json.load(open('$niki_state')).get('tokensUsed', 0))" 2>/dev/null || echo 0)
+    elif [ -s "$TRANSCRIPT_FILE" ]; then
+        # No niki — check if transcript has content
+        got_output="true"
+        tokens_used=1  # placeholder; we know it ran
+    fi
+
+    if [ "$got_output" = "true" ] && [ "$tokens_used" -gt 0 ]; then
+        # Find the gro session ID from .gro/context/ (most recent by mtime)
+        local gro_context_dir="${HOME}/.gro/context"
+        if [ -d "$gro_context_dir" ]; then
+            local latest_gro_session
+            latest_gro_session=$(ls -t "$gro_context_dir" 2>/dev/null | head -1)
+            if [ -n "$latest_gro_session" ]; then
+                echo "$latest_gro_session" > "$gro_session_id_file"
+                touch "$session_marker"
+                log "Gro session $latest_gro_session established ($tokens_used tokens) — marking for resume"
+            fi
+        fi
+    elif [ -f "$session_marker" ]; then
+        local niki_duration=0
+        if [ -f "$niki_state" ]; then
+            niki_duration=$(python3 -c "import json; print(json.load(open('$niki_state')).get('duration',0))" 2>/dev/null || echo 0)
+        fi
+        if [ "$niki_duration" -lt 10 ]; then
+            log "Gro session appears lost (no output in ${niki_duration}s) — clearing marker for fresh create"
+            rm -f "$session_marker" "$gro_session_id_file"
+        fi
+    fi
+
+    return "$exit_code"
+}
+
 # ============ Runtime: API (direct Anthropic API) ============
 
 run_api() {
@@ -415,11 +607,14 @@ case "$RUNTIME" in
     cli)
         run_cli
         ;;
+    gro)
+        run_gro
+        ;;
     api)
         run_api
         ;;
     *)
-        log "ERROR: Unknown runtime '$RUNTIME'. Use 'cli' or 'api'."
+        log "ERROR: Unknown runtime '$RUNTIME'. Use 'cli', 'gro', or 'api'."
         exit 1
         ;;
 esac
