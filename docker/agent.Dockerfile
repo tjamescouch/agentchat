@@ -12,6 +12,15 @@ RUN apt-get update && apt-get install -y \
 # Pin versions to bust Podman layer cache when deps update
 RUN npm install -g @anthropic-ai/claude-code @tjamescouch/agentchat-mcp@0.10.2 @tjamescouch/agentchat@0.25.0 @tjamescouch/niki@0.3.0
 
+# Install gro (provider-agnostic LLM runtime) from GitHub
+# Enables --use-gro flag for OpenAI/local model agents
+RUN git clone --depth 1 https://github.com/tjamescouch/gro.git /opt/gro \
+    && cd /opt/gro \
+    && npm install \
+    && npm run build \
+    && printf '#!/bin/sh\nexec node /opt/gro/dist/main.js "$@"\n' > /usr/local/bin/gro \
+    && chmod +x /usr/local/bin/gro
+
 # Create non-root agent user
 RUN useradd -m -s /bin/bash agent
 
