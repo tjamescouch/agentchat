@@ -55,10 +55,10 @@
     "prepublishOnly": "npm run rebuild",
     "start": "node dist/bin/agentchat.js serve",
     "dev": "npx tsc --watch",
-    "test": "npm run build && node --test 'test/*.test.js'",
+    "test": "npm run build && node --test test/*.test.js",
     "test:integration": "npm run build && node --test test/*.integration.test.js",
-    "test:all": "npm run build && node --test 'test/**/*.test.js'",
-    "test:watch": "node --test --watch 'test/*.test.js'",
+    "test:all": "npm run build && node --test test/**/*.test.js",
+    "test:watch": "node --test --watch test/*.test.js",
     "typecheck": "npx tsc --noEmit",
     "lint": "knip",
     "preflight": "npm run typecheck && npm run lint && npm test"
