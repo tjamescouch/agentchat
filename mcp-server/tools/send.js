@@ -27,6 +27,14 @@ export function registerSendTool(server) {
           };
         }
 
+        // Check actual WebSocket state to catch the CLOSING race window
+        if (client.ws && client.ws.readyState !== 1 /* OPEN */) {
+          return {
+            content: [{ type: 'text', text: 'Connection is closing or closed. Waiting for reconnect — retry in a few seconds.' }],
+            isError: true,
+          };
+        }
+
         // Join channel if needed
         if (target.startsWith('#') && !client.channels.has(target)) {
           await client.join(target);
