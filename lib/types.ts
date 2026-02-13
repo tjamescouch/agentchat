@@ -485,6 +485,7 @@ export interface ServerMsgMessage extends BaseMessage {
   sig?: string;
   in_reply_to?: string; // msg_id of the message being replied to (threading)
   msg_id?: string;      // unique message ID for threading references
+  verified?: boolean;   // whether the sender completed identity verification
 }
 
 export interface ServerFileChunkMessage extends BaseMessage {
