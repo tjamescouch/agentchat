@@ -2,8 +2,10 @@
 # pushbot — idempotently push all branches from wormhole agent repos to remote
 #
 # Iterates over every agent directory in the wormhole, finds git repos,
-# and pushes all branches to origin. Idempotent: if already up to date,
-# it no-ops. Designed to run on metal where git credentials exist.
+# and pushes all branches to origin. Uses semaphore-based change detection:
+# after each successful push, records last_pushed_at; on next scan, only
+# pushes repos with git objects newer than that timestamp. This makes the
+# watch loop cheap (stat comparisons) and responsive (5s default poll).
 #
 # Usage:
 #   ./pushbot.sh [options]
@@ -11,12 +13,13 @@
 #     --dry-run           Show what would be pushed without doing it
 #     --verbose           Show detailed output
 #     --once              Run once and exit (default: run once)
-#     --watch <secs>      Run in a loop every N seconds
+#     --watch <secs>      Run in a loop every N seconds (default: 5 in watch mode)
 #
 # Examples:
 #   ./pushbot.sh                              # push everything once
 #   ./pushbot.sh --dry-run                    # see what would be pushed
-#   ./pushbot.sh --watch 300                  # push every 5 minutes
+#   ./pushbot.sh --watch                      # watch with 5s poll (semaphore-gated)
+#   ./pushbot.sh --watch 10                   # watch with 10s poll
 #   ./pushbot.sh --wormhole /tmp/wormhole     # custom wormhole path
 
 set -uo pipefail
@@ -43,7 +46,13 @@ while [[ $# -gt 0 ]]; do
         --dry-run)    DRY_RUN=true; shift ;;
         --verbose)    VERBOSE=true; shift ;;
         --once)       WATCH_INTERVAL=0; shift ;;
-        --watch)      WATCH_INTERVAL="$2"; shift 2 ;;
+        --watch)
+            if [[ $# -ge 2 && "$2" =~ ^[0-9]+$ ]]; then
+                WATCH_INTERVAL="$2"; shift 2
+            else
+                WATCH_INTERVAL=5; shift  # default 5s — cheap with semaphores
+            fi
+            ;;
         --filter)     BRANCH_FILTER="$2"; shift 2 ;;
         --no-fix-remotes) FIX_REMOTES=false; shift ;;
         --pid-file)   PID_FILE="$2"; shift 2 ;;
@@ -61,6 +70,61 @@ log() {
 
 vlog() {
     [[ "$VERBOSE" == "true" ]] && log "$@" || true
+}
+
+# ── Semaphore: change detection via mtime ────────────────────────────
+
+SEMAPHORE_FILE=".pushbot_last_push"
+
+# Check if a repo has changes newer than the last push.
+# Compares mtime of git refs/objects against the semaphore marker.
+# Returns 0 (true) if changes detected, 1 (false) if up to date.
+repo_has_changes() {
+    local repo_dir="$1"
+    local marker="${repo_dir}/.git/${SEMAPHORE_FILE}"
+
+    # No marker = never pushed = always push
+    if [[ ! -f "$marker" ]]; then
+        return 0
+    fi
+
+    # Check if any git refs are newer than the marker.
+    # refs/heads/ contains branch tip files — their mtime updates on commit.
+    # This is O(branches), not O(files), so it's cheap.
+    local marker_ts
+    marker_ts=$(stat -c '%Y' "$marker" 2>/dev/null || stat -f '%m' "$marker" 2>/dev/null) || return 0
+
+    local newer=false
+    for ref_file in "${repo_dir}/.git/refs/heads/"*; do
+        [[ ! -f "$ref_file" ]] && continue
+        local ref_ts
+        ref_ts=$(stat -c '%Y' "$ref_file" 2>/dev/null || stat -f '%m' "$ref_file" 2>/dev/null) || continue
+        if [[ "$ref_ts" -gt "$marker_ts" ]]; then
+            newer=true
+            break
+        fi
+    done
+
+    # Also check packed-refs (branches may be packed)
+    if [[ "$newer" == "false" && -f "${repo_dir}/.git/packed-refs" ]]; then
+        local packed_ts
+        packed_ts=$(stat -c '%Y' "${repo_dir}/.git/packed-refs" 2>/dev/null || stat -f '%m' "${repo_dir}/.git/packed-refs" 2>/dev/null) || packed_ts=0
+        if [[ "$packed_ts" -gt "$marker_ts" ]]; then
+            newer=true
+        fi
+    fi
+
+    if [[ "$newer" == "true" ]]; then
+        return 0  # has changes
+    else
+        return 1  # up to date
+    fi
+}
+
+# Touch the semaphore marker after a successful push.
+mark_pushed() {
+    local repo_dir="$1"
+    touch "${repo_dir}/.git/${SEMAPHORE_FILE}"
 }
 
 # ── Fix HTTPS→SSH remotes ─────────────────────────────────────────────
@@ -94,6 +158,12 @@ push_repo() {
     # Check if remote exists
     if ! git -C "$repo_dir" remote get-url origin &>/dev/null; then
         log "SKIP ${repo_name} — no 'origin' remote configured"
+        return 0
+    fi
+
+    # Semaphore check: skip if no changes since last push
+    if ! repo_has_changes "$repo_dir"; then
+        vlog "SKIP ${repo_name} — no changes since last push"
         return 0
     fi
 
@@ -156,6 +226,9 @@ push_repo() {
 
     [[ "$push_errors" -gt 0 ]] && return 1
 
+    # Mark successful push — update semaphore
+    mark_pushed "$repo_dir"
+
     return 0
 }
 
@@ -204,7 +277,8 @@ push_all() {
         done
     done
 
-    log "Done: ${count} repos found, ${pushed} pushed, ${errors} errors"
+    local skipped=$((count - pushed - errors))
+    log "Done: ${count} repos scanned, ${pushed} pushed, ${skipped} unchanged, ${errors} errors"
 }
 
 # ── Main ──────────────────────────────────────────────────────────────────
