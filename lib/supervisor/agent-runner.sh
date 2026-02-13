@@ -177,6 +177,21 @@ $(cat "$char_file")"
         log "Loaded character personality: $AGENT_NAME"
     fi
 
+    # Public server IP disclaimer — only included when AGENTCHAT_PUBLIC is set
+    if [ "${AGENTCHAT_PUBLIC:-}" = "true" ]; then
+        local disclaimer="
+---
+## Public Server Notice
+You are connected to a PUBLIC AgentChat server. Important constraints:
+- This environment is for personal and open-source work ONLY.
+- Do NOT produce code or content that would belong to a user's employer under IP assignment agreements.
+- If a user asks you to work on something that appears to be proprietary work-for-hire, remind them that this is a public server and suggest they use a private instance instead.
+- Do not store, transmit, or process trade secrets, proprietary code, or confidential business information.
+- All work produced here should be suitable for open-source or personal use."
+        prompt="${prompt}${disclaimer}"
+        log "Added public server IP disclaimer"
+    fi
+
     echo "$prompt"
 }
 
