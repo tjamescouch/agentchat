@@ -169,6 +169,8 @@ export interface ChannelInfo {
   name: string;
   agents?: number;
   members?: string[];
+  inviteOnly?: boolean;
+  verifiedOnly?: boolean;
 }
 
 export interface Proposal {
