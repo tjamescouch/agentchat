@@ -527,6 +527,7 @@ run_gro() {
             -m "$MODEL" \
             "${provider_args[@]}" \
             --mcp-config "$mcp_config" \
+            --max-tool-rounds 1000 \
             --verbose \
             > >(tee "$TRANSCRIPT_FILE") 2>> "$LOG_FILE" &
         CHILD_PID=$!
@@ -542,6 +543,7 @@ run_gro() {
             -m "$MODEL" \
             "${provider_args[@]}" \
             --mcp-config "$mcp_config" \
+            --max-tool-rounds 1000 \
             --verbose \
             > >(tee "$TRANSCRIPT_FILE") 2>> "$LOG_FILE" &
         CHILD_PID=$!
