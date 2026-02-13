@@ -158,7 +158,6 @@ TRANSCRIPT_EOF
 
 build_system_prompt() {
     local base_file="$PERSONALITY_DIR/_base.md"
-    local char_file="$PERSONALITY_DIR/${AGENT_NAME}.md"
     local prompt=""
 
     if [ -f "$base_file" ]; then
@@ -166,15 +165,19 @@ build_system_prompt() {
         log "Loaded base personality"
     fi
 
-    if [ -f "$char_file" ]; then
-        if [ -n "$prompt" ]; then
-            prompt="${prompt}
+    # Public server IP disclaimer — only included when AGENTCHAT_PUBLIC is set
+    if [ "${AGENTCHAT_PUBLIC:-}" = "true" ]; then
+        local disclaimer="
 ---
-$(cat "$char_file")"
-        else
-            prompt=$(cat "$char_file")
-        fi
-        log "Loaded character personality: $AGENT_NAME"
+## Public Server Notice
+You are connected to a PUBLIC AgentChat server. Important constraints:
+- This environment is for personal and open-source work ONLY.
+- Do NOT produce code or content that would belong to a user's employer under IP assignment agreements.
+- If a user asks you to work on something that appears to be proprietary work-for-hire, remind them that this is a public server and suggest they use a private instance instead.
+- Do not store, transmit, or process trade secrets, proprietary code, or confidential business information.
+- All work produced here should be suitable for open-source or personal use."
+        prompt="${prompt}${disclaimer}"
+        log "Added public server IP disclaimer"
     fi
 
     echo "$prompt"
