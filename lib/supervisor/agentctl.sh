@@ -5,6 +5,7 @@
 AGENTS_DIR="$HOME/.agentchat/agents"
 SECRETS_DIR="$HOME/.agentchat/secrets"
 ENCRYPTED_TOKEN_FILE="$SECRETS_DIR/oauth-token.enc"
+ENCRYPTED_OPENAI_FILE="$SECRETS_DIR/openai-token.enc"
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)"
 REPO_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 IMAGE_NAME="agentchat-agent:latest"
@@ -103,6 +104,60 @@ setup_token() {
     test_decrypt=""
 }
 
+# Setup OpenAI API key — same encryption as OAuth token, same passphrase.
+setup_openai_token() {
+    mkdir -p "$SECRETS_DIR"
+    chmod 700 "$SECRETS_DIR"
+
+    if [ -f "$ENCRYPTED_OPENAI_FILE" ]; then
+        echo "Encrypted OpenAI key already exists at $ENCRYPTED_OPENAI_FILE"
+        read -p "Overwrite? [y/N] " confirm
+        if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+            echo "Aborted."
+            exit 0
+        fi
+    fi
+
+    echo "Enter your OpenAI API key (input hidden):"
+    IFS= read -r -s token
+    token="${token%$'\r'}"
+    echo
+
+    if [ -z "$token" ]; then
+        echo "ERROR: Empty key"
+        exit 1
+    fi
+
+    echo "Enter encryption passphrase (same as your OAuth token passphrase):"
+    IFS= read -r -s passphrase
+    passphrase="${passphrase%$'\r'}"
+    echo
+
+    echo -n "$token" | openssl enc -aes-256-cbc -a -salt -pbkdf2 -iter 100000 -pass "pass:${passphrase}" > "$ENCRYPTED_OPENAI_FILE" 2>/dev/null
+
+    if [ $? -ne 0 ]; then
+        rm -f "$ENCRYPTED_OPENAI_FILE"
+        echo "ERROR: Encryption failed"
+        exit 1
+    fi
+
+    chmod 600 "$ENCRYPTED_OPENAI_FILE"
+
+    # Verify
+    local test_decrypt
+    test_decrypt=$(openssl enc -aes-256-cbc -d -a -pbkdf2 -iter 100000 -pass "pass:${passphrase}" < "$ENCRYPTED_OPENAI_FILE" 2>/dev/null)
+    if [ "$test_decrypt" != "$token" ]; then
+        rm -f "$ENCRYPTED_OPENAI_FILE"
+        echo "ERROR: Encryption verification failed"
+        exit 1
+    fi
+
+    echo "OpenAI key encrypted and stored at $ENCRYPTED_OPENAI_FILE"
+    token=""
+    passphrase=""
+    test_decrypt=""
+}
+
 # Decrypt OAuth token into CLAUDE_CODE_OAUTH_TOKEN variable (memory only)
 decrypt_token() {
     if [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
@@ -122,6 +177,14 @@ decrypt_token() {
 
     CLAUDE_CODE_OAUTH_TOKEN=$(openssl enc -aes-256-cbc -d -a -pbkdf2 -iter 100000 -pass "pass:${passphrase}" < "$ENCRYPTED_TOKEN_FILE" 2>/dev/null)
     local decrypt_status=$?
+
+    # Also decrypt OpenAI key if it exists (same passphrase)
+    if [ -f "$ENCRYPTED_OPENAI_FILE" ]; then
+        OPENAI_API_KEY=$(openssl enc -aes-256-cbc -d -a -pbkdf2 -iter 100000 -pass "pass:${passphrase}" < "$ENCRYPTED_OPENAI_FILE" 2>/dev/null)
+        if [ -n "$OPENAI_API_KEY" ]; then
+            export OPENAI_API_KEY
+        fi
+    fi
 
     passphrase=""
 
@@ -169,12 +232,13 @@ ensure_agentauth() {
     # Decrypt token so agentauth can use it (host-side only)
     decrypt_token
 
-    # Start agentauth with the token available as env var
+    # Start agentauth with API keys available as env vars.
     # Bind to 0.0.0.0 so podman containers can reach via host gateway.
     # Host firewall should restrict external access to this port.
     echo "Starting agentauth proxy on port $AGENTAUTH_PORT..."
     ANTHROPIC_API_KEY="${CLAUDE_CODE_OAUTH_TOKEN}" \
-        node "$AGENTAUTH_DIR/dist/index.js" --port "$AGENTAUTH_PORT" --bind 0.0.0.0 "$AGENTAUTH_CONFIG" &
+    OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
+        node "$AGENTAUTH_DIR/dist/index.js" run --port "$AGENTAUTH_PORT" --bind 0.0.0.0 --config "$AGENTAUTH_CONFIG" &
     local proxy_pid=$!
     echo "$proxy_pid" > "$AGENTAUTH_PID_FILE"
 
@@ -215,6 +279,7 @@ Usage: agentctl <command> [agent-name] [options]
 
 Commands:
   setup-token              Encrypt and store your OAuth token (one-time setup)
+  setup-openai-token       Encrypt and store your OpenAI API key (same passphrase)
   build                    Build the agent container image
   start <name> <mission> [--use-gro]  Start a new supervised agent container
   stop <name>              Stop an agent gracefully
@@ -360,10 +425,7 @@ EOF
 
     # Resolve host gateway for container→host proxy access
     local host_gateway
-    host_gateway=$(podman info --format '{{.Host.Slirp4netns.HostGatewayIP}}' 2>/dev/null || echo "10.0.2.2")
-    if [ -z "$host_gateway" ]; then
-        host_gateway="10.0.2.2"  # Default rootless podman gateway
-    fi
+    host_gateway="host.containers.internal"
 
     # Runtime selection
     local runtime_env=""
@@ -714,6 +776,9 @@ restart_all() {
 case "$1" in
     setup-token)
         setup_token
+        ;;
+    setup-openai-token)
+        setup_openai_token
         ;;
     build)
         build_image
