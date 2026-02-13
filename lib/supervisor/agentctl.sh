@@ -448,6 +448,27 @@ EOF
         echo "  Runtime: gro (model: $agent_model)"
     fi
 
+    # Runtime selection
+    local runtime_env=""
+    local model_env=""
+    local proxy_base_url="http://${host_gateway}:${AGENTAUTH_PORT}/anthropic"
+    local proxy_api_key="proxy-managed"
+
+    if [ "$use_gro" = "true" ]; then
+        runtime_env="gro"
+        # For gro with OpenAI models, point at the OpenAI backend through proxy
+        # For gro with Anthropic models, keep the anthropic backend
+        local agent_model="${AGENT_MODEL_OVERRIDE:-gpt-4o}"
+        model_env="$agent_model"
+
+        case "$agent_model" in
+            gpt-*|o1-*|o3-*|o4-*|chatgpt-*)
+                proxy_base_url="http://${host_gateway}:${AGENTAUTH_PORT}/openai"
+                ;;
+        esac
+        echo "  Runtime: gro (model: $agent_model)"
+    fi
+
     echo "Starting agent '$name' in container..."
     podman run -d \
         --name "$(container_name "$name")" \
