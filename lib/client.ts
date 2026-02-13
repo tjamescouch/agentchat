@@ -947,3 +947,4 @@ export async function listen(
 
 // Re-export security utilities
 export { checkDirectorySafety, enforceDirectorySafety } from './security.js';
+export { runEnvDoctor, printEnvDoctorReport, scanEnvSecrets, checkAdminPubkey } from './env-doctor.js';

@@ -4,7 +4,7 @@
  */
 
 import { z } from 'zod';
-import { AgentChatClient, checkDirectorySafety } from '@tjamescouch/agentchat';
+import { AgentChatClient, checkDirectorySafety, printEnvDoctorReport } from '@tjamescouch/agentchat';
 import fs from 'fs';
 import path from 'path';
 import {
@@ -350,6 +350,15 @@ export function registerConnectTool(server) {
           } catch {
             // Non-fatal: channel may not exist on older servers
           }
+        }
+
+        // Run environment health check on connect (warn-only, non-blocking)
+        try {
+          printEnvDoctorReport({
+            identityPath: actualIdentityPath || undefined,
+          });
+        } catch {
+          // envDoctor should never block connection
         }
 
         return {
