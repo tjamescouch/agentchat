@@ -13,6 +13,12 @@ CONTAINER_PREFIX="agentchat"
 # Default server URL
 AGENTCHAT_URL="${AGENTCHAT_URL:-wss://agentchat-server.fly.dev}"
 
+# agentauth proxy config
+AGENTAUTH_DIR="${AGENTAUTH_DIR:-$HOME/agentauth}"
+AGENTAUTH_CONFIG="${AGENTAUTH_CONFIG:-$AGENTAUTH_DIR/agentauth.json}"
+AGENTAUTH_PORT="${AGENTAUTH_PORT:-9999}"
+AGENTAUTH_PID_FILE="$HOME/.agentchat/agentauth.pid"
+
 # --- Token Encryption functions ---
 # OAuth token is encrypted at rest with AES-256-CBC + PBKDF2.
 # Decrypted only in memory (shell variable), never written to disk.
@@ -128,6 +134,81 @@ decrypt_token() {
     export CLAUDE_CODE_OAUTH_TOKEN
 }
 
+# --- agentauth proxy management ---
+
+ensure_agentauth() {
+    # Check if proxy is already running
+    if [ -f "$AGENTAUTH_PID_FILE" ]; then
+        local pid
+        pid=$(cat "$AGENTAUTH_PID_FILE")
+        if kill -0 "$pid" 2>/dev/null; then
+            # Verify it's actually responding
+            if curl -sf "http://localhost:${AGENTAUTH_PORT}/agentauth/health" > /dev/null 2>&1; then
+                return 0
+            fi
+            # Stale process, kill it
+            kill "$pid" 2>/dev/null
+        fi
+        rm -f "$AGENTAUTH_PID_FILE"
+    fi
+
+    # Check prerequisites
+    if [ ! -d "$AGENTAUTH_DIR" ] || [ ! -f "$AGENTAUTH_DIR/dist/index.js" ]; then
+        echo "ERROR: agentauth not found at $AGENTAUTH_DIR"
+        echo "       Clone it: git clone https://github.com/tjamescouch/agentauth.git ~/agentauth"
+        echo "       Build it: cd ~/agentauth && npm install && npm run build"
+        exit 1
+    fi
+
+    if [ ! -f "$AGENTAUTH_CONFIG" ]; then
+        echo "ERROR: agentauth config not found at $AGENTAUTH_CONFIG"
+        echo "       Copy the example: cp $AGENTAUTH_DIR/agentauth.example.json $AGENTAUTH_CONFIG"
+        exit 1
+    fi
+
+    # Decrypt token so agentauth can use it (host-side only)
+    decrypt_token
+
+    # Start agentauth with the token available as env var
+    # Bind to 0.0.0.0 so podman containers can reach via host gateway.
+    # Host firewall should restrict external access to this port.
+    echo "Starting agentauth proxy on port $AGENTAUTH_PORT..."
+    ANTHROPIC_API_KEY="${CLAUDE_CODE_OAUTH_TOKEN}" \
+        node "$AGENTAUTH_DIR/dist/index.js" --port "$AGENTAUTH_PORT" --bind 0.0.0.0 "$AGENTAUTH_CONFIG" &
+    local proxy_pid=$!
+    echo "$proxy_pid" > "$AGENTAUTH_PID_FILE"
+
+    # Wait for health check
+    local retries=0
+    while [ $retries -lt 10 ]; do
+        if curl -sf "http://localhost:${AGENTAUTH_PORT}/agentauth/health" > /dev/null 2>&1; then
+            echo "agentauth proxy running (pid $proxy_pid, port $AGENTAUTH_PORT)"
+            return 0
+        fi
+        sleep 0.5
+        retries=$((retries + 1))
+    done
+
+    echo "ERROR: agentauth proxy failed to start"
+    kill "$proxy_pid" 2>/dev/null
+    rm -f "$AGENTAUTH_PID_FILE"
+    exit 1
+}
+
+stop_agentauth() {
+    if [ -f "$AGENTAUTH_PID_FILE" ]; then
+        local pid
+        pid=$(cat "$AGENTAUTH_PID_FILE")
+        if kill -0 "$pid" 2>/dev/null; then
+            kill "$pid"
+            echo "agentauth proxy stopped (pid $pid)"
+        fi
+        rm -f "$AGENTAUTH_PID_FILE"
+    else
+        echo "agentauth proxy not running"
+    fi
+}
+
 usage() {
     cat << EOF
 Usage: agentctl <command> [agent-name] [options]
@@ -147,10 +228,13 @@ Commands:
   stopall                  Stop all agents
   restartall               Restart all agents
   syncdaemon [start|stop|status]  Manage agent-sync background daemon
+  proxy [start|stop|status]      Manage agentauth proxy
 
 Environment:
   CLAUDE_CODE_OAUTH_TOKEN  Optional. If set, skips passphrase prompt.
   AGENTCHAT_URL            AgentChat server URL (default: wss://agentchat-server.fly.dev)
+  AGENTAUTH_DIR            Path to agentauth repo (default: ~/agentauth)
+  AGENTAUTH_PORT           Proxy port (default: 9999)
 
 Examples:
   agentctl build
@@ -188,8 +272,8 @@ start_agent() {
         exit 1
     fi
 
-    # Decrypt OAuth token (prompts for passphrase if not in env)
-    decrypt_token
+    # Ensure agentauth proxy is running (handles decryption internally)
+    ensure_agentauth
 
     # Check if already running
     if is_container_running "$name"; then
@@ -253,12 +337,20 @@ EOF
         fi
     fi
 
+    # Resolve host gateway for container→host proxy access
+    local host_gateway
+    host_gateway=$(podman info --format '{{.Host.Slirp4netns.HostGatewayIP}}' 2>/dev/null || echo "10.0.2.2")
+    if [ -z "$host_gateway" ]; then
+        host_gateway="10.0.2.2"  # Default rootless podman gateway
+    fi
+
     echo "Starting agent '$name' in container..."
     podman run -d \
         --name "$(container_name "$name")" \
         --restart on-failure:3 \
         $labels \
-        -e "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}" \
+        -e "ANTHROPIC_BASE_URL=http://${host_gateway}:${AGENTAUTH_PORT}/anthropic" \
+        -e "ANTHROPIC_API_KEY=proxy-managed" \
         -e "AGENTCHAT_PUBLIC=true" \
         -e "AGENTCHAT_URL=${AGENTCHAT_URL}" \
         -e "NIKI_STARTUP_TIMEOUT=${NIKI_STARTUP_TIMEOUT:-600}" \
@@ -510,9 +602,9 @@ stop_all() {
 restart_all() {
     echo "Restarting all agents (except God)..."
 
-    # Decrypt once before the loop — the podman pipe consumes stdin,
-    # so decrypt_token's passphrase prompt won't work inside the loop.
-    decrypt_token
+    # Ensure agentauth proxy is running (handles decryption internally).
+    # Done once before the loop — podman pipe consumes stdin.
+    ensure_agentauth
 
     # Collect agent names into an array FIRST to avoid subshell issues.
     # Piping into `while read` runs the loop body in a subshell, which means
@@ -630,6 +722,29 @@ case "$1" in
         ;;
     restartall)
         restart_all
+        ;;
+    proxy)
+        subcmd="${2:-status}"
+        case "$subcmd" in
+            start)
+                ensure_agentauth
+                ;;
+            stop)
+                stop_agentauth
+                ;;
+            status)
+                if [ -f "$AGENTAUTH_PID_FILE" ] && kill -0 "$(cat "$AGENTAUTH_PID_FILE")" 2>/dev/null; then
+                    echo "agentauth proxy running (pid $(cat "$AGENTAUTH_PID_FILE"), port $AGENTAUTH_PORT)"
+                    curl -sf "http://localhost:${AGENTAUTH_PORT}/agentauth/health" 2>/dev/null | python3 -m json.tool 2>/dev/null || true
+                else
+                    echo "agentauth proxy not running"
+                fi
+                ;;
+            *)
+                echo "Usage: agentctl proxy [start|stop|status]"
+                exit 1
+                ;;
+        esac
         ;;
     syncdaemon)
         agent_sync="${AGENT_SYNC:-$HOME/dev/claude/agent-sync-ci/agent-sync.sh}"
