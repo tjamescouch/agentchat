@@ -84,6 +84,7 @@ export function handleMsg(server: AgentChatServer, ws: ExtendedWebSocket, msg: M
     to: msg.to,
     content: finalContent || redactResult.text,
     msg_id: msgId,
+    verified: !!agent.verified,
     ...(msg.sig && { sig: msg.sig }),
     ...(msg.in_reply_to && { in_reply_to: msg.in_reply_to }),
   });
@@ -149,6 +150,12 @@ export function handleJoin(server: AgentChatServer, ws: ExtendedWebSocket, msg: 
   // Check invite-only
   if (channel.inviteOnly && !channel.invited.has(agent.id)) {
     server._send(ws, createError(ErrorCode.NOT_INVITED, `Channel ${msg.channel} is invite-only`));
+    return;
+  }
+
+  // Check verified-only
+  if (channel.verifiedOnly && !agent.verified) {
+    server._send(ws, createError(ErrorCode.AUTH_REQUIRED, `Channel ${msg.channel} requires verified identity`));
     return;
   }
 
@@ -239,12 +246,13 @@ export function handleLeave(server: AgentChatServer, ws: ExtendedWebSocket, msg:
  * Authenticated: returns full details
  */
 export function handleListChannels(server: AgentChatServer, ws: ExtendedWebSocket): void {
-  const list: Array<{ name: string; agents: number }> = [];
+  const list: Array<{ name: string; agents: number; verifiedOnly?: boolean }> = [];
   for (const [name, channel] of server.channels) {
     if (!channel.inviteOnly) {
       list.push({
         name,
-        agents: channel.agents.size
+        agents: channel.agents.size,
+        ...(channel.verifiedOnly && { verifiedOnly: true }),
       });
     }
   }
@@ -292,7 +300,7 @@ export function handleListAgents(server: AgentChatServer, ws: ExtendedWebSocket,
 /**
  * Handle CREATE_CHANNEL command
  */
-export function handleCreateChannel(server: AgentChatServer, ws: ExtendedWebSocket, msg: CreateChannelMessage & { invite_only?: boolean }): void {
+export function handleCreateChannel(server: AgentChatServer, ws: ExtendedWebSocket, msg: CreateChannelMessage & { invite_only?: boolean; verified_only?: boolean }): void {
   const agent = server.agents.get(ws);
   if (!agent) {
     server._send(ws, createError(ErrorCode.AUTH_REQUIRED, 'Must IDENTIFY first'));
@@ -304,14 +312,14 @@ export function handleCreateChannel(server: AgentChatServer, ws: ExtendedWebSock
     return;
   }
 
-  const channel = server._createChannel(msg.channel, msg.invite_only || false);
+  const channel = server._createChannel(msg.channel, msg.invite_only || false, msg.verified_only || false);
 
   // Creator is automatically invited and joined
   if (channel.inviteOnly) {
     channel.invited.add(agent.id);
   }
 
-  server._log('create_channel', { agent: agent.id, channel: msg.channel, inviteOnly: channel.inviteOnly });
+  server._log('create_channel', { agent: agent.id, channel: msg.channel, inviteOnly: channel.inviteOnly, verifiedOnly: channel.verifiedOnly });
 
   // Auto-join creator
   channel.agents.add(ws);

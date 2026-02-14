@@ -41,20 +41,23 @@ else
     CONTAINER_MODE=false
 fi
 
-# Load OAuth token from secrets file if available (P0-SANDBOX-2)
-# Token is mounted as a file rather than env var to prevent agent reads.
+# Auth: prefer agentauth proxy (no secrets in container)
+# Legacy token-file path kept for backward compat but deprecated.
 TOKEN_FILE="/run/secrets/oauth-token"
-if [ -f "$TOKEN_FILE" ]; then
+if [ -n "$ANTHROPIC_BASE_URL" ] && [ "$ANTHROPIC_API_KEY" = "proxy-managed" ]; then
+    # Agentauth proxy mode — no real credentials needed in container
+    echo "Auth: using agentauth proxy at $ANTHROPIC_BASE_URL"
+elif [ -f "$TOKEN_FILE" ]; then
+    # Legacy: read token from mounted file (DEPRECATED — use agentauth proxy)
+    echo "WARNING: Using legacy token-file auth. Migrate to agentauth proxy."
     CLAUDE_CODE_OAUTH_TOKEN=$(cat "$TOKEN_FILE")
     export CLAUDE_CODE_OAUTH_TOKEN
-    # Delete the file so the agent process cannot read it later.
-    # (The export makes it available to child processes already launched.)
     rm -f "$TOKEN_FILE" 2>/dev/null || true
-fi
-
-# Validate auth in container mode
-if [ "$CONTAINER_MODE" = true ] && [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
-    echo "ERROR: OAuth token required. Mount at /run/secrets/oauth-token or set CLAUDE_CODE_OAUTH_TOKEN."
+elif [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+    # Legacy: token passed as env var (DEPRECATED — use agentauth proxy)
+    echo "WARNING: Token passed as env var. Migrate to agentauth proxy."
+elif [ "$CONTAINER_MODE" = true ]; then
+    echo "ERROR: No auth configured. Use agentauth proxy (recommended) or set CLAUDE_CODE_OAUTH_TOKEN."
     exit 1
 fi
 
@@ -90,6 +93,8 @@ RUNNER_PID=""
 
 cleanup() {
     log "Supervisor shutting down"
+    # Stop live curator first
+    stop_live_curator
     # Forward SIGTERM to runner so niki → claude can flush session state
     if [ -n "$RUNNER_PID" ] && kill -0 "$RUNNER_PID" 2>/dev/null; then
         log "Forwarding SIGTERM to runner (PID $RUNNER_PID)"
@@ -137,6 +142,107 @@ save_state "starting" ""
 # MCP config is pre-baked in settings.json and passed via --mcp-config in the runner.
 # No runtime registration needed.
 
+# === Live curation daemon ===
+# Runs alongside the agent, curating every CURATION_INTERVAL seconds.
+# Forked before the runner, killed when the runner exits.
+CURATION_INTERVAL="${CURATION_INTERVAL:-300}"  # 5 minutes
+CURATOR_PID=""
+
+# Shared curation paths (also used by between-session curation below)
+LUCIDITY_DIR="$HOME/lucidity/src"
+CURATOR_SCRIPT="$LUCIDITY_DIR/curator-run.sh"
+TREE_FILE="$STATE_DIR/tree.json"
+SKILL_FILE="$HOME/.claude/agentchat.skill.md"
+# Claude Code writes real conversation logs as JSONL in ~/.claude/projects/.
+# The tee-based transcript.log is empty on --resume sessions (stdout is suppressed),
+# so we find the most recent JSONL as the transcript source for curation.
+CLAUDE_PROJECTS_DIR="$HOME/.claude/projects/-home-agent"
+
+find_active_transcript() {
+    # Find the most recently modified JSONL in Claude Code's project dir
+    if [ -d "$CLAUDE_PROJECTS_DIR" ]; then
+        local newest
+        newest=$(find "$CLAUDE_PROJECTS_DIR" -maxdepth 1 -name "*.jsonl" -type f -printf '%T@ %p\n' 2>/dev/null \
+            | sort -rn | head -1 | cut -d' ' -f2-)
+        # macOS fallback (no -printf)
+        if [ -z "$newest" ]; then
+            newest=$(ls -t "$CLAUDE_PROJECTS_DIR"/*.jsonl 2>/dev/null | head -1)
+        fi
+        if [ -n "$newest" ] && [ -s "$newest" ]; then
+            echo "$newest"
+            return
+        fi
+    fi
+    # Fallback to tee-based transcript if JSONL not found
+    if [ -f "$STATE_DIR/transcript.log" ] && [ -s "$STATE_DIR/transcript.log" ]; then
+        echo "$STATE_DIR/transcript.log"
+    fi
+}
+
+run_curation_pass() {
+    mkdir -p "$(dirname "$TREE_FILE")"
+    local transcript_file
+    transcript_file=$(find_active_transcript)
+
+    if [ -z "$transcript_file" ]; then
+        log "No transcript found for curation (checked JSONL and transcript.log)"
+        return 1
+    fi
+
+    log "Curating from: $transcript_file"
+
+    if [ -x "$CURATOR_SCRIPT" ]; then
+        "$CURATOR_SCRIPT" \
+            --agent "$AGENT_NAME" \
+            --tree "$TREE_FILE" \
+            --transcript "$transcript_file" \
+            --output "$SKILL_FILE" 2>> "$LOG_FILE"
+    elif [ -f "$LUCIDITY_DIR/curator.js" ] && command -v node > /dev/null 2>&1; then
+        local curate_args="--agent $AGENT_NAME --tree $TREE_FILE --output $SKILL_FILE"
+        if [ -s "$transcript_file" ]; then
+            curate_args="$curate_args --transcript $transcript_file --once"
+        fi
+        LUCIDITY_TRANSCRIPT="$transcript_file" node "$LUCIDITY_DIR/curator.js" $curate_args 2>> "$LOG_FILE"
+    else
+        return 1
+    fi
+}
+
+start_live_curator() {
+    # Only start if a curator backend is available
+    if [ ! -x "$CURATOR_SCRIPT" ] && ! ([ -f "$LUCIDITY_DIR/curator.js" ] && command -v node > /dev/null 2>&1); then
+        log "No curator backend available — live curation disabled"
+        return
+    fi
+
+    (
+        log "Live curator started (interval: ${CURATION_INTERVAL}s)"
+        while true; do
+            sleep "$CURATION_INTERVAL"
+            # Check if transcript has been modified since last curation
+            if [ -f "$TRANSCRIPT_FILE_FOR_CURATION" ] && [ -s "$TRANSCRIPT_FILE_FOR_CURATION" ]; then
+                log "Live curation pass starting..."
+                if run_curation_pass; then
+                    log "Live curation pass complete — skill.md updated"
+                else
+                    log "Live curation pass failed (non-fatal)"
+                fi
+            fi
+        done
+    ) &
+    CURATOR_PID=$!
+    log "Live curator daemon forked (PID $CURATOR_PID)"
+}
+
+stop_live_curator() {
+    if [ -n "$CURATOR_PID" ] && kill -0 "$CURATOR_PID" 2>/dev/null; then
+        log "Stopping live curator (PID $CURATOR_PID)"
+        kill "$CURATOR_PID" 2>/dev/null || true
+        wait "$CURATOR_PID" 2>/dev/null || true
+        CURATOR_PID=""
+    fi
+}
+
 log "Using runner: $RUNNER"
 
 while true; do
@@ -158,15 +264,28 @@ while true; do
     # Export config for the runner
     export AGENT_NAME MISSION STATE_DIR LOG_FILE
 
+    # Start live curator daemon alongside the agent
+
+    # Live curation (Claude Code JSONL -> skill.md) is optional
+    if [ "${USE_CLAUDE_CODE:-0}" = "1" ] || [ "${USE_CLAUDE_CODE:-0}" = "true" ]; then
+        start_live_curator
+    else
+        log "USE_CLAUDE_CODE not set; live curation disabled"
+    fi
+
+
     # Run the agent via the runner abstraction layer
     # Background + wait so SIGTERM trap can interrupt and forward signal
-    "$RUNNER" &
+    "$RUNNER" "$@" &
     RUNNER_PID=$!
     set +e
     wait $RUNNER_PID 2>/dev/null
     EXIT_CODE=$?
     set -e
     RUNNER_PID=""
+
+    # Stop live curator when the agent exits
+    stop_live_curator
 
     if [ $EXIT_CODE -eq 0 ]; then
         # Clean exit
@@ -207,41 +326,13 @@ while true; do
     RESTART_COUNT=$((RESTART_COUNT + 1))
 
     # === Memory curation between sessions ===
-    # Run lucidity curator to curate transcript into tree.json
-    # and emit skill.md so the agent boots with memory context.
-    # Uses curator-run.sh (which tries curator.js, then ghost, then fallback).
-    LUCIDITY_DIR="$HOME/lucidity/src"
-    CURATOR_SCRIPT="$LUCIDITY_DIR/curator-run.sh"
-    # Store tree.json in STATE_DIR (volume-mounted, persists across container rebuilds)
-    TREE_FILE="$STATE_DIR/tree.json"
-    SKILL_FILE="$HOME/.claude/agentchat.skill.md"
-    TRANSCRIPT_FILE_FOR_CURATION="$STATE_DIR/transcript.log"
-
-    if [ -x "$CURATOR_SCRIPT" ]; then
-        log "Running memory curation (curator-run.sh)..."
-        mkdir -p "$(dirname "$TREE_FILE")"
-        if "$CURATOR_SCRIPT" \
-            --agent "$AGENT_NAME" \
-            --tree "$TREE_FILE" \
-            --transcript "$TRANSCRIPT_FILE_FOR_CURATION" \
-            --output "$SKILL_FILE" 2>> "$LOG_FILE"; then
-            log "Memory curation complete — skill.md updated"
-        else
-            log "Memory curation failed (non-fatal, continuing)"
-        fi
-    elif [ -f "$LUCIDITY_DIR/curator.js" ] && command -v node > /dev/null 2>&1; then
-        # Fallback: call curator.js directly if curator-run.sh isn't executable
-        log "Running memory curation (curator.js direct)..."
-        mkdir -p "$(dirname "$TREE_FILE")"
-        CURATE_ARGS="--agent $AGENT_NAME --tree $TREE_FILE --output $SKILL_FILE"
-        if [ -f "$TRANSCRIPT_FILE_FOR_CURATION" ] && [ -s "$TRANSCRIPT_FILE_FOR_CURATION" ]; then
-            CURATE_ARGS="$CURATE_ARGS --transcript $TRANSCRIPT_FILE_FOR_CURATION --curate"
-        fi
-        if node "$LUCIDITY_DIR/curator.js" $CURATE_ARGS 2>> "$LOG_FILE"; then
-            log "Memory curation complete — skill.md updated"
-        else
-            log "Memory curation failed (non-fatal, continuing)"
-        fi
+    # Final curation pass after agent exits — captures everything from the session.
+    # Uses the same run_curation_pass() function as the live curator.
+    log "Running between-session memory curation..."
+    if run_curation_pass; then
+        log "Between-session curation complete — skill.md updated"
+    else
+        log "Between-session curation failed (non-fatal, continuing)"
     fi
 
     # Check for stop signal before sleeping
