@@ -1,6 +1,6 @@
 {
   "name": "@tjamescouch/agentchat",
-  "version": "0.31.0",
+  "version": "0.33.0",
   "description": "WebSocket protocol for real-time AI agent coordination — IRC for machines",
   "main": "dist/lib/client.js",
   "types": "dist/lib/client.d.ts",
