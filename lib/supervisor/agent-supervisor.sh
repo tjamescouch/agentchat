@@ -41,20 +41,23 @@ else
     CONTAINER_MODE=false
 fi
 
-# Load OAuth token from secrets file if available (P0-SANDBOX-2)
-# Token is mounted as a file rather than env var to prevent agent reads.
+# Auth: prefer agentauth proxy (no secrets in container)
+# Legacy token-file path kept for backward compat but deprecated.
 TOKEN_FILE="/run/secrets/oauth-token"
-if [ -f "$TOKEN_FILE" ]; then
+if [ -n "$ANTHROPIC_BASE_URL" ] && [ "$ANTHROPIC_API_KEY" = "proxy-managed" ]; then
+    # Agentauth proxy mode — no real credentials needed in container
+    echo "Auth: using agentauth proxy at $ANTHROPIC_BASE_URL"
+elif [ -f "$TOKEN_FILE" ]; then
+    # Legacy: read token from mounted file (DEPRECATED — use agentauth proxy)
+    echo "WARNING: Using legacy token-file auth. Migrate to agentauth proxy."
     CLAUDE_CODE_OAUTH_TOKEN=$(cat "$TOKEN_FILE")
     export CLAUDE_CODE_OAUTH_TOKEN
-    # Delete the file so the agent process cannot read it later.
-    # (The export makes it available to child processes already launched.)
     rm -f "$TOKEN_FILE" 2>/dev/null || true
-fi
-
-# Validate auth in container mode
-if [ "$CONTAINER_MODE" = true ] && [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
-    echo "ERROR: OAuth token required. Mount at /run/secrets/oauth-token or set CLAUDE_CODE_OAUTH_TOKEN."
+elif [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+    # Legacy: token passed as env var (DEPRECATED — use agentauth proxy)
+    echo "WARNING: Token passed as env var. Migrate to agentauth proxy."
+elif [ "$CONTAINER_MODE" = true ]; then
+    echo "ERROR: No auth configured. Use agentauth proxy (recommended) or set CLAUDE_CODE_OAUTH_TOKEN."
     exit 1
 fi
 
@@ -150,22 +153,56 @@ LUCIDITY_DIR="$HOME/lucidity/src"
 CURATOR_SCRIPT="$LUCIDITY_DIR/curator-run.sh"
 TREE_FILE="$STATE_DIR/tree.json"
 SKILL_FILE="$HOME/.claude/agentchat.skill.md"
-TRANSCRIPT_FILE_FOR_CURATION="$STATE_DIR/transcript.log"
+# Claude Code writes real conversation logs as JSONL in ~/.claude/projects/.
+# The tee-based transcript.log is empty on --resume sessions (stdout is suppressed),
+# so we find the most recent JSONL as the transcript source for curation.
+CLAUDE_PROJECTS_DIR="$HOME/.claude/projects/-home-agent"
+
+find_active_transcript() {
+    # Find the most recently modified JSONL in Claude Code's project dir
+    if [ -d "$CLAUDE_PROJECTS_DIR" ]; then
+        local newest
+        newest=$(find "$CLAUDE_PROJECTS_DIR" -maxdepth 1 -name "*.jsonl" -type f -printf '%T@ %p\n' 2>/dev/null \
+            | sort -rn | head -1 | cut -d' ' -f2-)
+        # macOS fallback (no -printf)
+        if [ -z "$newest" ]; then
+            newest=$(ls -t "$CLAUDE_PROJECTS_DIR"/*.jsonl 2>/dev/null | head -1)
+        fi
+        if [ -n "$newest" ] && [ -s "$newest" ]; then
+            echo "$newest"
+            return
+        fi
+    fi
+    # Fallback to tee-based transcript if JSONL not found
+    if [ -f "$STATE_DIR/transcript.log" ] && [ -s "$STATE_DIR/transcript.log" ]; then
+        echo "$STATE_DIR/transcript.log"
+    fi
+}
 
 run_curation_pass() {
     mkdir -p "$(dirname "$TREE_FILE")"
+    local transcript_file
+    transcript_file=$(find_active_transcript)
+
+    if [ -z "$transcript_file" ]; then
+        log "No transcript found for curation (checked JSONL and transcript.log)"
+        return 1
+    fi
+
+    log "Curating from: $transcript_file"
+
     if [ -x "$CURATOR_SCRIPT" ]; then
         "$CURATOR_SCRIPT" \
             --agent "$AGENT_NAME" \
             --tree "$TREE_FILE" \
-            --transcript "$TRANSCRIPT_FILE_FOR_CURATION" \
+            --transcript "$transcript_file" \
             --output "$SKILL_FILE" 2>> "$LOG_FILE"
     elif [ -f "$LUCIDITY_DIR/curator.js" ] && command -v node > /dev/null 2>&1; then
         local curate_args="--agent $AGENT_NAME --tree $TREE_FILE --output $SKILL_FILE"
-        if [ -f "$TRANSCRIPT_FILE_FOR_CURATION" ] && [ -s "$TRANSCRIPT_FILE_FOR_CURATION" ]; then
-            curate_args="$curate_args --transcript $TRANSCRIPT_FILE_FOR_CURATION --curate"
+        if [ -s "$transcript_file" ]; then
+            curate_args="$curate_args --transcript $transcript_file --once"
         fi
-        node "$LUCIDITY_DIR/curator.js" $curate_args 2>> "$LOG_FILE"
+        LUCIDITY_TRANSCRIPT="$transcript_file" node "$LUCIDITY_DIR/curator.js" $curate_args 2>> "$LOG_FILE"
     else
         return 1
     fi
@@ -228,11 +265,18 @@ while true; do
     export AGENT_NAME MISSION STATE_DIR LOG_FILE
 
     # Start live curator daemon alongside the agent
-    start_live_curator
+
+    # Live curation (Claude Code JSONL -> skill.md) is optional
+    if [ "${USE_CLAUDE_CODE:-0}" = "1" ] || [ "${USE_CLAUDE_CODE:-0}" = "true" ]; then
+        start_live_curator
+    else
+        log "USE_CLAUDE_CODE not set; live curation disabled"
+    fi
+
 
     # Run the agent via the runner abstraction layer
     # Background + wait so SIGTERM trap can interrupt and forward signal
-    "$RUNNER" &
+    "$RUNNER" "$@" &
     RUNNER_PID=$!
     set +e
     wait $RUNNER_PID 2>/dev/null

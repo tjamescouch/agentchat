@@ -124,6 +124,7 @@ export interface PendingChallenge {
 export interface ChannelState {
   name: string;
   inviteOnly: boolean;
+  verifiedOnly: boolean;
   invited: Set<string>;
   agents: Set<ExtendedWebSocket>;
   messageBuffer: AnyMessage[];
@@ -329,6 +330,7 @@ export class AgentChatServer {
     this._createChannel('#agents', false);
     this._createChannel('#discovery', false);
     this._createChannel('#bounties', false);
+    this._createChannel('#ops', false, true);  // verified-only control plane
 
     // Proposal store for structured negotiations
     this.proposals = new ProposalStore();
@@ -457,11 +459,12 @@ export class AgentChatServer {
     };
   }
 
-  _createChannel(name: string, inviteOnly: boolean = false): ChannelState {
+  _createChannel(name: string, inviteOnly: boolean = false, verifiedOnly: boolean = false): ChannelState {
     if (!this.channels.has(name)) {
       this.channels.set(name, {
         name,
         inviteOnly,
+        verifiedOnly,
         invited: new Set(),
         agents: new Set(),
         messageBuffer: []
@@ -1038,6 +1041,24 @@ export class AgentChatServer {
 
   _handleDisconnect(ws: ExtendedWebSocket): void {
     const agent = this.agents.get(ws);
+
+    // Always remove ws from all channel agent Sets, even if agent is unknown.
+    // This prevents orphaned references when _handleDisconnect is called for
+    // connections that were already removed from this.agents (e.g. double-
+    // disconnect, or connections that joined channels but lost their agent
+    // mapping).
+    for (const [channelName, channel] of this.channels) {
+      if (channel.agents.has(ws)) {
+        channel.agents.delete(ws);
+        if (agent) {
+          this._broadcast(channelName, createMessage(ServerMessageType.AGENT_LEFT, {
+            channel: channelName,
+            agent: `@${agent.id}`
+          }));
+        }
+      }
+    }
+
     if (!agent) return;
 
     // Calculate connection duration
@@ -1051,18 +1072,6 @@ export class AgentChatServer {
       had_pubkey: !!agent.pubkey,
       ip: ws._realIp
     });
-
-    // Leave all channels
-    for (const channelName of agent.channels) {
-      const channel = this.channels.get(channelName);
-      if (channel) {
-        channel.agents.delete(ws);
-        this._broadcast(channelName, createMessage(ServerMessageType.AGENT_LEFT, {
-          channel: channelName,
-          agent: `@${agent.id}`
-        }));
-      }
-    }
 
     // Remove from state
     this.agentById.delete(agent.id);

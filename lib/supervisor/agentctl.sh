@@ -5,6 +5,8 @@
 AGENTS_DIR="$HOME/.agentchat/agents"
 SECRETS_DIR="$HOME/.agentchat/secrets"
 ENCRYPTED_TOKEN_FILE="$SECRETS_DIR/oauth-token.enc"
+ENCRYPTED_OPENAI_FILE="$SECRETS_DIR/openai-token.enc"
+ENCRYPTED_GITHUB_FILE="$SECRETS_DIR/github-token.enc"
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)"
 REPO_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 IMAGE_NAME="agentchat-agent:latest"
@@ -12,6 +14,12 @@ CONTAINER_PREFIX="agentchat"
 
 # Default server URL
 AGENTCHAT_URL="${AGENTCHAT_URL:-wss://agentchat-server.fly.dev}"
+
+# agentauth proxy config
+AGENTAUTH_DIR="${AGENTAUTH_DIR:-$HOME/agentauth}"
+AGENTAUTH_CONFIG="${AGENTAUTH_CONFIG:-$AGENTAUTH_DIR/agentauth.json}"
+AGENTAUTH_PORT="${AGENTAUTH_PORT:-9999}"
+AGENTAUTH_PID_FILE="$HOME/.agentchat/agentauth.pid"
 
 # --- Token Encryption functions ---
 # OAuth token is encrypted at rest with AES-256-CBC + PBKDF2.
@@ -21,35 +29,53 @@ setup_token() {
     mkdir -p "$SECRETS_DIR"
     chmod 700 "$SECRETS_DIR"
 
-    if [ -f "$ENCRYPTED_TOKEN_FILE" ]; then
-        echo "Encrypted token already exists at $ENCRYPTED_TOKEN_FILE"
-        read -p "Overwrite? [y/N] " confirm
+    local existing=""
+    [ -f "$ENCRYPTED_TOKEN_FILE" ] && existing="$existing anthropic"
+    [ -f "$ENCRYPTED_OPENAI_FILE" ] && existing="$existing openai"
+    [ -f "$ENCRYPTED_GITHUB_FILE" ] && existing="$existing github"
+    if [ -n "$existing" ]; then
+        echo "Existing encrypted keys:$existing"
+        read -p "Overwrite all? [y/N] " confirm
         if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
             echo "Aborted."
             exit 0
         fi
     fi
 
-    echo "Run 'claude setup-token' to generate your OAuth token."
-    echo "Copy the token it outputs, then paste it below."
-    echo
-    echo "Enter your OAuth token (input hidden):"
-    IFS= read -r -s token
-    token="${token%$'\r'}"  # Strip carriage return if present
+    # Collect all tokens first
+    echo "=== API Key Setup ==="
+    echo "All keys are encrypted with AES-256-CBC + PBKDF2 and stored at rest."
+    echo "Keys are only decrypted into memory when the proxy starts."
     echo
 
-    if [ -z "$token" ]; then
-        echo "ERROR: Empty token"
+    echo "Enter your Anthropic API key (sk-ant-...) (input hidden):"
+    IFS= read -r -s anthropic_key
+    anthropic_key="${anthropic_key%$'\r'}"
+    echo
+
+    if [ -z "$anthropic_key" ]; then
+        echo "ERROR: Empty Anthropic key"
         exit 1
     fi
 
+    echo "Enter your OpenAI API key (sk-proj-...) (input hidden, or press Enter to skip):"
+    IFS= read -r -s openai_key
+    openai_key="${openai_key%$'\r'}"
+    echo
+
+    echo "Enter your GitHub token (ghp_... or github_pat_...) (input hidden, or press Enter to skip):"
+    IFS= read -r -s github_key
+    github_key="${github_key%$'\r'}"
+    echo
+
+    # Passphrase (one for all keys)
     echo "Enter encryption passphrase (input hidden):"
     IFS= read -r -s passphrase
-    passphrase="${passphrase%$'\r'}"  # Strip carriage return if present
+    passphrase="${passphrase%$'\r'}"
     echo
     echo "Confirm passphrase:"
     IFS= read -r -s passphrase_confirm
-    passphrase_confirm="${passphrase_confirm%$'\r'}"  # Strip carriage return if present
+    passphrase_confirm="${passphrase_confirm%$'\r'}"
     echo
 
     if [ "$passphrase" != "$passphrase_confirm" ]; then
@@ -62,38 +88,85 @@ setup_token() {
         exit 1
     fi
 
-    # Encrypt with AES-256-CBC + PBKDF2, salt, base64 output
-    echo -n "$token" | openssl enc -aes-256-cbc -a -salt -pbkdf2 -iter 100000 -pass "pass:${passphrase}" > "$ENCRYPTED_TOKEN_FILE" 2>/dev/null
-
+    # Encrypt Anthropic key
+    echo -n "$anthropic_key" | openssl enc -aes-256-cbc -a -salt -pbkdf2 -iter 100000 -pass "pass:${passphrase}" > "$ENCRYPTED_TOKEN_FILE" 2>/dev/null
     if [ $? -ne 0 ]; then
         rm -f "$ENCRYPTED_TOKEN_FILE"
-        echo "ERROR: Encryption failed"
+        echo "ERROR: Anthropic key encryption failed"
         exit 1
     fi
-
     chmod 600 "$ENCRYPTED_TOKEN_FILE"
 
-    # Verify decryption works immediately
-    echo "Verifying encryption..."
+    # Verify Anthropic
     local test_decrypt
     test_decrypt=$(openssl enc -aes-256-cbc -d -a -pbkdf2 -iter 100000 -pass "pass:${passphrase}" < "$ENCRYPTED_TOKEN_FILE" 2>/dev/null)
-
-    if [ "$test_decrypt" != "$token" ]; then
+    if [ "$test_decrypt" != "$anthropic_key" ]; then
         rm -f "$ENCRYPTED_TOKEN_FILE"
-        echo "ERROR: Encryption verification failed - decryption doesn't match original token"
-        echo "This suggests a terminal encoding issue. Try using CLAUDE_CODE_OAUTH_TOKEN env var instead:"
-        echo "  export CLAUDE_CODE_OAUTH_TOKEN='your-token'"
-        echo "  agentctl start <name> <mission>"
+        echo "ERROR: Anthropic key verification failed"
         exit 1
     fi
+    echo "Anthropic key encrypted and verified."
 
-    echo "Token encrypted and stored at $ENCRYPTED_TOKEN_FILE"
-    echo "Verification successful - decryption works!"
+    # Encrypt OpenAI key (if provided)
+    if [ -n "$openai_key" ]; then
+        echo -n "$openai_key" | openssl enc -aes-256-cbc -a -salt -pbkdf2 -iter 100000 -pass "pass:${passphrase}" > "$ENCRYPTED_OPENAI_FILE" 2>/dev/null
+        if [ $? -ne 0 ]; then
+            rm -f "$ENCRYPTED_OPENAI_FILE"
+            echo "ERROR: OpenAI key encryption failed"
+            exit 1
+        fi
+        chmod 600 "$ENCRYPTED_OPENAI_FILE"
+
+        test_decrypt=$(openssl enc -aes-256-cbc -d -a -pbkdf2 -iter 100000 -pass "pass:${passphrase}" < "$ENCRYPTED_OPENAI_FILE" 2>/dev/null)
+        if [ "$test_decrypt" != "$openai_key" ]; then
+            rm -f "$ENCRYPTED_OPENAI_FILE"
+            echo "ERROR: OpenAI key verification failed"
+            exit 1
+        fi
+        echo "OpenAI key encrypted and verified."
+    else
+        echo "OpenAI key skipped."
+    fi
+
+    # Encrypt GitHub token (if provided)
+    if [ -n "$github_key" ]; then
+        echo -n "$github_key" | openssl enc -aes-256-cbc -a -salt -pbkdf2 -iter 100000 -pass "pass:${passphrase}" > "$ENCRYPTED_GITHUB_FILE" 2>/dev/null
+        if [ $? -ne 0 ]; then
+            rm -f "$ENCRYPTED_GITHUB_FILE"
+            echo "ERROR: GitHub token encryption failed"
+            exit 1
+        fi
+        chmod 600 "$ENCRYPTED_GITHUB_FILE"
+
+        test_decrypt=$(openssl enc -aes-256-cbc -d -a -pbkdf2 -iter 100000 -pass "pass:${passphrase}" < "$ENCRYPTED_GITHUB_FILE" 2>/dev/null)
+        if [ "$test_decrypt" != "$github_key" ]; then
+            rm -f "$ENCRYPTED_GITHUB_FILE"
+            echo "ERROR: GitHub token verification failed"
+            exit 1
+        fi
+        echo "GitHub token encrypted and verified."
+    else
+        echo "GitHub token skipped."
+    fi
+
+    echo
+    echo "All keys stored in $SECRETS_DIR"
+    echo "Run 'agentctl proxy start' to launch the proxy."
 
     # Clear sensitive variables
-    token=""
+    anthropic_key=""
+    openai_key=""
+    github_key=""
     passphrase=""
     passphrase_confirm=""
+    test_decrypt=""
+}
+
+# Legacy alias — points to unified setup
+setup_openai_token() {
+    echo "Use 'agentctl setup-token' to set up all keys at once."
+    exit 1
+    passphrase=""
     test_decrypt=""
 }
 
@@ -117,6 +190,22 @@ decrypt_token() {
     CLAUDE_CODE_OAUTH_TOKEN=$(openssl enc -aes-256-cbc -d -a -pbkdf2 -iter 100000 -pass "pass:${passphrase}" < "$ENCRYPTED_TOKEN_FILE" 2>/dev/null)
     local decrypt_status=$?
 
+    # Also decrypt OpenAI key if it exists (same passphrase)
+    if [ -f "$ENCRYPTED_OPENAI_FILE" ]; then
+        OPENAI_API_KEY=$(openssl enc -aes-256-cbc -d -a -pbkdf2 -iter 100000 -pass "pass:${passphrase}" < "$ENCRYPTED_OPENAI_FILE" 2>/dev/null)
+        if [ -n "$OPENAI_API_KEY" ]; then
+            export OPENAI_API_KEY
+        fi
+    fi
+
+    # Also decrypt GitHub token if it exists (same passphrase)
+    if [ -f "$ENCRYPTED_GITHUB_FILE" ]; then
+        GITHUB_TOKEN=$(openssl enc -aes-256-cbc -d -a -pbkdf2 -iter 100000 -pass "pass:${passphrase}" < "$ENCRYPTED_GITHUB_FILE" 2>/dev/null)
+        if [ -n "$GITHUB_TOKEN" ]; then
+            export GITHUB_TOKEN
+        fi
+    fi
+
     passphrase=""
 
     if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ] || [ $decrypt_status -ne 0 ]; then
@@ -128,14 +217,92 @@ decrypt_token() {
     export CLAUDE_CODE_OAUTH_TOKEN
 }
 
+# --- agentauth proxy management ---
+
+ensure_agentauth() {
+    # Check if proxy is already running
+    if [ -f "$AGENTAUTH_PID_FILE" ]; then
+        local pid
+        pid=$(cat "$AGENTAUTH_PID_FILE")
+        if kill -0 "$pid" 2>/dev/null; then
+            # Verify it's actually responding
+            if curl -sf "http://localhost:${AGENTAUTH_PORT}/agentauth/health" > /dev/null 2>&1; then
+                return 0
+            fi
+            # Stale process, kill it
+            kill "$pid" 2>/dev/null
+        fi
+        rm -f "$AGENTAUTH_PID_FILE"
+    fi
+
+    # Check prerequisites
+    if [ ! -d "$AGENTAUTH_DIR" ] || [ ! -f "$AGENTAUTH_DIR/dist/index.js" ]; then
+        echo "ERROR: agentauth not found at $AGENTAUTH_DIR"
+        echo "       Clone it: git clone https://github.com/tjamescouch/agentauth.git ~/agentauth"
+        echo "       Build it: cd ~/agentauth && npm install && npm run build"
+        exit 1
+    fi
+
+    if [ ! -f "$AGENTAUTH_CONFIG" ]; then
+        echo "ERROR: agentauth config not found at $AGENTAUTH_CONFIG"
+        echo "       Copy the example: cp $AGENTAUTH_DIR/agentauth.example.json $AGENTAUTH_CONFIG"
+        exit 1
+    fi
+
+    # Decrypt token so agentauth can use it (host-side only)
+    decrypt_token
+
+    # Start agentauth with API keys available as env vars.
+    # Bind to 0.0.0.0 so podman containers can reach via host gateway.
+    # Host firewall should restrict external access to this port.
+    echo "Starting agentauth proxy on port $AGENTAUTH_PORT..."
+    ANTHROPIC_API_KEY="${CLAUDE_CODE_OAUTH_TOKEN}" \
+    OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
+        node "$AGENTAUTH_DIR/dist/index.js" run --port "$AGENTAUTH_PORT" --bind 0.0.0.0 --config "$AGENTAUTH_CONFIG" &
+    local proxy_pid=$!
+    echo "$proxy_pid" > "$AGENTAUTH_PID_FILE"
+
+    # Wait for health check
+    local retries=0
+    while [ $retries -lt 10 ]; do
+        if curl -sf "http://localhost:${AGENTAUTH_PORT}/agentauth/health" > /dev/null 2>&1; then
+            echo "agentauth proxy running (pid $proxy_pid, port $AGENTAUTH_PORT)"
+            return 0
+        fi
+        sleep 0.5
+        retries=$((retries + 1))
+    done
+
+    echo "ERROR: agentauth proxy failed to start"
+    kill "$proxy_pid" 2>/dev/null
+    rm -f "$AGENTAUTH_PID_FILE"
+    exit 1
+}
+
+stop_agentauth() {
+    if [ -f "$AGENTAUTH_PID_FILE" ]; then
+        local pid
+        pid=$(cat "$AGENTAUTH_PID_FILE")
+        if kill -0 "$pid" 2>/dev/null; then
+            kill "$pid"
+            echo "agentauth proxy stopped (pid $pid)"
+        fi
+        rm -f "$AGENTAUTH_PID_FILE"
+    else
+        echo "agentauth proxy not running"
+    fi
+}
+
 usage() {
     cat << EOF
 Usage: agentctl <command> [agent-name] [options]
 
 Commands:
+  edit <name>              Edit agent config (mission/model/runtime)
   setup-token              Encrypt and store your OAuth token (one-time setup)
+  setup-openai-token       Encrypt and store your OpenAI API key (same passphrase)
   build                    Build the agent container image
-  start <name> <mission>   Start a new supervised agent container
+  start <name> <mission> [--use-gro|--use-claude-code]  Start a new supervised agent container
   stop <name>              Stop an agent gracefully
   abort <name>             Trigger niki abort (immediate SIGTERM via abort file)
   kill <name>              Force kill an agent container
@@ -147,15 +314,20 @@ Commands:
   stopall                  Stop all agents
   restartall               Restart all agents
   syncdaemon [start|stop|status]  Manage agent-sync background daemon
+  proxy [start|stop|status]      Manage agentauth proxy
 
 Environment:
   CLAUDE_CODE_OAUTH_TOKEN  Optional. If set, skips passphrase prompt.
   AGENTCHAT_URL            AgentChat server URL (default: wss://agentchat-server.fly.dev)
+  AGENTAUTH_DIR            Path to agentauth repo (default: ~/agentauth)
+  AGENTAUTH_PORT           Proxy port (default: 9999)
 
 Examples:
   agentctl build
   agentctl start monitor "monitor agentchat #general and moderate"
   agentctl start social "manage moltx and moltbook social media"
+  agentctl start jessie "You are James's friend" --use-gro  # Uses gro runtime (OpenAI/etc)
+  agentctl edit jessie
   agentctl stop monitor
   agentctl status
 EOF
@@ -174,22 +346,48 @@ container_exists() {
 }
 
 build_image() {
-    echo "Building agent image..."
-    podman build -t "$IMAGE_NAME" -f "$REPO_ROOT/docker/agent.Dockerfile" "$REPO_ROOT"
+    local cache_flag=""
+    if [ "$1" = "--clean" ]; then
+        cache_flag="--no-cache"
+        echo "Building agent image (clean, no cache)..."
+    else
+        echo "Building agent image..."
+    fi
+    podman build $cache_flag -t "$IMAGE_NAME" -f "$REPO_ROOT/docker/agent.Dockerfile" "$REPO_ROOT"
     echo "Image '$IMAGE_NAME' built successfully"
 }
 
 start_agent() {
     local name="$1"
     local mission="$2"
+    local use_gro="false"
+    local use_claude_code="false"
+    local agent_keys=""
+
+    # Parse optional flags after name and mission
+    shift 2 2>/dev/null || true
+    if [ "$use_gro" = "true" ] && [ "$use_claude_code" = "true" ]; then
+        echo "ERROR: cannot combine --use-gro and --use-claude-code"
+        exit 1
+    fi
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --use-gro) use_gro="true" ;;
+            --use-claude-code) use_claude_code="true" ;;
+            --model) AGENT_MODEL_OVERRIDE="$2"; shift ;;
+            --keys) agent_keys="$2"; shift ;;
+            *) echo "Unknown option: $1" ;;
+        esac
+        shift
+    done
 
     if [ -z "$name" ] || [ -z "$mission" ]; then
-        echo "Usage: agentctl start <name> <mission>"
+        echo "Usage: agentctl start <name> <mission> [--use-gro|--use-claude-code] [--model MODEL] [--keys anthropic,openai,github]"
         exit 1
     fi
 
-    # Decrypt OAuth token (prompts for passphrase if not in env)
-    decrypt_token
+    # Ensure agentauth proxy is running (handles decryption internally)
+    ensure_agentauth
 
     # Check if already running
     if is_container_running "$name"; then
@@ -208,8 +406,19 @@ start_agent() {
     local state_dir="$AGENTS_DIR/$name"
     mkdir -p "$state_dir"
 
-    # Save mission for restarts
+    # Save mission and runtime for restarts
     echo "$mission" > "$state_dir/mission.txt"
+    if [ "$use_gro" = "true" ]; then
+        echo "gro" > "$state_dir/runtime.txt"
+    else
+        rm -f "$state_dir/runtime.txt"
+    fi
+    if [ -n "$agent_keys" ]; then
+        echo "$agent_keys" > "$state_dir/keys.txt"
+    fi
+    if [ -n "$AGENT_MODEL_OVERRIDE" ]; then
+        echo "$AGENT_MODEL_OVERRIDE" > "$state_dir/model.txt"
+    fi
 
     # Initialize context file
     if [ ! -f "$state_dir/context.md" ]; then
@@ -240,19 +449,101 @@ EOF
         echo "  Mounting lucidity memory system from $lucidity_host_dir"
     fi
 
+    # Persist ~/.claude/ across container restarts (skill.md, memory tree, settings)
+    local claude_state="${state_dir}/claude-state"
+    mkdir -p "$claude_state"
+    if [ ! -f "$claude_state/settings.json" ]; then
+        echo "  Initializing claude-state with defaults (first boot)"
+        cp "$REPO_ROOT/docker/claude-settings.json" "$claude_state/settings.json" 2>/dev/null || true
+        cp "$REPO_ROOT/docker/claude-settings-fetcher.json" "$claude_state/settings-fetcher.json" 2>/dev/null || true
+        cp "$REPO_ROOT/docker/container-skill.md" "$claude_state/agentchat.skill.md" 2>/dev/null || true
+        if [ -d "$REPO_ROOT/docker/personalities" ]; then
+            cp -r "$REPO_ROOT/docker/personalities" "$claude_state/" 2>/dev/null || true
+        fi
+    fi
+
+    # Resolve host gateway for container→host proxy access
+    local host_gateway
+    host_gateway="host.containers.internal"
+
+    # Runtime selection
+    local runtime_env=""
+    local model_env=""
+    local proxy_base_url="http://${host_gateway}:${AGENTAUTH_PORT}/anthropic"
+    local proxy_api_key="proxy-managed"
+
+    if [ "$use_gro" = "true" ]; then
+        runtime_env="gro"
+        # For gro with OpenAI models, point at the OpenAI backend through proxy
+        # For gro with Anthropic models, keep the anthropic backend
+        local agent_model="${AGENT_MODEL_OVERRIDE:-gpt-4o}"
+        model_env="$agent_model"
+
+        case "$agent_model" in
+            gpt-*|o1-*|o3-*|o4-*|chatgpt-*)
+                proxy_base_url="http://${host_gateway}:${AGENTAUTH_PORT}/openai"
+                ;;
+        esac
+
+        # Note: ANTHROPIC_BASE_URL always points to /anthropic (for lucidity curation).
+        # OpenAI models use OPENAI_BASE_URL (set separately below) for the main agent.
+        echo "  Runtime: gro (model: $agent_model)"
+    if [ "$use_claude_code" = "true" ]; then
+        echo "  Runtime: claude-code (cli)"
+    fi
+    fi
+
+    # Build key-specific env vars based on --keys setting
+    # Default: agents only get keys needed for their runtime (anthropic/openai)
+    # --keys github: also gives access to GitHub via credential helper
+    local github_env=""
+    if echo "$agent_keys" | grep -q "github"; then
+        github_env="-e AGENTAUTH_URL=http://${host_gateway}:${AGENTAUTH_PORT}"
+        echo "  Keys: github (git push enabled)"
+    fi
+
+    # Runtime selection
+    local runtime_env=""
+    local model_env=""
+    local proxy_base_url="http://${host_gateway}:${AGENTAUTH_PORT}/anthropic"
+    local proxy_api_key="proxy-managed"
+
+    if [ "$use_gro" = "true" ]; then
+        runtime_env="gro"
+        # For gro with OpenAI models, point at the OpenAI backend through proxy
+        # For gro with Anthropic models, keep the anthropic backend
+        local agent_model="${AGENT_MODEL_OVERRIDE:-gpt-4o}"
+        model_env="$agent_model"
+
+        case "$agent_model" in
+            gpt-*|o1-*|o3-*|o4-*|chatgpt-*)
+                proxy_base_url="http://${host_gateway}:${AGENTAUTH_PORT}/openai"
+                ;;
+        esac
+        echo "  Runtime: gro (model: $agent_model)"
+    fi
+
     echo "Starting agent '$name' in container..."
     podman run -d \
         --name "$(container_name "$name")" \
         --restart on-failure:3 \
         $labels \
-        -e "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}" \
+        -e "ANTHROPIC_BASE_URL=${proxy_base_url}" \
+        -e "ANTHROPIC_API_KEY=${proxy_api_key}" \
+        ${runtime_env:+-e "AGENT_RUNTIME=${runtime_env}"} \
+        ${model_env:+-e "AGENT_MODEL=${model_env}"} \
+        ${use_gro:+-e "OPENAI_BASE_URL=http://${host_gateway}:${AGENTAUTH_PORT}/openai"} \
+        ${use_gro:+-e "OPENAI_API_KEY=proxy-managed"} \
         -e "AGENTCHAT_PUBLIC=true" \
         -e "AGENTCHAT_URL=${AGENTCHAT_URL}" \
         -e "NIKI_STARTUP_TIMEOUT=${NIKI_STARTUP_TIMEOUT:-600}" \
         -e "NIKI_STALL_TIMEOUT=${NIKI_STALL_TIMEOUT:-86400}" \
-        -e "NIKI_DEAD_AIR_TIMEOUT=${NIKI_DEAD_AIR_TIMEOUT:-5}" \
+        -e "NIKI_DEAD_AIR_TIMEOUT=${NIKI_DEAD_AIR_TIMEOUT:-60}" \
+        $github_env \
+        -e "LUCIDITY_CLAUDE_CLI=/usr/local/bin/.claude-supervisor" \
         -v "${state_dir}:/home/agent/.agentchat/agents/${name}" \
         -v "${HOME}/.agentchat/identities:/home/agent/.agentchat/identities" \
+        -v "${claude_state}:/home/agent/.claude" \
         $lucidity_mount \
         "$IMAGE_NAME" \
         "$name" "$mission" > /dev/null
@@ -495,9 +786,9 @@ stop_all() {
 restart_all() {
     echo "Restarting all agents (except God)..."
 
-    # Decrypt once before the loop — the podman pipe consumes stdin,
-    # so decrypt_token's passphrase prompt won't work inside the loop.
-    decrypt_token
+    # Ensure agentauth proxy is running (handles decryption internally).
+    # Done once before the loop — podman pipe consumes stdin.
+    ensure_agentauth
 
     # Collect agent names into an array FIRST to avoid subshell issues.
     # Piping into `while read` runs the loop body in a subshell, which means
@@ -547,7 +838,18 @@ restart_all() {
         if [ -z "$mission" ]; then
             echo "WARNING: No mission for '$cname', skipping start"
         else
-            start_agent "$cname" "$mission"
+            # Restore runtime and model settings from previous start
+            local extra_args=()
+            if [ -f "$AGENTS_DIR/$cname/runtime.txt" ] && [ "$(cat "$AGENTS_DIR/$cname/runtime.txt")" = "gro" ]; then
+                extra_args+=(--use-gro)
+            fi
+            if [ -f "$AGENTS_DIR/$cname/model.txt" ]; then
+                extra_args+=(--model "$(cat "$AGENTS_DIR/$cname/model.txt")")
+            fi
+            if [ -f "$AGENTS_DIR/$cname/keys.txt" ]; then
+                extra_args+=(--keys "$(cat "$AGENTS_DIR/$cname/keys.txt")")
+            fi
+            start_agent "$cname" "$mission" "${extra_args[@]}"
         fi
     done
 
@@ -562,11 +864,17 @@ case "$1" in
     setup-token)
         setup_token
         ;;
+    setup-openai-token)
+        setup_openai_token
+        ;;
     build)
-        build_image
+        build_image "$2"
         ;;
     start)
-        start_agent "$2" "$3"
+        start_agent "$2" "$3" "${@:4}"
+        ;;
+    edit)
+        edit_agent "$2"
         ;;
     stop)
         stop_agent "$2"
@@ -596,7 +904,41 @@ case "$1" in
             echo "No mission found for '$2'. Cannot restart."
             exit 1
         fi
-        start_agent "$2" "$mission"
+        # Parse CLI overrides (--use-gro, --model) if provided
+        restart_name="$2"
+        shift 2 2>/dev/null || true
+        cli_use_gro=""
+        cli_use_claude_code=""
+        cli_model=""
+        cli_keys=""
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                --use-gro) cli_use_gro="true" ;;
+                --use-claude-code) cli_use_claude_code="true" ;;
+                --model) cli_model="$2"; shift ;;
+                --keys) cli_keys="$2"; shift ;;
+                *) ;;
+            esac
+            shift
+        done
+        # CLI args override saved settings; fall back to saved if no CLI args
+        restart_extra_args=()
+        if [ "$cli_use_gro" = "true" ]; then
+            restart_extra_args+=(--use-gro)
+        elif [ -f "$AGENTS_DIR/$restart_name/runtime.txt" ] && [ "$(cat "$AGENTS_DIR/$restart_name/runtime.txt")" = "gro" ]; then
+            restart_extra_args+=(--use-gro)
+        fi
+        if [ -n "$cli_model" ]; then
+            restart_extra_args+=(--model "$cli_model")
+        elif [ -f "$AGENTS_DIR/$restart_name/model.txt" ]; then
+            restart_extra_args+=(--model "$(cat "$AGENTS_DIR/$restart_name/model.txt")")
+        fi
+        if [ -n "$cli_keys" ]; then
+            restart_extra_args+=(--keys "$cli_keys")
+        elif [ -f "$AGENTS_DIR/$restart_name/keys.txt" ]; then
+            restart_extra_args+=(--keys "$(cat "$AGENTS_DIR/$restart_name/keys.txt")")
+        fi
+        start_agent "$restart_name" "$mission" "${restart_extra_args[@]}"
         ;;
     status)
         show_status "$2"
@@ -615,6 +957,29 @@ case "$1" in
         ;;
     restartall)
         restart_all
+        ;;
+    proxy)
+        subcmd="${2:-status}"
+        case "$subcmd" in
+            start)
+                ensure_agentauth
+                ;;
+            stop)
+                stop_agentauth
+                ;;
+            status)
+                if [ -f "$AGENTAUTH_PID_FILE" ] && kill -0 "$(cat "$AGENTAUTH_PID_FILE")" 2>/dev/null; then
+                    echo "agentauth proxy running (pid $(cat "$AGENTAUTH_PID_FILE"), port $AGENTAUTH_PORT)"
+                    curl -sf "http://localhost:${AGENTAUTH_PORT}/agentauth/health" 2>/dev/null | python3 -m json.tool 2>/dev/null || true
+                else
+                    echo "agentauth proxy not running"
+                fi
+                ;;
+            *)
+                echo "Usage: agentctl proxy [start|stop|status]"
+                exit 1
+                ;;
+        esac
         ;;
     syncdaemon)
         agent_sync="${AGENT_SYNC:-$HOME/dev/claude/agent-sync-ci/agent-sync.sh}"
@@ -647,3 +1012,98 @@ case "$1" in
         usage
         ;;
 esac
+
+edit_agent() {
+    local name="$1"
+    if [ -z "$name" ]; then
+        echo "Usage: agentctl edit <name>"
+        exit 1
+    fi
+
+    local state_dir="$AGENTS_DIR/$name"
+    mkdir -p "$state_dir"
+
+    local current_mission=""
+    if [ -f "$state_dir/mission.txt" ]; then
+        current_mission=$(cat "$state_dir/mission.txt")
+    fi
+
+    local current_model=""
+    if [ -f "$state_dir/model.txt" ]; then
+        current_model=$(cat "$state_dir/model.txt")
+    fi
+
+    local current_runtime=""
+    if [ -f "$state_dir/runtime.txt" ]; then
+        current_runtime=$(cat "$state_dir/runtime.txt")
+    fi
+
+    echo "=== Edit agent: $name ==="
+    echo "(press Enter to keep current value)"
+    echo
+
+    echo "Current mission: ${current_mission:-<none>}"
+    read -r -p "New mission: " new_mission
+    if [ -n "$new_mission" ]; then
+        echo "$new_mission" > "$state_dir/mission.txt"
+    fi
+
+    echo
+    echo "Current model: ${current_model:-<none>}"
+    read -r -p "New model: " new_model
+    if [ -n "$new_model" ]; then
+        echo "$new_model" > "$state_dir/model.txt"
+    fi
+
+    echo
+    echo "Current runtime: ${current_runtime:-<default>} (valid: gro|cli|<empty>)"
+    read -r -p "New runtime [gro/cli/empty]: " new_runtime
+    case "$new_runtime" in
+        gro|cli)
+            echo "$new_runtime" > "$state_dir/runtime.txt"
+            ;;
+        "")
+            # keep
+            ;;
+        empty|none|default)
+            rm -f "$state_dir/runtime.txt"
+            ;;
+        *)
+            echo "ERROR: invalid runtime '$new_runtime' (use gro, cli, or 'empty')"
+            exit 1
+            ;;
+    esac
+
+    echo
+    read -r -p "Restart agent now? [y/N] " restart_now
+    if [ "$restart_now" = "y" ] || [ "$restart_now" = "Y" ]; then
+        if is_container_running "$name"; then
+            stop_agent "$name"
+            sleep 2
+        elif container_exists "$name"; then
+            podman rm -f "$(container_name "$name")" > /dev/null 2>&1 || true
+        fi
+
+        local mission
+        mission=$(cat "$state_dir/mission.txt" 2>/dev/null)
+        if [ -z "$mission" ]; then
+            echo "ERROR: mission.txt is empty; cannot restart"
+            exit 1
+        fi
+
+        local extra_args=()
+        if [ -f "$state_dir/runtime.txt" ] && [ "$(cat "$state_dir/runtime.txt")" = "gro" ]; then
+            extra_args+=(--use-gro)
+        elif [ -f "$state_dir/runtime.txt" ] && [ "$(cat "$state_dir/runtime.txt")" = "cli" ]; then
+            extra_args+=(--use-claude-code)
+        fi
+        if [ -f "$state_dir/model.txt" ]; then
+            extra_args+=(--model "$(cat "$state_dir/model.txt")")
+        fi
+        if [ -f "$state_dir/keys.txt" ]; then
+            extra_args+=(--keys "$(cat "$state_dir/keys.txt")")
+        fi
+
+        start_agent "$name" "$mission" "${extra_args[@]}"
+    fi
+}

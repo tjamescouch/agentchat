@@ -1,5 +1,16 @@
 {
   "$schema": "https://unpkg.com/knip@latest/schema.json",
-  "project": ["bin/**/*.js", "lib/**/*.js", "test/**/*.js"],
-  "ignore": ["mcp-server/**"]
+  "entry": ["bin/agentchat.ts", "lib/**/index.ts", "test/**/*.js"],
+  "project": ["bin/**/*.ts", "lib/**/*.ts", "test/**/*.js"],
+  "ignore": ["mcp-server/**", "lib/**/*.js", "bin/**/*.js"],
+  "ignoreDependencies": [
+    "@akashnetwork/akashjs",
+    "@cosmjs/proto-signing",
+    "@cosmjs/stargate"
+  ],
+  "rules": {
+    "files": "off",
+    "exports": "off",
+    "types": "off"
+  }
 }
