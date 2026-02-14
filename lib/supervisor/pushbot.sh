@@ -35,6 +35,7 @@ SKIP_PROTECTED=true  # skip main/master branches (never push these from wormhole
 DELETE_OLD_DAYS=0    # 0 = disabled, >0 = delete remote branches with no commits in N days
 PID_FILE="/tmp/pushbot.pid"
 LOG_FILE="/tmp/pushbot.log"
+FAIL_DIR="/tmp/pushbot-failed"  # semaphore dir: tracks failed push commit hashes
 
 # ── Args ──────────────────────────────────────────────────────────────────
 
@@ -110,6 +111,30 @@ git_push() {
             -C "$repo_dir" push origin "$branch" 2>&1
 }
 
+# ── Failed-push semaphore ─────────────────────────────────────────────────
+# File-based: /tmp/pushbot-failed/<repo>__<branch> contains the commit hash
+# that last failed. On retry, skip if local HEAD matches (nothing changed).
+# On success, remove the semaphore. On new failure, write/update it.
+
+fail_key() {
+    # Sanitize repo:branch into a filename
+    echo "${1}__${2}" | tr '/' '_'
+}
+
+get_failed_hash() {
+    local f="${FAIL_DIR}/$(fail_key "$1" "$2")"
+    [[ -f "$f" ]] && cat "$f" || echo ""
+}
+
+set_failed_hash() {
+    mkdir -p "$FAIL_DIR"
+    echo "$3" > "${FAIL_DIR}/$(fail_key "$1" "$2")"
+}
+
+clear_failed() {
+    rm -f "${FAIL_DIR}/$(fail_key "$1" "$2")"
+}
+
 # ── Push one repo ─────────────────────────────────────────────────────────
 
 push_repo() {
@@ -129,7 +154,6 @@ push_repo() {
         return 0
     fi
 
-    # List ALL local branches, push each non-protected one
     local push_errors=0
     local found=0
     while IFS= read -r branch; do
@@ -139,10 +163,30 @@ push_repo() {
             continue
         fi
 
+        # Within-cycle dedup: skip if this repo+branch already handled by another agent
+        local dedup_key="${repo_name}:${branch}"
+        if [[ " ${CYCLE_SEEN} " == *" ${dedup_key} "* ]]; then
+            vlog "SKIP ${repo_name}/${branch} — already handled this cycle"
+            continue
+        fi
+
+        # Get local HEAD for this branch
+        local head_hash
+        head_hash=$(git -C "$repo_dir" rev-parse "$branch" 2>/dev/null) || continue
+
+        # Cross-cycle: skip if same commit already failed (retry on new commits)
+        local prev_fail
+        prev_fail=$(get_failed_hash "$repo_name" "$branch")
+        if [[ -n "$prev_fail" && "$prev_fail" == "$head_hash" ]]; then
+            vlog "SKIP ${repo_name}/${branch} — unchanged since last failure (${head_hash:0:7})"
+            CYCLE_SEEN+=" ${dedup_key}"
+            continue
+        fi
+
         found=$((found + 1))
 
         if [[ "$DRY_RUN" == "true" ]]; then
-            log "[dry-run] Would push ${repo_name}/${branch}"
+            log "[dry-run] Would push ${repo_name}/${branch} (${head_hash:0:7})"
             continue
         fi
 
@@ -155,11 +199,17 @@ push_repo() {
                 echo "$output" | sed 's/^/  /'
                 notify_push "${repo_name}" "${branch}" "$output"
             fi
+            # Clear any previous failure
+            clear_failed "$repo_name" "$branch"
         else
             log "ERROR ${repo_name}/${branch}: $(echo "$output" | head -1)"
             notify_error "${repo_name}" "${branch}" "$output"
+            # Record failure with this commit hash — won't retry until commit changes
+            set_failed_hash "$repo_name" "$branch" "$head_hash"
             push_errors=$((push_errors + 1))
         fi
+        # Mark as seen this cycle (dedup across agent dirs with same repo)
+        CYCLE_SEEN+=" ${dedup_key}"
     done < <(git -C "$repo_dir" branch --format='%(refname:short)' 2>/dev/null)
 
     [[ "$found" -eq 0 ]] && vlog "SKIP ${repo_name} — no non-protected branches"
@@ -227,6 +277,8 @@ push_all() {
     local count=0
     local errors=0
     local pushed=0
+    CYCLE_SEEN=""    # dedup: tracks repo:branch combos already attempted this cycle
+    CLEANED_SET=""   # dedup: tracks repos already cleaned this cycle
 
     log "Scanning ${WORMHOLE_DIR}..."
 
@@ -244,7 +296,10 @@ push_all() {
             else
                 errors=$((errors + 1))
             fi
-            [[ "$DELETE_OLD_DAYS" -gt 0 ]] && delete_old_branches "$agent_dir"
+            if [[ "$DELETE_OLD_DAYS" -gt 0 ]] && [[ " ${CLEANED_SET} " != *" $(basename "$agent_dir") "* ]]; then
+                delete_old_branches "$agent_dir"
+                CLEANED_SET+=" $(basename "$agent_dir")"
+            fi
             count=$((count + 1))
         fi
 
@@ -257,7 +312,10 @@ push_all() {
                 else
                     errors=$((errors + 1))
                 fi
-                [[ "$DELETE_OLD_DAYS" -gt 0 ]] && delete_old_branches "$sub_dir"
+                if [[ "$DELETE_OLD_DAYS" -gt 0 ]] && [[ " ${CLEANED_SET} " != *" $(basename "$sub_dir") "* ]]; then
+                    delete_old_branches "$sub_dir"
+                    CLEANED_SET+=" $(basename "$sub_dir")"
+                fi
                 count=$((count + 1))
             fi
         done
