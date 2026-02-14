@@ -36,6 +36,9 @@ DELETE_OLD_DAYS=0    # 0 = disabled, >0 = delete remote branches with no commits
 PID_FILE="/tmp/pushbot.pid"
 LOG_FILE="/tmp/pushbot.log"
 FAIL_DIR="/tmp/pushbot-failed"  # semaphore dir: tracks failed push commit hashes
+AUTH_FAIL_FILE="/tmp/pushbot-auth-fail"  # circuit breaker: consecutive auth failures
+MAX_AUTH_FAILS=3               # trip breaker after this many consecutive auth failures
+AUTH_BACKOFF=1800              # seconds to sleep when breaker trips (30 min)
 
 # ── Args ──────────────────────────────────────────────────────────────────
 
@@ -135,6 +138,42 @@ clear_failed() {
     rm -f "${FAIL_DIR}/$(fail_key "$1" "$2")"
 }
 
+# ── Auth failure circuit breaker ─────────────────────────────────────────
+# Detects SSH/auth failures (credential exhaustion, key issues) and stops
+# hammering GitHub. Trips after MAX_AUTH_FAILS consecutive auth errors.
+
+is_auth_error() {
+    local output="$1"
+    echo "$output" | grep -qiE 'permission denied|authentication|publickey|could not read from remote|403|401|rate limit|secondary rate'
+}
+
+get_auth_fails() {
+    [[ -f "$AUTH_FAIL_FILE" ]] && cat "$AUTH_FAIL_FILE" || echo 0
+}
+
+record_auth_fail() {
+    local count
+    count=$(get_auth_fails)
+    echo $((count + 1)) > "$AUTH_FAIL_FILE"
+}
+
+clear_auth_fails() {
+    rm -f "$AUTH_FAIL_FILE"
+}
+
+check_circuit_breaker() {
+    local fails
+    fails=$(get_auth_fails)
+    if [[ "$fails" -ge "$MAX_AUTH_FAILS" ]]; then
+        log "CIRCUIT BREAKER: ${fails} consecutive auth failures — sleeping ${AUTH_BACKOFF}s"
+        log "  (delete ${AUTH_FAIL_FILE} to reset manually)"
+        # Reset counter so we retry after backoff
+        echo 0 > "$AUTH_FAIL_FILE"
+        return 1
+    fi
+    return 0
+}
+
 # ── Push one repo ─────────────────────────────────────────────────────────
 
 push_repo() {
@@ -201,12 +240,19 @@ push_repo() {
             fi
             # Clear any previous failure
             clear_failed "$repo_name" "$branch"
+            # Success clears auth failure counter
+            clear_auth_fails
         else
             log "ERROR ${repo_name}/${branch}: $(echo "$output" | head -1)"
             notify_error "${repo_name}" "${branch}" "$output"
             # Record failure with this commit hash — won't retry until commit changes
             set_failed_hash "$repo_name" "$branch" "$head_hash"
             push_errors=$((push_errors + 1))
+            # Track auth failures for circuit breaker
+            if is_auth_error "$output"; then
+                record_auth_fail
+                log "AUTH FAIL #$(get_auth_fails) — credential/SSH issue detected"
+            fi
         fi
         # Mark as seen this cycle (dedup across agent dirs with same repo)
         CYCLE_SEEN+=" ${dedup_key}"
@@ -231,10 +277,21 @@ delete_old_branches() {
     local cutoff_epoch
     cutoff_epoch=$(date -v-${DELETE_OLD_DAYS}d +%s 2>/dev/null || date -d "${DELETE_OLD_DAYS} days ago" +%s 2>/dev/null) || return 0
 
+    # Skip if circuit breaker already tripped
+    [[ $(get_auth_fails) -ge $MAX_AUTH_FAILS ]] && return 0
+
     # Fetch remote branch info
-    GIT_TERMINAL_PROMPT=0 git -c core.hooksPath=/dev/null \
+    local fetch_output
+    fetch_output=$(GIT_TERMINAL_PROMPT=0 timeout 30 git -c core.hooksPath=/dev/null \
         -c 'url.git@github.com:.insteadOf=https://github.com/' \
-        -C "$repo_dir" fetch origin --prune 2>/dev/null || return 0
+        -C "$repo_dir" fetch origin --prune 2>&1)
+    if [[ $? -ne 0 ]]; then
+        if is_auth_error "$fetch_output"; then
+            record_auth_fail
+            log "AUTH FAIL on fetch ${repo_name}: $(echo "$fetch_output" | head -1)"
+        fi
+        return 0
+    fi
 
     while IFS= read -r ref; do
         [[ -z "$ref" ]] && continue
@@ -258,8 +315,13 @@ delete_old_branches() {
                     -C "$repo_dir" push origin --delete "$branch" 2>&1); then
                     log "DELETED stale branch ${repo_name}/${branch} (${age_days}d old)"
                     notify_push "${repo_name}" "${branch}" "🗑️ Deleted stale branch (${age_days}d old, threshold: ${DELETE_OLD_DAYS}d)"
+                    clear_auth_fails
                 else
                     log "ERROR deleting ${repo_name}/${branch}: $(echo "$output" | head -1)"
+                    if is_auth_error "$output"; then
+                        record_auth_fail
+                        return 0  # stop deleting — auth is broken
+                    fi
                 fi
             fi
         fi
@@ -366,6 +428,17 @@ main() {
         push_all
     else
         while [[ "$RUNNING" == "true" ]]; do
+            # Circuit breaker: skip cycle if too many consecutive auth failures
+            if ! check_circuit_breaker; then
+                # Sleep the backoff period (interruptible)
+                local b=0
+                while [[ $b -lt $AUTH_BACKOFF && "$RUNNING" == "true" ]]; do
+                    sleep 1
+                    b=$((b + 1))
+                done
+                continue
+            fi
+
             # Catch errors — daemon must not die on transient failures
             push_all || log "WARNING: push_all had errors, continuing..."
 
