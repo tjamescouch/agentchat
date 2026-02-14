@@ -48,8 +48,10 @@ If the repo does not exist yet in `~`:
 
 ```bash
 cd ~
-git clone https://github.com/tjamescouch/REPONAME.git REPONAME
+mkdir -p ~/REPONAME
 cd ~/REPONAME
+git init
+git remote add origin https://github.com/tjamescouch/REPONAME.git
 ```
 
 Create a feature branch:
