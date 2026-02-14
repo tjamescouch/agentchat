@@ -31,7 +31,7 @@ DRY_RUN=false
 VERBOSE=false
 WATCH_INTERVAL=0  # 0 = run once
 BRANCH_FILTER=""  # empty = push all, otherwise glob pattern (e.g. "agent/*")
-FIX_REMOTES=true  # auto-convert HTTPS→SSH remotes
+SKIP_PROTECTED=true  # skip main/master branches (never push these from wormhole)
 PID_FILE="/tmp/pushbot.pid"
 LOG_FILE="/tmp/pushbot.log"
 
@@ -45,7 +45,7 @@ while [[ $# -gt 0 ]]; do
         --once)       WATCH_INTERVAL=0; shift ;;
         --watch)      WATCH_INTERVAL="$2"; shift 2 ;;
         --filter)     BRANCH_FILTER="$2"; shift 2 ;;
-        --no-fix-remotes) FIX_REMOTES=false; shift ;;
+        --no-skip-protected) SKIP_PROTECTED=false; shift ;;
         --pid-file)   PID_FILE="$2"; shift 2 ;;
         --log)        LOG_FILE="$2"; shift 2 ;;
         -h|--help)    sed -n '2,/^$/s/^# //p' "$0"; exit 0 ;;
@@ -63,19 +63,16 @@ vlog() {
     [[ "$VERBOSE" == "true" ]] && log "$@" || true
 }
 
-# ── Fix HTTPS→SSH remotes ─────────────────────────────────────────────
+# ── Protected branch list ─────────────────────────────────────────────
 
-fix_remote() {
-    local repo_dir="$1"
-    local url
-    url=$(git -C "$repo_dir" remote get-url origin 2>/dev/null) || return 0
+PROTECTED_BRANCHES="main master"
 
-    if [[ "$url" == https://github.com/* ]]; then
-        local new_url
-        new_url=$(echo "$url" | sed 's|https://github.com/|git@github.com:|')
-        git -C "$repo_dir" remote set-url origin "$new_url"
-        log "Fixed remote: $(basename "$repo_dir"): $url → $new_url"
-    fi
+is_protected_branch() {
+    local branch="$1"
+    for p in $PROTECTED_BRANCHES; do
+        [[ "$branch" == "$p" ]] && return 0
+    done
+    return 1
 }
 
 # ── Notify agentchat on push ──────────────────────────────────────────────
@@ -111,9 +108,6 @@ push_repo() {
         return 0
     fi
 
-    # Auto-fix HTTPS→SSH if enabled
-    [[ "$FIX_REMOTES" == "true" ]] && fix_remote "$repo_dir"
-
     # Get current branches
     local branches
     branches=$(git -C "$repo_dir" branch --format='%(refname:short)' 2>/dev/null)
@@ -121,6 +115,24 @@ push_repo() {
     if [[ -z "$branches" ]]; then
         vlog "SKIP ${repo_name} — no branches"
         return 0
+    fi
+
+    # Filter out protected branches (main/master) — never push these from wormhole
+    if [[ "$SKIP_PROTECTED" == "true" ]]; then
+        local filtered=""
+        while IFS= read -r branch; do
+            [[ -z "$branch" ]] && continue
+            if is_protected_branch "$branch"; then
+                vlog "SKIP ${repo_name}/${branch} — protected branch"
+            else
+                filtered+="${branch}"$'\n'
+            fi
+        done <<< "$branches"
+        branches="${filtered%$'\n'}"
+        if [[ -z "$branches" ]]; then
+            vlog "SKIP ${repo_name} — only protected branches"
+            return 0
+        fi
     fi
 
     # Filter branches if pattern specified
@@ -151,7 +163,9 @@ push_repo() {
         local output
         # SECURITY: Disable git hooks — wormhole repos are agent-written, untrusted.
         # Hooks in .git/hooks/ could execute arbitrary code on the host.
-        if output=$(GIT_TERMINAL_PROMPT=0 timeout 30 git -c core.hooksPath=/dev/null -C "$repo_dir" push origin "$branch" 2>&1); then
+        # Use url.*.insteadOf to rewrite HTTPS→SSH at push time (avoids modifying
+        # wormhole .git/config which gets overwritten by sync daemon)
+        if output=$(GIT_TERMINAL_PROMPT=0 timeout 30 git -c core.hooksPath=/dev/null -c 'url.git@github.com:.insteadOf=https://github.com/' -C "$repo_dir" push origin "$branch" 2>&1); then
             if echo "$output" | grep -q "Everything up-to-date"; then
                 vlog "OK ${repo_name}/${branch} — already up to date"
             else
@@ -167,8 +181,8 @@ push_repo() {
         fi
     done <<< "$branches"
 
-    # Also push tags if any (hooks disabled for security)
-    git -c core.hooksPath=/dev/null -C "$repo_dir" push origin --tags 2>/dev/null || true
+    # Also push tags if any (hooks disabled for security, HTTPS→SSH rewrite)
+    git -c core.hooksPath=/dev/null -c 'url.git@github.com:.insteadOf=https://github.com/' -C "$repo_dir" push origin --tags 2>/dev/null || true
 
     [[ "$push_errors" -gt 0 ]] && return 1
 
@@ -247,7 +261,7 @@ main() {
     log "Starting pushbot (PID $$)"
     log "  Wormhole:     $WORMHOLE_DIR"
     log "  Dry-run:      $DRY_RUN"
-    log "  Fix-remotes:  $FIX_REMOTES"
+    log "  Skip-protected: $SKIP_PROTECTED"
     [[ -n "$BRANCH_FILTER" ]] && log "  Filter:       $BRANCH_FILTER"
     [[ "$WATCH_INTERVAL" -gt 0 ]] && log "  Watch:        every ${WATCH_INTERVAL}s"
 
