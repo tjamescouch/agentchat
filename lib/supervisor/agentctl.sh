@@ -344,8 +344,14 @@ container_exists() {
 }
 
 build_image() {
-    echo "Building agent image (clean build, no cache)..."
-    podman build --no-cache -t "$IMAGE_NAME" -f "$REPO_ROOT/docker/agent.Dockerfile" "$REPO_ROOT"
+    local cache_flag=""
+    if [ "$1" = "--clean" ]; then
+        cache_flag="--no-cache"
+        echo "Building agent image (clean, no cache)..."
+    else
+        echo "Building agent image..."
+    fi
+    podman build $cache_flag -t "$IMAGE_NAME" -f "$REPO_ROOT/docker/agent.Dockerfile" "$REPO_ROOT"
     echo "Image '$IMAGE_NAME' built successfully"
 }
 
@@ -830,7 +836,7 @@ case "$1" in
         setup_openai_token
         ;;
     build)
-        build_image
+        build_image "$2"
         ;;
     start)
         start_agent "$2" "$3" "${@:4}"
