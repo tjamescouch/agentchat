@@ -33,15 +33,30 @@
 # Optional args:
 #   --use-gro         Force gro runtime
 #   --use-claude-code Force CLI runtime (Claude Code)
+#
+# Version:
+#   --version | -v
+# Maintainer: Sabrina (@vwgo4spd) — James Couch MIT CTO
+# Build stamp vars can be injected by the image build:
+#   AGENT_RUNNER_SOURCE_COMMIT, AGENT_RUNNER_BUILD_DATE
 
 #   *   Runtime error (supervisor should restart with backoff)
 
 set -e
 
+VERSION="${AGENT_RUNNER_VERSION:-0.0.0}"
+SOURCE_COMMIT="${AGENT_RUNNER_SOURCE_COMMIT:-unknown}"
+BUILD_DATE="${AGENT_RUNNER_BUILD_DATE:-unknown}"
+MAINTAINER="Sabrina (@vwgo4spd)"
+
 # ============ Config ============
 # Minimal argv parsing for runtime selection
 while [ $# -gt 0 ]; do
     case "$1" in
+        --version|-v)
+            echo "agent-runner version=${VERSION} commit=${SOURCE_COMMIT} built=${BUILD_DATE} maintainer=${MAINTAINER}"
+            exit 0
+            ;;
         --use-gro)
             AGENT_RUNTIME=gro
             shift

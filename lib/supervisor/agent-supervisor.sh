@@ -13,9 +13,25 @@
 #
 # Usage: ./agent-supervisor.sh <agent-name> <mission>
 
+# Version:
+#   --version | -v
+# Maintainer: Sabrina (@vwgo4spd) — James Couch MIT CTO
+# Build stamp vars can be injected by the image build:
+#   AGENT_SUPERVISOR_SOURCE_COMMIT, AGENT_SUPERVISOR_BUILD_DATE
+
 set -e
 
+VERSION="${AGENT_SUPERVISOR_VERSION:-0.0.0}"
+SOURCE_COMMIT="${AGENT_SUPERVISOR_SOURCE_COMMIT:-unknown}"
+BUILD_DATE="${AGENT_SUPERVISOR_BUILD_DATE:-unknown}"
+MAINTAINER="Sabrina (@vwgo4spd)"
+
 AGENT_NAME="${1:-default}"
+
+if [ "${1:-}" = "--version" ] || [ "${1:-}" = "-v" ]; then
+    echo "agent-supervisor version=${VERSION} commit=${SOURCE_COMMIT} built=${BUILD_DATE} maintainer=${MAINTAINER}"
+    exit 0
+fi
 MISSION="${2:-monitor agentchat and respond to messages}"
 STATE_DIR="$HOME/.agentchat/agents/$AGENT_NAME"
 LOG_FILE="$STATE_DIR/supervisor.log"
