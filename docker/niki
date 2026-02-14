@@ -228,11 +228,29 @@ function checkRateLimits() {
 let child = null;
 let killed = false;
 
-function killChild(reason) {
+function killChild(reason, detail) {
   if (killed || !child) return;
   killed = true;
   state.killedBy = reason;
-  log(`KILL — reason: ${reason} | tokens: ${state.tokensTotal}/${BUDGET} | sends: ${state.sendCallsThisMinute}/min | tools: ${state.toolCallsThisMinute}/min`);
+  state.killDetail = detail || '';
+
+  const uptimeSec = Math.round((Date.now() - new Date(state.startedAt).getTime()) / 1000);
+  const silenceSec = Math.round((Date.now() - lastOutputTime) / 1000);
+  const cpuActive = child ? hasConsumedCpu(child.pid) : false;
+
+  log(`╔══ KILL ════════════════════════════════════════`);
+  log(`║ reason:       ${reason}`);
+  if (detail) log(`║ detail:       ${detail}`);
+  log(`║ uptime:       ${uptimeSec}s`);
+  log(`║ silence:      ${silenceSec}s since last output`);
+  log(`║ cpu_active:   ${cpuActive}`);
+  log(`║ first_output: ${gotFirstOutput}`);
+  log(`║ tokens:       ${state.tokensTotal}/${BUDGET}`);
+  log(`║ sends/min:    ${state.sendCallsThisMinute}/${MAX_SENDS}`);
+  log(`║ tools/min:    ${state.toolCallsThisMinute}/${MAX_TOOL_CALLS}`);
+  log(`║ stalls:       ${state.stallEvents} (nudges: ${nudgeCount}/${MAX_NUDGES})`);
+  log(`║ dead_air:     ${deadAirStart ? Math.round((Date.now() - deadAirStart) / 1000) + 's' : 'none'}`);
+  log(`╚═══════════════════════════════════════════════`);
 
   child.kill('SIGTERM');
 
@@ -359,7 +377,7 @@ function checkDeadAir() {
   const deadAirMin = (Date.now() - deadAirStart) / 60_000;
   if (deadAirMin >= DEAD_AIR_TIMEOUT_M) {
     log(`DEAD AIR — zero CPU + zero output for ${Math.round(deadAirMin)}min (threshold: ${DEAD_AIR_TIMEOUT_M}min)`);
-    killChild('dead-air');
+    killChild('dead-air', `zero CPU + zero output for ${Math.round(deadAirMin)}min, threshold was ${DEAD_AIR_TIMEOUT_M}min, silence started ${silenceSec}s ago`);
     return;
   }
 
@@ -453,7 +471,8 @@ function onStallDetected() {
     }
   }
 
-  killChild('stall');
+  const silence = Math.round((Date.now() - lastOutputTime) / 1000);
+  killChild('stall', `no output for ${silence}s, stdin closed, ${nudgeCount} nudges exhausted, zero CPU confirmed`);
 }
 
 // --- Spawn child process ---
@@ -503,14 +522,17 @@ child.stderr.on('data', (chunk) => {
 
     // Check budget
     if (state.tokensTotal > BUDGET) {
-      killChild('budget');
+      killChild('budget', `token count ${state.tokensTotal} exceeded budget ${BUDGET}`);
       return;
     }
 
     // Check rate limits
     const rateViolation = checkRateLimits();
     if (rateViolation) {
-      killChild(rateViolation);
+      const detail = rateViolation === 'rate-sends'
+        ? `${sendCallTimestamps.length} sends in 60s (max: ${MAX_SENDS})`
+        : `${toolCallTimestamps.length} tool calls in 60s (max: ${MAX_TOOL_CALLS})`;
+      killChild(rateViolation, detail);
       return;
     }
   }
@@ -544,7 +566,7 @@ function scheduleAbortPoll() {
     if (killed) return;
     if (existsSync(ABORT_FILE)) {
       log(`Abort file detected: ${ABORT_FILE}`);
-      killChild('abort');
+      killChild('abort', `abort file found at ${ABORT_FILE}`);
       return;
     }
     scheduleAbortPoll();
@@ -559,7 +581,7 @@ if (ABORT_FILE) {
 // --- Timeout ---
 
 const timeoutId = setTimeout(() => {
-  killChild('timeout');
+  killChild('timeout', `wall-clock timeout of ${TIMEOUT_S}s exceeded`);
 }, TIMEOUT_S * 1000);
 
 // --- Clean exit ---
@@ -574,7 +596,7 @@ child.on('exit', (code, signal) => {
   state.duration = Math.round((Date.now() - new Date(state.startedAt).getTime()) / 1000);
 
   state.gotFirstOutput = gotFirstOutput;
-  log(`Exit — code: ${code} signal: ${signal} | tokens: ${state.tokensTotal} | tools: ${state.toolCalls} | sends: ${state.sendCalls} | duration: ${state.duration}s | output: ${gotFirstOutput}${state.killedBy ? ` | killed: ${state.killedBy}` : ''}`);
+  log(`Exit — code: ${code} signal: ${signal} | tokens: ${state.tokensTotal} | tools: ${state.toolCalls} | sends: ${state.sendCalls} | duration: ${state.duration}s | output: ${gotFirstOutput}${state.killedBy ? ` | killed: ${state.killedBy} (${state.killDetail || 'no detail'})` : ''}`);
   writeState();
 
   if (logStream) logStream.end();

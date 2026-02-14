@@ -200,13 +200,13 @@ sync_container() {
             "$(basename "$CONTAINER_SOURCE")" \
             | tar xf - -C "$tar_tmp" --strip-components=1 2>/dev/null; then
 
-            # Atomic swap
+            # Incremental merge (preserves repos from previous sessions after restart)
             if [[ -d "$dest" ]]; then
-                rm -rf "${dest}.old"
-                mv "$dest" "${dest}.old"
+                cp -a "$tar_tmp/." "$dest/" 2>/dev/null || true
+                rm -rf "$tar_tmp"
+            else
+                mv "$tar_tmp" "$dest"
             fi
-            mv "$tar_tmp" "$dest"
-            rm -rf "${dest}.old"
         else
             log_always "ERROR: tar pipe failed for $agent_name ($container_id)"
             rm -rf "$tar_tmp"
@@ -243,13 +243,13 @@ sync_container() {
             done < "${tmp_dest}/.syncignore"
         fi
 
-        # Atomic swap
+        # Incremental merge (preserves repos from previous sessions after restart)
         if [[ -d "$dest" ]]; then
-            rm -rf "${dest}.old"
-            mv "$dest" "${dest}.old"
+            cp -a "$tmp_dest/." "$dest/" 2>/dev/null || true
+            rm -rf "$tmp_dest"
+        else
+            mv "$tmp_dest" "$dest"
         fi
-        mv "$tmp_dest" "$dest"
-        rm -rf "${dest}.old"
 
         log "podman cp complete for $agent_name"
     else

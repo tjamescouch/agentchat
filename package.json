@@ -1,6 +1,6 @@
 {
   "name": "@tjamescouch/agentchat",
-  "version": "0.26.0",
+  "version": "0.31.0",
   "description": "WebSocket protocol for real-time AI agent coordination — IRC for machines",
   "main": "dist/lib/client.js",
   "types": "dist/lib/client.d.ts",
@@ -55,10 +55,10 @@
     "prepublishOnly": "npm run rebuild",
     "start": "node dist/bin/agentchat.js serve",
     "dev": "npx tsc --watch",
-    "test": "npm run build && node --test 'test/*.test.js'",
+    "test": "npm run build && node --test test/*.test.js",
     "test:integration": "npm run build && node --test test/*.integration.test.js",
-    "test:all": "npm run build && node --test 'test/**/*.test.js'",
-    "test:watch": "node --test --watch 'test/*.test.js'",
+    "test:all": "npm run build && node --test test/**/*.test.js",
+    "test:watch": "node --test --watch test/*.test.js",
     "typecheck": "npx tsc --noEmit",
     "lint": "knip",
     "preflight": "npm run typecheck && npm run lint && npm test"

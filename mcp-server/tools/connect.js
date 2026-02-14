@@ -12,7 +12,7 @@ import {
   setClient, setServerUrl, setKeepaliveInterval,
   resetLastSeen,
   DEFAULT_SERVER_URL, KEEPALIVE_INTERVAL_MS, PONG_STALE_MS,
-  RECONNECT_MAX_ATTEMPTS, RECONNECT_BASE_DELAY_MS,
+  RECONNECT_MAX_ATTEMPTS, RECONNECT_BASE_DELAY_MS, RECONNECT_MAX_DELAY_MS,
   recordPong, isConnectionHealthy, lastPongTime,
   connectionOptions, setConnectionOptions,
   joinedChannels, trackChannel,
@@ -104,9 +104,26 @@ function wireMessageHandlers(targetClient) {
     recordPong();
   });
 
+  // Track whether this client was displaced by another connection
+  let _displaced = false;
+
+  // Inhibit reconnect on session displacement to prevent ping-pong loop
+  targetClient.on('session_displaced', () => {
+    _displaced = true;
+    appendToInbox({
+      type: 'MSG',
+      from: '@system',
+      from_name: 'system',
+      to: '#internal',
+      content: '[session displaced by another connection — not reconnecting]',
+      ts: Date.now(),
+    });
+  });
+
   // Auto-reconnect on disconnect (P1-LISTEN-1)
   targetClient.on('disconnect', () => {
-    // Don't reconnect if we're already reconnecting or if this was intentional
+    // Don't reconnect if displaced, already reconnecting, or intentional
+    if (_displaced) return;
     if (!isReconnecting() && connectionOptions) {
       attemptReconnect();
     }
@@ -125,8 +142,11 @@ async function attemptReconnect() {
   const channels = [...joinedChannels];
 
   for (let attempt = 0; attempt < RECONNECT_MAX_ATTEMPTS; attempt++) {
-    const delay = RECONNECT_BASE_DELAY_MS * Math.pow(2, attempt);
     if (attempt > 0) {
+      // Exponential backoff with jitter, capped at max delay
+      const exponentialDelay = Math.min(RECONNECT_BASE_DELAY_MS * Math.pow(2, attempt), RECONNECT_MAX_DELAY_MS);
+      const jitter = exponentialDelay * 0.2 * (Math.random() - 0.5) * 2; // +/- 20%
+      const delay = Math.max(100, Math.round(exponentialDelay + jitter));
       await new Promise(r => setTimeout(r, delay));
     }
 
@@ -162,8 +182,16 @@ async function attemptReconnect() {
       setReconnecting(false);
       return;
     } catch (err) {
-      // Last attempt failed — give up
+      // Last attempt failed — log and give up
       if (attempt === RECONNECT_MAX_ATTEMPTS - 1) {
+        appendToInbox({
+          type: 'MSG',
+          from: '@system',
+          from_name: 'system',
+          to: '#internal',
+          content: `[reconnect failed after ${RECONNECT_MAX_ATTEMPTS} attempts — connection lost. Use agentchat_connect to reconnect manually.]`,
+          ts: Date.now(),
+        });
         setReconnecting(false);
       }
     }

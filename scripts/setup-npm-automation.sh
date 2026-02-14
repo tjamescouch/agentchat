@@ -30,6 +30,17 @@ echo
 read -p "Press ENTER when you have copied the token..."
 
 echo
+echo -e "${YELLOW}⚠️  IMPORTANT: Branch workflow${NC}"
+echo "   This repo uses a branch-only workflow for automation."
+echo "   Do NOT commit to main. Create/switch to a feature/* branch first."
+echo
+echo "   Example:"
+echo "     git checkout -b feature/npm-automation-trigger"
+echo
+echo "   (If you're already on a feature/* branch, you're good.)"
+echo
+
+echo
 echo -e "${CYAN}Step 2: Opening GitHub secrets page...${NC}"
 sleep 1
 open "https://github.com/tjamescouch/agentchat/settings/secrets/actions/new" 2>/dev/null || echo "Please open: https://github.com/tjamescouch/agentchat/settings/secrets/actions/new"
@@ -46,6 +57,17 @@ read -p "Press ENTER when you've added the secret..."
 echo
 echo -e "${CYAN}Step 3: Triggering publish workflow...${NC}"
 cd "$(dirname "$0")/.."
+
+# Ensure we don't accidentally create commits on main.
+branch="$(git branch --show-current 2>/dev/null || true)"
+if [[ "$branch" == "main" || -z "$branch" ]]; then
+  echo
+  echo -e "${YELLOW}Refusing to commit on branch '$branch'.${NC}"
+  echo "Create a feature branch first, then re-run this script:"
+  echo "  git checkout -b feature/npm-automation-trigger"
+  exit 1
+fi
+
 git commit --allow-empty -m "Trigger MCP publish workflow [ci skip]"
 git push
 
