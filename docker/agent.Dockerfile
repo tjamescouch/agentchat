@@ -6,6 +6,9 @@ RUN apt-get update && apt-get install -y \
     git \
     bash \
     procps \
+    python3 \
+    file \
+    ripgrep \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Claude CLI and agentchat MCP server globally
