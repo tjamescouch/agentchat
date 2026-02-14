@@ -6,6 +6,7 @@ AGENTS_DIR="$HOME/.agentchat/agents"
 SECRETS_DIR="$HOME/.agentchat/secrets"
 ENCRYPTED_TOKEN_FILE="$SECRETS_DIR/oauth-token.enc"
 ENCRYPTED_OPENAI_FILE="$SECRETS_DIR/openai-token.enc"
+ENCRYPTED_GITHUB_FILE="$SECRETS_DIR/github-token.enc"
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)"
 REPO_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 IMAGE_NAME="agentchat-agent:latest"
@@ -28,35 +29,53 @@ setup_token() {
     mkdir -p "$SECRETS_DIR"
     chmod 700 "$SECRETS_DIR"
 
-    if [ -f "$ENCRYPTED_TOKEN_FILE" ]; then
-        echo "Encrypted token already exists at $ENCRYPTED_TOKEN_FILE"
-        read -p "Overwrite? [y/N] " confirm
+    local existing=""
+    [ -f "$ENCRYPTED_TOKEN_FILE" ] && existing="$existing anthropic"
+    [ -f "$ENCRYPTED_OPENAI_FILE" ] && existing="$existing openai"
+    [ -f "$ENCRYPTED_GITHUB_FILE" ] && existing="$existing github"
+    if [ -n "$existing" ]; then
+        echo "Existing encrypted keys:$existing"
+        read -p "Overwrite all? [y/N] " confirm
         if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
             echo "Aborted."
             exit 0
         fi
     fi
 
-    echo "Run 'claude setup-token' to generate your OAuth token."
-    echo "Copy the token it outputs, then paste it below."
-    echo
-    echo "Enter your OAuth token (input hidden):"
-    IFS= read -r -s token
-    token="${token%$'\r'}"  # Strip carriage return if present
+    # Collect all tokens first
+    echo "=== API Key Setup ==="
+    echo "All keys are encrypted with AES-256-CBC + PBKDF2 and stored at rest."
+    echo "Keys are only decrypted into memory when the proxy starts."
     echo
 
-    if [ -z "$token" ]; then
-        echo "ERROR: Empty token"
+    echo "Enter your Anthropic API key (sk-ant-...) (input hidden):"
+    IFS= read -r -s anthropic_key
+    anthropic_key="${anthropic_key%$'\r'}"
+    echo
+
+    if [ -z "$anthropic_key" ]; then
+        echo "ERROR: Empty Anthropic key"
         exit 1
     fi
 
+    echo "Enter your OpenAI API key (sk-proj-...) (input hidden, or press Enter to skip):"
+    IFS= read -r -s openai_key
+    openai_key="${openai_key%$'\r'}"
+    echo
+
+    echo "Enter your GitHub token (ghp_... or github_pat_...) (input hidden, or press Enter to skip):"
+    IFS= read -r -s github_key
+    github_key="${github_key%$'\r'}"
+    echo
+
+    # Passphrase (one for all keys)
     echo "Enter encryption passphrase (input hidden):"
     IFS= read -r -s passphrase
-    passphrase="${passphrase%$'\r'}"  # Strip carriage return if present
+    passphrase="${passphrase%$'\r'}"
     echo
     echo "Confirm passphrase:"
     IFS= read -r -s passphrase_confirm
-    passphrase_confirm="${passphrase_confirm%$'\r'}"  # Strip carriage return if present
+    passphrase_confirm="${passphrase_confirm%$'\r'}"
     echo
 
     if [ "$passphrase" != "$passphrase_confirm" ]; then
@@ -69,91 +88,84 @@ setup_token() {
         exit 1
     fi
 
-    # Encrypt with AES-256-CBC + PBKDF2, salt, base64 output
-    echo -n "$token" | openssl enc -aes-256-cbc -a -salt -pbkdf2 -iter 100000 -pass "pass:${passphrase}" > "$ENCRYPTED_TOKEN_FILE" 2>/dev/null
-
+    # Encrypt Anthropic key
+    echo -n "$anthropic_key" | openssl enc -aes-256-cbc -a -salt -pbkdf2 -iter 100000 -pass "pass:${passphrase}" > "$ENCRYPTED_TOKEN_FILE" 2>/dev/null
     if [ $? -ne 0 ]; then
         rm -f "$ENCRYPTED_TOKEN_FILE"
-        echo "ERROR: Encryption failed"
+        echo "ERROR: Anthropic key encryption failed"
         exit 1
     fi
-
     chmod 600 "$ENCRYPTED_TOKEN_FILE"
 
-    # Verify decryption works immediately
-    echo "Verifying encryption..."
+    # Verify Anthropic
     local test_decrypt
     test_decrypt=$(openssl enc -aes-256-cbc -d -a -pbkdf2 -iter 100000 -pass "pass:${passphrase}" < "$ENCRYPTED_TOKEN_FILE" 2>/dev/null)
-
-    if [ "$test_decrypt" != "$token" ]; then
+    if [ "$test_decrypt" != "$anthropic_key" ]; then
         rm -f "$ENCRYPTED_TOKEN_FILE"
-        echo "ERROR: Encryption verification failed - decryption doesn't match original token"
-        echo "This suggests a terminal encoding issue. Try using CLAUDE_CODE_OAUTH_TOKEN env var instead:"
-        echo "  export CLAUDE_CODE_OAUTH_TOKEN='your-token'"
-        echo "  agentctl start <name> <mission>"
+        echo "ERROR: Anthropic key verification failed"
         exit 1
     fi
+    echo "Anthropic key encrypted and verified."
 
-    echo "Token encrypted and stored at $ENCRYPTED_TOKEN_FILE"
-    echo "Verification successful - decryption works!"
+    # Encrypt OpenAI key (if provided)
+    if [ -n "$openai_key" ]; then
+        echo -n "$openai_key" | openssl enc -aes-256-cbc -a -salt -pbkdf2 -iter 100000 -pass "pass:${passphrase}" > "$ENCRYPTED_OPENAI_FILE" 2>/dev/null
+        if [ $? -ne 0 ]; then
+            rm -f "$ENCRYPTED_OPENAI_FILE"
+            echo "ERROR: OpenAI key encryption failed"
+            exit 1
+        fi
+        chmod 600 "$ENCRYPTED_OPENAI_FILE"
+
+        test_decrypt=$(openssl enc -aes-256-cbc -d -a -pbkdf2 -iter 100000 -pass "pass:${passphrase}" < "$ENCRYPTED_OPENAI_FILE" 2>/dev/null)
+        if [ "$test_decrypt" != "$openai_key" ]; then
+            rm -f "$ENCRYPTED_OPENAI_FILE"
+            echo "ERROR: OpenAI key verification failed"
+            exit 1
+        fi
+        echo "OpenAI key encrypted and verified."
+    else
+        echo "OpenAI key skipped."
+    fi
+
+    # Encrypt GitHub token (if provided)
+    if [ -n "$github_key" ]; then
+        echo -n "$github_key" | openssl enc -aes-256-cbc -a -salt -pbkdf2 -iter 100000 -pass "pass:${passphrase}" > "$ENCRYPTED_GITHUB_FILE" 2>/dev/null
+        if [ $? -ne 0 ]; then
+            rm -f "$ENCRYPTED_GITHUB_FILE"
+            echo "ERROR: GitHub token encryption failed"
+            exit 1
+        fi
+        chmod 600 "$ENCRYPTED_GITHUB_FILE"
+
+        test_decrypt=$(openssl enc -aes-256-cbc -d -a -pbkdf2 -iter 100000 -pass "pass:${passphrase}" < "$ENCRYPTED_GITHUB_FILE" 2>/dev/null)
+        if [ "$test_decrypt" != "$github_key" ]; then
+            rm -f "$ENCRYPTED_GITHUB_FILE"
+            echo "ERROR: GitHub token verification failed"
+            exit 1
+        fi
+        echo "GitHub token encrypted and verified."
+    else
+        echo "GitHub token skipped."
+    fi
+
+    echo
+    echo "All keys stored in $SECRETS_DIR"
+    echo "Run 'agentctl proxy start' to launch the proxy."
 
     # Clear sensitive variables
-    token=""
+    anthropic_key=""
+    openai_key=""
+    github_key=""
     passphrase=""
     passphrase_confirm=""
     test_decrypt=""
 }
 
-# Setup OpenAI API key — same encryption as OAuth token, same passphrase.
+# Legacy alias — points to unified setup
 setup_openai_token() {
-    mkdir -p "$SECRETS_DIR"
-    chmod 700 "$SECRETS_DIR"
-
-    if [ -f "$ENCRYPTED_OPENAI_FILE" ]; then
-        echo "Encrypted OpenAI key already exists at $ENCRYPTED_OPENAI_FILE"
-        read -p "Overwrite? [y/N] " confirm
-        if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
-            echo "Aborted."
-            exit 0
-        fi
-    fi
-
-    echo "Enter your OpenAI API key (input hidden):"
-    IFS= read -r -s token
-    token="${token%$'\r'}"
-    echo
-
-    if [ -z "$token" ]; then
-        echo "ERROR: Empty key"
-        exit 1
-    fi
-
-    echo "Enter encryption passphrase (same as your OAuth token passphrase):"
-    IFS= read -r -s passphrase
-    passphrase="${passphrase%$'\r'}"
-    echo
-
-    echo -n "$token" | openssl enc -aes-256-cbc -a -salt -pbkdf2 -iter 100000 -pass "pass:${passphrase}" > "$ENCRYPTED_OPENAI_FILE" 2>/dev/null
-
-    if [ $? -ne 0 ]; then
-        rm -f "$ENCRYPTED_OPENAI_FILE"
-        echo "ERROR: Encryption failed"
-        exit 1
-    fi
-
-    chmod 600 "$ENCRYPTED_OPENAI_FILE"
-
-    # Verify
-    local test_decrypt
-    test_decrypt=$(openssl enc -aes-256-cbc -d -a -pbkdf2 -iter 100000 -pass "pass:${passphrase}" < "$ENCRYPTED_OPENAI_FILE" 2>/dev/null)
-    if [ "$test_decrypt" != "$token" ]; then
-        rm -f "$ENCRYPTED_OPENAI_FILE"
-        echo "ERROR: Encryption verification failed"
-        exit 1
-    fi
-
-    echo "OpenAI key encrypted and stored at $ENCRYPTED_OPENAI_FILE"
-    token=""
+    echo "Use 'agentctl setup-token' to set up all keys at once."
+    exit 1
     passphrase=""
     test_decrypt=""
 }
@@ -183,6 +195,14 @@ decrypt_token() {
         OPENAI_API_KEY=$(openssl enc -aes-256-cbc -d -a -pbkdf2 -iter 100000 -pass "pass:${passphrase}" < "$ENCRYPTED_OPENAI_FILE" 2>/dev/null)
         if [ -n "$OPENAI_API_KEY" ]; then
             export OPENAI_API_KEY
+        fi
+    fi
+
+    # Also decrypt GitHub token if it exists (same passphrase)
+    if [ -f "$ENCRYPTED_GITHUB_FILE" ]; then
+        GITHUB_TOKEN=$(openssl enc -aes-256-cbc -d -a -pbkdf2 -iter 100000 -pass "pass:${passphrase}" < "$ENCRYPTED_GITHUB_FILE" 2>/dev/null)
+        if [ -n "$GITHUB_TOKEN" ]; then
+            export GITHUB_TOKEN
         fi
     fi
 
@@ -333,6 +353,7 @@ start_agent() {
     local name="$1"
     local mission="$2"
     local use_gro="false"
+    local agent_keys=""
 
     # Parse optional flags after name and mission
     shift 2 2>/dev/null || true
@@ -340,13 +361,14 @@ start_agent() {
         case "$1" in
             --use-gro) use_gro="true" ;;
             --model) AGENT_MODEL_OVERRIDE="$2"; shift ;;
+            --keys) agent_keys="$2"; shift ;;
             *) echo "Unknown option: $1" ;;
         esac
         shift
     done
 
     if [ -z "$name" ] || [ -z "$mission" ]; then
-        echo "Usage: agentctl start <name> <mission> [--use-gro] [--model MODEL]"
+        echo "Usage: agentctl start <name> <mission> [--use-gro] [--model MODEL] [--keys anthropic,openai,github]"
         exit 1
     fi
 
@@ -376,6 +398,9 @@ start_agent() {
         echo "gro" > "$state_dir/runtime.txt"
     else
         rm -f "$state_dir/runtime.txt"
+    fi
+    if [ -n "$agent_keys" ]; then
+        echo "$agent_keys" > "$state_dir/keys.txt"
     fi
     if [ -n "$AGENT_MODEL_OVERRIDE" ]; then
         echo "$AGENT_MODEL_OVERRIDE" > "$state_dir/model.txt"
@@ -445,28 +470,19 @@ EOF
                 proxy_base_url="http://${host_gateway}:${AGENTAUTH_PORT}/openai"
                 ;;
         esac
+
+        # Note: ANTHROPIC_BASE_URL always points to /anthropic (for lucidity curation).
+        # OpenAI models use OPENAI_BASE_URL (set separately below) for the main agent.
         echo "  Runtime: gro (model: $agent_model)"
     fi
 
-    # Runtime selection
-    local runtime_env=""
-    local model_env=""
-    local proxy_base_url="http://${host_gateway}:${AGENTAUTH_PORT}/anthropic"
-    local proxy_api_key="proxy-managed"
-
-    if [ "$use_gro" = "true" ]; then
-        runtime_env="gro"
-        # For gro with OpenAI models, point at the OpenAI backend through proxy
-        # For gro with Anthropic models, keep the anthropic backend
-        local agent_model="${AGENT_MODEL_OVERRIDE:-gpt-4o}"
-        model_env="$agent_model"
-
-        case "$agent_model" in
-            gpt-*|o1-*|o3-*|o4-*|chatgpt-*)
-                proxy_base_url="http://${host_gateway}:${AGENTAUTH_PORT}/openai"
-                ;;
-        esac
-        echo "  Runtime: gro (model: $agent_model)"
+    # Build key-specific env vars based on --keys setting
+    # Default: agents only get keys needed for their runtime (anthropic/openai)
+    # --keys github: also gives access to GitHub via credential helper
+    local github_env=""
+    if echo "$agent_keys" | grep -q "github"; then
+        github_env="-e AGENTAUTH_URL=http://${host_gateway}:${AGENTAUTH_PORT}"
+        echo "  Keys: github (git push enabled)"
     fi
 
     echo "Starting agent '$name' in container..."
@@ -484,7 +500,8 @@ EOF
         -e "AGENTCHAT_URL=${AGENTCHAT_URL}" \
         -e "NIKI_STARTUP_TIMEOUT=${NIKI_STARTUP_TIMEOUT:-600}" \
         -e "NIKI_STALL_TIMEOUT=${NIKI_STALL_TIMEOUT:-86400}" \
-        -e "NIKI_DEAD_AIR_TIMEOUT=${NIKI_DEAD_AIR_TIMEOUT:-5}" \
+        -e "NIKI_DEAD_AIR_TIMEOUT=${NIKI_DEAD_AIR_TIMEOUT:-60}" \
+        $github_env \
         -e "LUCIDITY_CLAUDE_CLI=/usr/local/bin/.claude-supervisor" \
         -v "${state_dir}:/home/agent/.agentchat/agents/${name}" \
         -v "${HOME}/.agentchat/identities:/home/agent/.agentchat/identities" \
@@ -783,7 +800,18 @@ restart_all() {
         if [ -z "$mission" ]; then
             echo "WARNING: No mission for '$cname', skipping start"
         else
-            start_agent "$cname" "$mission"
+            # Restore runtime and model settings from previous start
+            local extra_args=()
+            if [ -f "$AGENTS_DIR/$cname/runtime.txt" ] && [ "$(cat "$AGENTS_DIR/$cname/runtime.txt")" = "gro" ]; then
+                extra_args+=(--use-gro)
+            fi
+            if [ -f "$AGENTS_DIR/$cname/model.txt" ]; then
+                extra_args+=(--model "$(cat "$AGENTS_DIR/$cname/model.txt")")
+            fi
+            if [ -f "$AGENTS_DIR/$cname/keys.txt" ]; then
+                extra_args+=(--keys "$(cat "$AGENTS_DIR/$cname/keys.txt")")
+            fi
+            start_agent "$cname" "$mission" "${extra_args[@]}"
         fi
     done
 
@@ -835,15 +863,39 @@ case "$1" in
             echo "No mission found for '$2'. Cannot restart."
             exit 1
         fi
-        # Restore runtime and model settings from previous start
+        # Parse CLI overrides (--use-gro, --model) if provided
+        restart_name="$2"
+        shift 2 2>/dev/null || true
+        cli_use_gro=""
+        cli_model=""
+        cli_keys=""
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                --use-gro) cli_use_gro="true" ;;
+                --model) cli_model="$2"; shift ;;
+                --keys) cli_keys="$2"; shift ;;
+                *) ;;
+            esac
+            shift
+        done
+        # CLI args override saved settings; fall back to saved if no CLI args
         restart_extra_args=()
-        if [ -f "$AGENTS_DIR/$2/runtime.txt" ] && [ "$(cat "$AGENTS_DIR/$2/runtime.txt")" = "gro" ]; then
+        if [ "$cli_use_gro" = "true" ]; then
+            restart_extra_args+=(--use-gro)
+        elif [ -f "$AGENTS_DIR/$restart_name/runtime.txt" ] && [ "$(cat "$AGENTS_DIR/$restart_name/runtime.txt")" = "gro" ]; then
             restart_extra_args+=(--use-gro)
         fi
-        if [ -f "$AGENTS_DIR/$2/model.txt" ]; then
-            restart_extra_args+=(--model "$(cat "$AGENTS_DIR/$2/model.txt")")
+        if [ -n "$cli_model" ]; then
+            restart_extra_args+=(--model "$cli_model")
+        elif [ -f "$AGENTS_DIR/$restart_name/model.txt" ]; then
+            restart_extra_args+=(--model "$(cat "$AGENTS_DIR/$restart_name/model.txt")")
         fi
-        start_agent "$2" "$mission" "${restart_extra_args[@]}"
+        if [ -n "$cli_keys" ]; then
+            restart_extra_args+=(--keys "$cli_keys")
+        elif [ -f "$AGENTS_DIR/$restart_name/keys.txt" ]; then
+            restart_extra_args+=(--keys "$(cat "$AGENTS_DIR/$restart_name/keys.txt")")
+        fi
+        start_agent "$restart_name" "$mission" "${restart_extra_args[@]}"
         ;;
     status)
         show_status "$2"

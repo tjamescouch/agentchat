@@ -78,6 +78,20 @@ fix_remote() {
     fi
 }
 
+# ── Notify agentchat on push ──────────────────────────────────────────────
+
+NOTIFY_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/push-notify.cjs"
+
+notify_push() {
+    local repo="$1" branch="$2" output="$3"
+    # Fire-and-forget — don't block pushbot on notification failures
+    if [[ -f "$NOTIFY_SCRIPT" ]] && command -v node &>/dev/null; then
+        local summary
+        summary=$(echo "$output" | grep -E '^\s+[a-f0-9]+\.\.[a-f0-9]+' | head -3)
+        node "$NOTIFY_SCRIPT" "PUSHED ${repo}/${branch}: ${summary}" &>/dev/null &
+    fi
+}
+
 # ── Push one repo ─────────────────────────────────────────────────────────
 
 push_repo() {
@@ -143,6 +157,8 @@ push_repo() {
             else
                 log "PUSHED ${repo_name}/${branch}:"
                 echo "$output" | sed 's/^/  /'
+                # Notify agentchat #pull-requests
+                notify_push "${repo_name}" "${branch}" "$output"
             fi
         else
             log "ERROR pushing ${repo_name}/${branch}:"
@@ -205,6 +221,12 @@ push_all() {
     done
 
     log "Done: ${count} repos found, ${pushed} pushed, ${errors} errors"
+
+    # Accumulate stats for heartbeat
+    TOTAL_REPOS=$count
+    TOTAL_PUSHED=$((TOTAL_PUSHED + pushed))
+    TOTAL_ERRORS=$((TOTAL_ERRORS + errors))
+    SCAN_COUNT=$((SCAN_COUNT + 1))
 }
 
 # ── Main ──────────────────────────────────────────────────────────────────
@@ -214,6 +236,13 @@ main() {
     if [[ "$WATCH_INTERVAL" -gt 0 && -n "$LOG_FILE" ]]; then
         exec >> "$LOG_FILE" 2>&1
     fi
+
+    # Heartbeat counters
+    TOTAL_PUSHED=0
+    TOTAL_ERRORS=0
+    TOTAL_REPOS=0
+    SCAN_COUNT=0
+    HEARTBEAT_INTERVAL=10  # emit heartbeat every N scans
 
     log "Starting pushbot (PID $$)"
     log "  Wormhole:     $WORMHOLE_DIR"
@@ -237,6 +266,17 @@ main() {
         while [[ "$RUNNING" == "true" ]]; do
             # Catch errors — daemon must not die on transient failures
             push_all || log "WARNING: push_all had errors, continuing..."
+
+            # Periodic heartbeat with stats
+            if [[ $((SCAN_COUNT % HEARTBEAT_INTERVAL)) -eq 0 && $SCAN_COUNT -gt 0 ]]; then
+                local disk_usage
+                disk_usage=$(df -h "$WORMHOLE_DIR" 2>/dev/null | tail -1 | awk '{print $3"/"$2" ("$5" used)"}')
+                local wormhole_size
+                wormhole_size=$(du -sh "$WORMHOLE_DIR" 2>/dev/null | cut -f1)
+                local agents_active
+                agents_active=$(ls -d "${WORMHOLE_DIR}"/*/ 2>/dev/null | wc -l | tr -d ' ')
+                log "HEARTBEAT: scans=$SCAN_COUNT repos=$TOTAL_REPOS pushed=$TOTAL_PUSHED errors=$TOTAL_ERRORS agents=$agents_active wormhole=$wormhole_size disk=$disk_usage"
+            fi
 
             # Interruptible sleep
             local i=0

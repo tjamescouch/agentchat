@@ -528,6 +528,9 @@ run_gro() {
             "${provider_args[@]}" \
             --mcp-config "$mcp_config" \
             --max-tool-rounds 1000 \
+            --persistent \
+            --max-idle-nudges 3 \
+            --bash \
             --verbose \
             > >(tee "$TRANSCRIPT_FILE") 2>> "$LOG_FILE" &
         CHILD_PID=$!
@@ -544,6 +547,9 @@ run_gro() {
             "${provider_args[@]}" \
             --mcp-config "$mcp_config" \
             --max-tool-rounds 1000 \
+            --persistent \
+            --max-idle-nudges 3 \
+            --bash \
             --verbose \
             > >(tee "$TRANSCRIPT_FILE") 2>> "$LOG_FILE" &
         CHILD_PID=$!

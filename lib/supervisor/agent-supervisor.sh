@@ -200,7 +200,7 @@ run_curation_pass() {
     elif [ -f "$LUCIDITY_DIR/curator.js" ] && command -v node > /dev/null 2>&1; then
         local curate_args="--agent $AGENT_NAME --tree $TREE_FILE --output $SKILL_FILE"
         if [ -s "$transcript_file" ]; then
-            curate_args="$curate_args --transcript $transcript_file --curate"
+            curate_args="$curate_args --transcript $transcript_file --once"
         fi
         LUCIDITY_TRANSCRIPT="$transcript_file" node "$LUCIDITY_DIR/curator.js" $curate_args 2>> "$LOG_FILE"
     else

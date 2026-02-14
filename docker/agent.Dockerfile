@@ -14,6 +14,7 @@ RUN npm install -g @anthropic-ai/claude-code @tjamescouch/agentchat-mcp@0.10.2 @
 
 # Install gro (provider-agnostic LLM runtime) from GitHub
 # Enables --use-gro flag for OpenAI/local model agents
+ARG GRO_VERSION=v4
 RUN git clone --depth 1 https://github.com/tjamescouch/gro.git /opt/gro \
     && cd /opt/gro \
     && npm install \
@@ -31,7 +32,8 @@ RUN mkdir -p /home/agent/.claude && chown agent:agent /home/agent/.claude
 # niki is installed from npm (@tjamescouch/niki) — standalone repo is SoT
 COPY lib/supervisor/agent-supervisor.sh /usr/local/bin/agent-supervisor
 COPY lib/supervisor/agent-runner.sh /usr/local/bin/agent-runner
-RUN chmod +x /usr/local/bin/agent-supervisor /usr/local/bin/agent-runner
+COPY lib/supervisor/git-credential-agentauth /usr/local/bin/git-credential-agentauth
+RUN chmod +x /usr/local/bin/agent-supervisor /usr/local/bin/agent-runner /usr/local/bin/git-credential-agentauth
 
 # Hide claude binary so agents cannot self-spawn (P0-SANDBOX-1)
 # Supervisor uses .claude-supervisor; 'claude' is not in PATH for the agent.
@@ -49,6 +51,11 @@ COPY --chown=agent:agent docker/container-skill.md /home/agent/.claude/agentchat
 
 # Copy personality files (supervisor loads ~/.claude/personalities/<name>.md as system prompt)
 COPY --chown=agent:agent docker/personalities/ /home/agent/.claude/personalities/
+
+# Configure git to use agentauth credential helper for GitHub access
+RUN git config --global credential.helper /usr/local/bin/git-credential-agentauth \
+    && git config --global user.name "agent" \
+    && git config --global user.email "agent@agentchat.local"
 
 # Pre-create lucidity memory directories (populated via wormhole mount or image rebuild)
 RUN mkdir -p /home/agent/lucidity/src /home/agent/.claude/memory
