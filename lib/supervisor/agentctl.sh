@@ -301,7 +301,7 @@ Commands:
   setup-token              Encrypt and store your OAuth token (one-time setup)
   setup-openai-token       Encrypt and store your OpenAI API key (same passphrase)
   build                    Build the agent container image
-  start <name> <mission> [--use-gro]  Start a new supervised agent container
+  start <name> <mission> [--use-gro|--use-claude-code]  Start a new supervised agent container
   stop <name>              Stop an agent gracefully
   abort <name>             Trigger niki abort (immediate SIGTERM via abort file)
   kill <name>              Force kill an agent container
@@ -325,7 +325,8 @@ Examples:
   agentctl build
   agentctl start monitor "monitor agentchat #general and moderate"
   agentctl start social "manage moltx and moltbook social media"
-  agentctl start jessie "You are James's friend" --use-gro  # Uses gro runtime (OpenAI/etc)
+  agentctl start jessie "You are James's friend" --use-gro  # gro runtime
+  agentctl start jessie "You are James's friend" --use-claude-code  # Claude Code CLI runtime
   agentctl stop monitor
   agentctl status
 EOF
@@ -358,7 +359,8 @@ build_image() {
 start_agent() {
     local name="$1"
     local mission="$2"
-    local use_gro="false"
+    local use_gro=""
+    local use_claude_code=""
     local agent_keys=""
 
     # Parse optional flags after name and mission
@@ -366,6 +368,7 @@ start_agent() {
     while [ $# -gt 0 ]; do
         case "$1" in
             --use-gro) use_gro="true" ;;
+            --use-claude-code) use_claude_code="true" ;;
             --model) AGENT_MODEL_OVERRIDE="$2"; shift ;;
             --keys) agent_keys="$2"; shift ;;
             *) echo "Unknown option: $1" ;;
@@ -374,7 +377,7 @@ start_agent() {
     done
 
     if [ -z "$name" ] || [ -z "$mission" ]; then
-        echo "Usage: agentctl start <name> <mission> [--use-gro] [--model MODEL] [--keys anthropic,openai,github]"
+        echo "Usage: agentctl start <name> <mission> [--use-gro|--use-claude-code] [--model MODEL] [--keys anthropic,openai,github]"
         exit 1
     fi
 
@@ -399,9 +402,15 @@ start_agent() {
     mkdir -p "$state_dir"
 
     # Save mission and runtime for restarts
+    if [ "$use_gro" = "true" ] && [ "$use_claude_code" = "true" ]; then
+        echo "ERROR: choose only one of --use-gro or --use-claude-code"
+        exit 1
+    fi
     echo "$mission" > "$state_dir/mission.txt"
     if [ "$use_gro" = "true" ]; then
         echo "gro" > "$state_dir/runtime.txt"
+    elif [ "$use_claude_code" = "true" ]; then
+        echo "cli" > "$state_dir/runtime.txt"
     else
         rm -f "$state_dir/runtime.txt"
     fi
@@ -464,6 +473,19 @@ EOF
     local proxy_base_url="http://${host_gateway}:${AGENTAUTH_PORT}/anthropic"
     local proxy_api_key="proxy-managed"
 
+
+    # Default runtime: gro (runner default). Claude Code is opt-in via runtime.txt=cli or --use-claude-code.
+    if [ "$use_claude_code" = "true" ]; then
+        runtime_env="cli"
+        export USE_CLAUDE_CODE=1
+        echo "  Runtime: claude-code (CLI)"
+    elif [ -f "$state_dir/runtime.txt" ] && [ "$(cat "$state_dir/runtime.txt" 2>/dev/null)" = "cli" ]; then
+        runtime_env="cli"
+        export USE_CLAUDE_CODE=1
+        echo "  Runtime: claude-code (CLI)"
+    fi
+
+
     if [ "$use_gro" = "true" ]; then
         runtime_env="gro"
         # For gro with OpenAI models, point at the OpenAI backend through proxy
@@ -498,7 +520,7 @@ EOF
         $labels \
         -e "ANTHROPIC_BASE_URL=${proxy_base_url}" \
         -e "ANTHROPIC_API_KEY=${proxy_api_key}" \
-        ${runtime_env:+-e "AGENT_RUNTIME=${runtime_env}"} \
+        ${runtime_env:+-e "AGENT_RUNTIME=${runtime_env}"} ${USE_CLAUDE_CODE:+-e "USE_CLAUDE_CODE=${USE_CLAUDE_CODE}"} \
         ${model_env:+-e "AGENT_MODEL=${model_env}"} \
         ${use_gro:+-e "OPENAI_BASE_URL=http://${host_gateway}:${AGENTAUTH_PORT}/openai"} \
         ${use_gro:+-e "OPENAI_API_KEY=proxy-managed"} \
