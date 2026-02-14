@@ -298,10 +298,11 @@ usage() {
 Usage: agentctl <command> [agent-name] [options]
 
 Commands:
+  edit <name>              Edit agent config (mission/model/runtime)
   setup-token              Encrypt and store your OAuth token (one-time setup)
   setup-openai-token       Encrypt and store your OpenAI API key (same passphrase)
   build                    Build the agent container image
-  start <name> <mission> [--use-gro]  Start a new supervised agent container
+  start <name> <mission> [--use-gro|--use-claude-code]  Start a new supervised agent container
   stop <name>              Stop an agent gracefully
   abort <name>             Trigger niki abort (immediate SIGTERM via abort file)
   kill <name>              Force kill an agent container
@@ -326,6 +327,7 @@ Examples:
   agentctl start monitor "monitor agentchat #general and moderate"
   agentctl start social "manage moltx and moltbook social media"
   agentctl start jessie "You are James's friend" --use-gro  # Uses gro runtime (OpenAI/etc)
+  agentctl edit jessie
   agentctl stop monitor
   agentctl status
 EOF
@@ -359,13 +361,19 @@ start_agent() {
     local name="$1"
     local mission="$2"
     local use_gro="false"
+    local use_claude_code="false"
     local agent_keys=""
 
     # Parse optional flags after name and mission
     shift 2 2>/dev/null || true
+    if [ "$use_gro" = "true" ] && [ "$use_claude_code" = "true" ]; then
+        echo "ERROR: cannot combine --use-gro and --use-claude-code"
+        exit 1
+    fi
     while [ $# -gt 0 ]; do
         case "$1" in
             --use-gro) use_gro="true" ;;
+            --use-claude-code) use_claude_code="true" ;;
             --model) AGENT_MODEL_OVERRIDE="$2"; shift ;;
             --keys) agent_keys="$2"; shift ;;
             *) echo "Unknown option: $1" ;;
@@ -374,7 +382,7 @@ start_agent() {
     done
 
     if [ -z "$name" ] || [ -z "$mission" ]; then
-        echo "Usage: agentctl start <name> <mission> [--use-gro] [--model MODEL] [--keys anthropic,openai,github]"
+        echo "Usage: agentctl start <name> <mission> [--use-gro|--use-claude-code] [--model MODEL] [--keys anthropic,openai,github]"
         exit 1
     fi
 
@@ -480,6 +488,9 @@ EOF
         # Note: ANTHROPIC_BASE_URL always points to /anthropic (for lucidity curation).
         # OpenAI models use OPENAI_BASE_URL (set separately below) for the main agent.
         echo "  Runtime: gro (model: $agent_model)"
+    if [ "$use_claude_code" = "true" ]; then
+        echo "  Runtime: claude-code (cli)"
+    fi
     fi
 
     # Build key-specific env vars based on --keys setting
@@ -489,6 +500,27 @@ EOF
     if echo "$agent_keys" | grep -q "github"; then
         github_env="-e AGENTAUTH_URL=http://${host_gateway}:${AGENTAUTH_PORT}"
         echo "  Keys: github (git push enabled)"
+    fi
+
+    # Runtime selection
+    local runtime_env=""
+    local model_env=""
+    local proxy_base_url="http://${host_gateway}:${AGENTAUTH_PORT}/anthropic"
+    local proxy_api_key="proxy-managed"
+
+    if [ "$use_gro" = "true" ]; then
+        runtime_env="gro"
+        # For gro with OpenAI models, point at the OpenAI backend through proxy
+        # For gro with Anthropic models, keep the anthropic backend
+        local agent_model="${AGENT_MODEL_OVERRIDE:-gpt-4o}"
+        model_env="$agent_model"
+
+        case "$agent_model" in
+            gpt-*|o1-*|o3-*|o4-*|chatgpt-*)
+                proxy_base_url="http://${host_gateway}:${AGENTAUTH_PORT}/openai"
+                ;;
+        esac
+        echo "  Runtime: gro (model: $agent_model)"
     fi
 
     echo "Starting agent '$name' in container..."
@@ -841,6 +873,9 @@ case "$1" in
     start)
         start_agent "$2" "$3" "${@:4}"
         ;;
+    edit)
+        edit_agent "$2"
+        ;;
     stop)
         stop_agent "$2"
         ;;
@@ -873,11 +908,13 @@ case "$1" in
         restart_name="$2"
         shift 2 2>/dev/null || true
         cli_use_gro=""
+        cli_use_claude_code=""
         cli_model=""
         cli_keys=""
         while [ $# -gt 0 ]; do
             case "$1" in
                 --use-gro) cli_use_gro="true" ;;
+                --use-claude-code) cli_use_claude_code="true" ;;
                 --model) cli_model="$2"; shift ;;
                 --keys) cli_keys="$2"; shift ;;
                 *) ;;
@@ -975,3 +1012,98 @@ case "$1" in
         usage
         ;;
 esac
+
+edit_agent() {
+    local name="$1"
+    if [ -z "$name" ]; then
+        echo "Usage: agentctl edit <name>"
+        exit 1
+    fi
+
+    local state_dir="$AGENTS_DIR/$name"
+    mkdir -p "$state_dir"
+
+    local current_mission=""
+    if [ -f "$state_dir/mission.txt" ]; then
+        current_mission=$(cat "$state_dir/mission.txt")
+    fi
+
+    local current_model=""
+    if [ -f "$state_dir/model.txt" ]; then
+        current_model=$(cat "$state_dir/model.txt")
+    fi
+
+    local current_runtime=""
+    if [ -f "$state_dir/runtime.txt" ]; then
+        current_runtime=$(cat "$state_dir/runtime.txt")
+    fi
+
+    echo "=== Edit agent: $name ==="
+    echo "(press Enter to keep current value)"
+    echo
+
+    echo "Current mission: ${current_mission:-<none>}"
+    read -r -p "New mission: " new_mission
+    if [ -n "$new_mission" ]; then
+        echo "$new_mission" > "$state_dir/mission.txt"
+    fi
+
+    echo
+    echo "Current model: ${current_model:-<none>}"
+    read -r -p "New model: " new_model
+    if [ -n "$new_model" ]; then
+        echo "$new_model" > "$state_dir/model.txt"
+    fi
+
+    echo
+    echo "Current runtime: ${current_runtime:-<default>} (valid: gro|cli|<empty>)"
+    read -r -p "New runtime [gro/cli/empty]: " new_runtime
+    case "$new_runtime" in
+        gro|cli)
+            echo "$new_runtime" > "$state_dir/runtime.txt"
+            ;;
+        "")
+            # keep
+            ;;
+        empty|none|default)
+            rm -f "$state_dir/runtime.txt"
+            ;;
+        *)
+            echo "ERROR: invalid runtime '$new_runtime' (use gro, cli, or 'empty')"
+            exit 1
+            ;;
+    esac
+
+    echo
+    read -r -p "Restart agent now? [y/N] " restart_now
+    if [ "$restart_now" = "y" ] || [ "$restart_now" = "Y" ]; then
+        if is_container_running "$name"; then
+            stop_agent "$name"
+            sleep 2
+        elif container_exists "$name"; then
+            podman rm -f "$(container_name "$name")" > /dev/null 2>&1 || true
+        fi
+
+        local mission
+        mission=$(cat "$state_dir/mission.txt" 2>/dev/null)
+        if [ -z "$mission" ]; then
+            echo "ERROR: mission.txt is empty; cannot restart"
+            exit 1
+        fi
+
+        local extra_args=()
+        if [ -f "$state_dir/runtime.txt" ] && [ "$(cat "$state_dir/runtime.txt")" = "gro" ]; then
+            extra_args+=(--use-gro)
+        elif [ -f "$state_dir/runtime.txt" ] && [ "$(cat "$state_dir/runtime.txt")" = "cli" ]; then
+            extra_args+=(--use-claude-code)
+        fi
+        if [ -f "$state_dir/model.txt" ]; then
+            extra_args+=(--model "$(cat "$state_dir/model.txt")")
+        fi
+        if [ -f "$state_dir/keys.txt" ]; then
+            extra_args+=(--keys "$(cat "$state_dir/keys.txt")")
+        fi
+
+        start_agent "$name" "$mission" "${extra_args[@]}"
+    fi
+}
