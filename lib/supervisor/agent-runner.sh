@@ -12,7 +12,7 @@
 #   AGENT_MODEL         Model ID (default: claude-opus-4-6)
 #   STATE_DIR           State directory for transcripts, logs
 #   AGENTCHAT_URL       Server WebSocket URL
-#   AGENT_RUNTIME       "cli", "gro", or "api" (default: cli)
+#   AGENT_RUNTIME       "cli", "gro", or "api" (default: gro)
 #   PERSONALITY_DIR     Directory containing personality .md files
 #   SETTINGS_FILE       Claude settings.json path
 #   CLAUDE_CMD          Path to claude binary (auto-detected if unset)
@@ -30,18 +30,57 @@
 #
 # Exit codes:
 #   0   Clean exit
+# Optional args:
+#   --use-gro         Force gro runtime
+#   --use-claude-code Force CLI runtime (Claude Code)
+
 #   *   Runtime error (supervisor should restart with backoff)
 
 set -e
 
 # ============ Config ============
+# Minimal argv parsing for runtime selection
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --use-gro)
+            AGENT_RUNTIME=gro
+            shift
+            ;;
+        --use-claude-code)
+            AGENT_RUNTIME=cli
+            shift
+            ;;
+        --)
+            shift
+            break
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
 
 AGENT_NAME="${AGENT_NAME:-default}"
 MISSION="${MISSION:-monitor agentchat and respond to messages}"
 MODEL="${AGENT_MODEL:-claude-opus-4-6}"
 STATE_DIR="${STATE_DIR:-$HOME/.agentchat/agents/$AGENT_NAME}"
 SERVER_URL="${AGENTCHAT_URL:-wss://agentchat-server.fly.dev}"
-RUNTIME="${AGENT_RUNTIME:-cli}"
+RUNTIME="${AGENT_RUNTIME:-gro}"
+
+# Injection controls. By default, when running with gro we want gro to be the
+# single context authority, so we disable prompt-time injection unless
+# explicitly enabled.
+if [ "$RUNTIME" = "gro" ]; then
+    INJECT_TRANSCRIPT_DEFAULT=0
+    INJECT_MEMORY_DEFAULT=0
+else
+    INJECT_TRANSCRIPT_DEFAULT=1
+    INJECT_MEMORY_DEFAULT=1
+fi
+
+INJECT_TRANSCRIPT="${INJECT_TRANSCRIPT:-$INJECT_TRANSCRIPT_DEFAULT}"
+INJECT_MEMORY="${INJECT_MEMORY:-$INJECT_MEMORY_DEFAULT}"
 PERSONALITY_DIR="${PERSONALITY_DIR:-$HOME/.claude/personalities}"
 LOG_FILE="${LOG_FILE:-$STATE_DIR/runner.log}"
 MAX_TRANSCRIPT="${MAX_TRANSCRIPT:-200}"
@@ -187,11 +226,15 @@ You are connected to a PUBLIC AgentChat server. Important constraints:
 # ============ Prompt Building ============
 
 build_agent_prompt() {
-    local transcript_context
-    transcript_context=$(build_transcript_context)
+    local transcript_context=""
+    if [ "${INJECT_TRANSCRIPT}" = "1" ] || [ "${INJECT_TRANSCRIPT}" = "true" ]; then
+        transcript_context=$(build_transcript_context)
+    fi
 
-    local memory_context
-    memory_context=$(build_memory_context)
+    local memory_context=""
+    if [ "${INJECT_MEMORY}" = "1" ] || [ "${INJECT_MEMORY}" = "true" ]; then
+        memory_context=$(build_memory_context)
+    fi
 
     local restart_notice=""
     if [ "$SESSION_NUM" -gt 1 ]; then
