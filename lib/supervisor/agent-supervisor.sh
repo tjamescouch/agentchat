@@ -15,7 +15,7 @@
 
 # Version:
 #   --version | -v
-# Maintainer: Sabrina (@vwgo4spd) — James Couch MIT CTO
+# Maintainer: Sabrina (@vwgo4spd)
 # Build stamp vars can be injected by the image build:
 #   AGENT_SUPERVISOR_SOURCE_COMMIT, AGENT_SUPERVISOR_BUILD_DATE
 
