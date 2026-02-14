@@ -42,6 +42,21 @@ MODEL="${AGENT_MODEL:-claude-opus-4-6}"
 STATE_DIR="${STATE_DIR:-$HOME/.agentchat/agents/$AGENT_NAME}"
 SERVER_URL="${AGENTCHAT_URL:-wss://agentchat-server.fly.dev}"
 RUNTIME="${AGENT_RUNTIME:-gro}"
+
+# ============ CLI Flags ============
+# Optional argv flags override env defaults:
+#   --use-claude-code   Force claude CLI runtime ("cli")
+#   --use-gro           Force gro runtime ("gro")
+#
+# We intentionally keep parsing minimal: supervisor can pass these through unchanged.
+if [ "${1:-}" = "--use-claude-code" ]; then
+    RUNTIME="cli"
+    shift
+elif [ "${1:-}" = "--use-gro" ]; then
+    RUNTIME="gro"
+    shift
+fi
+
 PERSONALITY_DIR="${PERSONALITY_DIR:-$HOME/.claude/personalities}"
 LOG_FILE="${LOG_FILE:-$STATE_DIR/runner.log}"
 MAX_TRANSCRIPT="${MAX_TRANSCRIPT:-200}"
