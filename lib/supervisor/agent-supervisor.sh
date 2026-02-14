@@ -265,11 +265,18 @@ while true; do
     export AGENT_NAME MISSION STATE_DIR LOG_FILE
 
     # Start live curator daemon alongside the agent
-    start_live_curator
+
+    # Live curation (Claude Code JSONL -> skill.md) is optional
+    if [ "${USE_CLAUDE_CODE:-0}" = "1" ] || [ "${USE_CLAUDE_CODE:-0}" = "true" ]; then
+        start_live_curator
+    else
+        log "USE_CLAUDE_CODE not set; live curation disabled"
+    fi
+
 
     # Run the agent via the runner abstraction layer
     # Background + wait so SIGTERM trap can interrupt and forward signal
-    "$RUNNER" &
+    "$RUNNER" "$@" &
     RUNNER_PID=$!
     set +e
     wait $RUNNER_PID 2>/dev/null
