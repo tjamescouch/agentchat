@@ -85,7 +85,16 @@ notify_push() {
     if [[ -f "$NOTIFY_SCRIPT" ]] && command -v node &>/dev/null; then
         local summary
         summary=$(echo "$output" | grep -E '^\s+[a-f0-9]+\.\.[a-f0-9]+' | head -3)
-        node "$NOTIFY_SCRIPT" "PUSHED ${repo}/${branch}: ${summary}" &>/dev/null &
+        node "$NOTIFY_SCRIPT" "✅ PUSHED ${repo}/${branch}: ${summary}" &>/dev/null &
+    fi
+}
+
+notify_error() {
+    local repo="$1" branch="$2" output="$3"
+    if [[ -f "$NOTIFY_SCRIPT" ]] && command -v node &>/dev/null; then
+        local reason
+        reason=$(echo "$output" | grep -E '(rejected|error|fatal)' | head -1 | sed 's/^ *//')
+        node "$NOTIFY_SCRIPT" "❌ PUSH FAILED ${repo}/${branch}: ${reason}" &>/dev/null &
     fi
 }
 
@@ -146,6 +155,7 @@ push_repo() {
             fi
         else
             log "ERROR ${repo_name}/${branch}: $(echo "$output" | head -1)"
+            notify_error "${repo_name}" "${branch}" "$output"
             push_errors=$((push_errors + 1))
         fi
     done < <(git -C "$repo_dir" branch --format='%(refname:short)' 2>/dev/null)
