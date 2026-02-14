@@ -22,6 +22,7 @@ import {
   isChannel,
   isAgent,
 } from '../../protocol.js';
+import { parseCallbacks } from '../../callback-engine.js';
 
 // Extended WebSocket with custom properties
 interface ExtendedWebSocket extends WebSocket {
@@ -59,12 +60,33 @@ export function handleMsg(server: AgentChatServer, ws: ExtendedWebSocket, msg: M
     });
   }
 
+  // Parse and extract callback markers (@@cb:Ns@@payload)
+  const cbResult = parseCallbacks(redactResult.text, agent.id);
+  for (const cb of cbResult.callbacks) {
+    const enqueued = server.callbackQueue.enqueue(cb);
+    if (enqueued) {
+      server._log('callback_scheduled', { id: cb.id, from: agent.id, delay_ms: cb.fireAt - Date.now(), target: cb.target });
+    }
+  }
+
+  // Use cleaned content (callback markers stripped)
+  const finalContent = cbResult.cleanContent;
+
+  // If the message was entirely callback markers with no other content, don't route it
+  if (!finalContent && cbResult.callbacks.length > 0) {
+    return;
+  }
+
+  const msgId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const outMsg = createMessage(ServerMessageType.MSG, {
     from: `@${agent.id}`,
     from_name: agent.name,
     to: msg.to,
-    content: redactResult.text,
-    ...(msg.sig && { sig: msg.sig })
+    content: finalContent || redactResult.text,
+    msg_id: msgId,
+    verified: !!agent.verified,
+    ...(msg.sig && { sig: msg.sig }),
+    ...(msg.in_reply_to && { in_reply_to: msg.in_reply_to }),
   });
 
   if (isChannel(msg.to)) {
@@ -79,6 +101,9 @@ export function handleMsg(server: AgentChatServer, ws: ExtendedWebSocket, msg: M
       server._send(ws, createError(ErrorCode.NOT_INVITED, `Not a member of ${msg.to}`));
       return;
     }
+
+    // Release any floor claim by this agent (they're done responding)
+    server.floorControl.release(agent.id, msg.to);
 
     // Broadcast to channel including sender
     server._broadcast(msg.to, outMsg);
@@ -125,6 +150,12 @@ export function handleJoin(server: AgentChatServer, ws: ExtendedWebSocket, msg: 
   // Check invite-only
   if (channel.inviteOnly && !channel.invited.has(agent.id)) {
     server._send(ws, createError(ErrorCode.NOT_INVITED, `Channel ${msg.channel} is invite-only`));
+    return;
+  }
+
+  // Check verified-only
+  if (channel.verifiedOnly && !agent.verified) {
+    server._send(ws, createError(ErrorCode.AUTH_REQUIRED, `Channel ${msg.channel} requires verified identity`));
     return;
   }
 
@@ -215,12 +246,13 @@ export function handleLeave(server: AgentChatServer, ws: ExtendedWebSocket, msg:
  * Authenticated: returns full details
  */
 export function handleListChannels(server: AgentChatServer, ws: ExtendedWebSocket): void {
-  const list: Array<{ name: string; agents: number }> = [];
+  const list: Array<{ name: string; agents: number; verifiedOnly?: boolean }> = [];
   for (const [name, channel] of server.channels) {
     if (!channel.inviteOnly) {
       list.push({
         name,
-        agents: channel.agents.size
+        agents: channel.agents.size,
+        ...(channel.verifiedOnly && { verifiedOnly: true }),
       });
     }
   }
@@ -268,7 +300,7 @@ export function handleListAgents(server: AgentChatServer, ws: ExtendedWebSocket,
 /**
  * Handle CREATE_CHANNEL command
  */
-export function handleCreateChannel(server: AgentChatServer, ws: ExtendedWebSocket, msg: CreateChannelMessage & { invite_only?: boolean }): void {
+export function handleCreateChannel(server: AgentChatServer, ws: ExtendedWebSocket, msg: CreateChannelMessage & { invite_only?: boolean; verified_only?: boolean }): void {
   const agent = server.agents.get(ws);
   if (!agent) {
     server._send(ws, createError(ErrorCode.AUTH_REQUIRED, 'Must IDENTIFY first'));
@@ -280,14 +312,14 @@ export function handleCreateChannel(server: AgentChatServer, ws: ExtendedWebSock
     return;
   }
 
-  const channel = server._createChannel(msg.channel, msg.invite_only || false);
+  const channel = server._createChannel(msg.channel, msg.invite_only || false, msg.verified_only || false);
 
   // Creator is automatically invited and joined
   if (channel.inviteOnly) {
     channel.invited.add(agent.id);
   }
 
-  server._log('create_channel', { agent: agent.id, channel: msg.channel, inviteOnly: channel.inviteOnly });
+  server._log('create_channel', { agent: agent.id, channel: msg.channel, inviteOnly: channel.inviteOnly, verifiedOnly: channel.verifiedOnly });
 
   // Auto-join creator
   channel.agents.add(ws);

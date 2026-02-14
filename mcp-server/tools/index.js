@@ -10,6 +10,7 @@
  *   agentchat_channels       - List channels
  *   agentchat_leave          - Leave/unsubscribe from a channel
  *   agentchat_create_channel - Create a channel
+ *   agentchat_claim       - Claim floor (RESPONDING_TO)
  *   agentchat_daemon_*    - Background daemon
  *   agentchat_inbox       - Read daemon inbox
  *
@@ -34,6 +35,7 @@ import { registerChannelsTool } from './channels.js';
 import { registerCreateChannelTool } from './create-channel.js';
 import { registerDaemonTools } from './daemon.js';
 import { registerNickTool } from './nick.js';
+import { registerClaimTool } from './claim.js';
 import { registerMarketplaceTools } from './marketplace/index.js';
 import { registerModerationTools } from './moderation.js';
 import { registerFileTransferTools } from './file-transfer.js';
@@ -49,6 +51,7 @@ export function registerAllTools(server) {
   registerChannelsTool(server);
   registerCreateChannelTool(server);
   registerNickTool(server);
+  registerClaimTool(server);
   registerDaemonTools(server);
 
   // === MODERATION TOOLS ===

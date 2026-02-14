@@ -18,21 +18,64 @@ const NUDGE_TIMEOUT_MS = 30 * 1000; // 30 seconds when others are present
 const MAX_BACKOFF_MS = 15 * 60 * 1000; // 15 minute cap on backoff
 const POLL_INTERVAL_MS = 500; // fallback poll interval
 const HEARTBEAT_INTERVAL_MS = 30 * 1000; // heartbeat file write interval
+const SETTLE_MS = parseInt(process.env.AGENTCHAT_SETTLE_MS || '5000', 10); // settle window to batch burst messages into one API call
+
+/**
+ * Read last N lines from a file efficiently (reads from end of file).
+ */
+function tailLines(filePath, n) {
+  const fd = fs.openSync(filePath, 'r');
+  try {
+    const stat = fs.fstatSync(fd);
+    if (stat.size === 0) return [];
+
+    const CHUNK = 8192;
+    let pos = stat.size;
+    let lines = [];
+    let partial = '';
+
+    while (pos > 0 && lines.length <= n) {
+      const readSize = Math.min(CHUNK, pos);
+      pos -= readSize;
+      const buf = Buffer.alloc(readSize);
+      fs.readSync(fd, buf, 0, readSize, pos);
+      const chunk = buf.toString('utf-8') + partial;
+      const parts = chunk.split('\n');
+      partial = parts.shift(); // incomplete first line
+      lines = parts.concat(lines);
+    }
+    if (partial) lines.unshift(partial);
+    return lines.filter(Boolean).slice(-n);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
 
 /**
  * Read inbox.jsonl and return messages newer than lastSeen for the given channels.
+ * If tailN is set, only read the last tailN lines from the file instead of all lines.
  */
-function readInbox(paths, lastSeen, channels, agentId) {
+function readInbox(paths, lastSeen, channels, agentId, tailN) {
   if (!fs.existsSync(paths.inbox)) return [];
 
-  let content;
-  try {
-    content = fs.readFileSync(paths.inbox, 'utf-8');
-  } catch {
-    return [];
+  let lines;
+  if (tailN) {
+    // Read only last tailN*2 lines (extra margin for filtering) from end of file
+    try {
+      lines = tailLines(paths.inbox, tailN * 2);
+    } catch {
+      return [];
+    }
+  } else {
+    let content;
+    try {
+      content = fs.readFileSync(paths.inbox, 'utf-8');
+    } catch {
+      return [];
+    }
+    lines = content.trim().split('\n').filter(Boolean);
   }
 
-  const lines = content.trim().split('\n').filter(Boolean);
   const messages = [];
 
   for (const line of lines) {
@@ -40,7 +83,7 @@ function readInbox(paths, lastSeen, channels, agentId) {
       const msg = JSON.parse(line);
 
       if (msg.type !== 'MSG' || !msg.ts) continue;
-      if (msg.ts < lastSeen) continue;
+      if (msg.ts <= lastSeen) continue;
       if (msg.from === agentId || msg.from === '@server') continue;
 
       const isRelevantChannel = channels.includes(msg.to);
@@ -78,11 +121,12 @@ function readInbox(paths, lastSeen, channels, agentId) {
 export function registerListenTool(server) {
   server.tool(
     'agentchat_listen',
-    'Listen for messages - blocks until a message arrives. If others are in the channel, returns after ~30s with nudge:true so you can take initiative. If alone, waits up to 1 hour. Writes a heartbeat file every 30s during blocking for deadlock detection.',
+    'Listen for messages - blocks until a message arrives. If others are in the channel, returns after ~30s with nudge:true so you can take initiative. If alone, waits up to 1 hour. Writes a heartbeat file every 30s during blocking for deadlock detection. Use tail parameter to return last N messages immediately without blocking (efficient polling mode).',
     {
       channels: z.array(z.string()).describe('Channels to listen on (e.g., ["#general"])'),
+      tail: z.number().optional().describe('Return last N messages immediately without blocking. Reads only the tail of the inbox file for efficiency.'),
     },
-    async ({ channels }) => {
+    async ({ channels, tail }) => {
       try {
         if (!client || !client.connected) {
           return {
@@ -99,6 +143,26 @@ export function registerListenTool(server) {
         for (const channel of channels) {
           await client.join(channel);
           trackChannel(channel); // Track for auto-reconnect (P1-LISTEN-1)
+        }
+
+        // --- Tail mode: return last N messages immediately, no blocking ---
+        if (tail) {
+          const msgs = readInbox(paths, 0, channels, client.agentId, tail);
+          const lastN = msgs.slice(-tail);
+          if (lastN.length > 0) {
+            const newestTs = lastN[lastN.length - 1].ts;
+            updateLastSeen(newestTs);
+          }
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                messages: lastN,
+                tail: true,
+                count: lastN.length,
+              }),
+            }],
+          };
         }
 
         // Check channel occupancy to determine timeout behavior
@@ -131,7 +195,12 @@ export function registerListenTool(server) {
         const immediate = readInbox(paths, lastSeen, channels, client.agentId);
 
         if (immediate.length > 0) {
-          const newestTs = immediate[immediate.length - 1].ts;
+          // Settle window: wait to batch burst messages before returning
+          await new Promise(r => setTimeout(r, SETTLE_MS));
+          // Re-read to catch any messages that arrived during settle
+          const settled = readInbox(paths, lastSeen, channels, client.agentId);
+          const finalMsgs = settled.length > 0 ? settled : immediate;
+          const newestTs = finalMsgs[finalMsgs.length - 1].ts;
           updateLastSeen(newestTs);
           resetIdleCount();
           setPresence('online');
@@ -139,8 +208,9 @@ export function registerListenTool(server) {
             content: [{
               type: 'text',
               text: JSON.stringify({
-                messages: immediate,
+                messages: finalMsgs,
                 from_inbox: true,
+                settled: true,
                 elapsed_ms: Date.now() - startTime,
               }),
             }],
@@ -152,8 +222,11 @@ export function registerListenTool(server) {
           let watcher = null;
           let pollId = null;
           let timeoutId = null;
+          let settleId = null;
+          let resolved = false;
 
           let cleanup = () => {
+            if (settleId) { clearTimeout(settleId); settleId = null; }
             if (watcher) { watcher.close(); watcher = null; }
             if (pollId) { clearInterval(pollId); pollId = null; }
             if (timeoutId) { clearTimeout(timeoutId); timeoutId = null; }
@@ -161,23 +234,32 @@ export function registerListenTool(server) {
           };
 
           const tryRead = () => {
+            if (resolved) return false;
             const msgs = readInbox(paths, getLastSeen(), channels, client.agentId);
-            if (msgs.length > 0) {
-              const newestTs = msgs[msgs.length - 1].ts;
-              updateLastSeen(newestTs);
-              resetIdleCount();
-              cleanup();
-              resolve({
-                content: [{
-                  type: 'text',
-                  text: JSON.stringify({
-                    messages: msgs,
-                    from_inbox: true,
-                    elapsed_ms: Date.now() - startTime,
-                  }),
-                }],
-              });
-              return true;
+            if (msgs.length > 0 && !settleId) {
+              // Start settle window — batch burst messages before returning
+              settleId = setTimeout(() => {
+                if (resolved) return;
+                resolved = true;
+                // Re-read to catch messages that arrived during settle
+                const settled = readInbox(paths, getLastSeen(), channels, client.agentId);
+                const finalMsgs = settled.length > 0 ? settled : msgs;
+                const newestTs = finalMsgs[finalMsgs.length - 1].ts;
+                updateLastSeen(newestTs);
+                resetIdleCount();
+                cleanup();
+                resolve({
+                  content: [{
+                    type: 'text',
+                    text: JSON.stringify({
+                      messages: finalMsgs,
+                      from_inbox: true,
+                      settled: true,
+                      elapsed_ms: Date.now() - startTime,
+                    }),
+                  }],
+                });
+              }, SETTLE_MS);
             }
             return false;
           };
@@ -216,12 +298,14 @@ export function registerListenTool(server) {
           const baseTimeout = othersPresent
             ? Math.min(NUDGE_TIMEOUT_MS * backoffMultiplier, MAX_BACKOFF_MS)
             : ENFORCED_TIMEOUT_MS;
-          const actualTimeout = addJitter(baseTimeout, 0.2);
+          const jitterPercent = parseFloat(process.env.AGENTCHAT_JITTER_PERCENT || '0.5');
+          const actualTimeout = addJitter(baseTimeout, jitterPercent);
 
-          // Heartbeat file for deadlock detection
+          // Heartbeat file for deadlock detection + stderr for niki stall prevention
           const heartbeatPath = path.join(newdataDir, 'heartbeat');
           const writeHeartbeat = () => {
             try { fs.writeFileSync(heartbeatPath, String(Date.now())); } catch { /* ignore */ }
+            try { process.stderr.write(`[heartbeat] listening on ${channels.join(', ')}\n`); } catch { /* ignore */ }
           };
           writeHeartbeat();
           const heartbeatId = setInterval(writeHeartbeat, HEARTBEAT_INTERVAL_MS);
@@ -235,6 +319,8 @@ export function registerListenTool(server) {
           cleanup = cleanupAll;
 
           timeoutId = setTimeout(() => {
+            if (resolved) return;
+            resolved = true;
             incrementIdleCount();
             cleanupAll();
             resolve({

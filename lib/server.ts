@@ -32,6 +32,8 @@ import { EscrowHooks } from './escrow-hooks.js';
 import { Allowlist } from './allowlist.js';
 import { Banlist } from './banlist.js';
 import { Redactor } from './redactor.js';
+import { CallbackQueue, type CallbackEntry } from './callback-engine.js';
+import { FloorControl } from './floor-control.js';
 
 // Import extracted handlers
 import {
@@ -122,6 +124,7 @@ export interface PendingChallenge {
 export interface ChannelState {
   name: string;
   inviteOnly: boolean;
+  verifiedOnly: boolean;
   invited: Set<string>;
   agents: Set<ExtendedWebSocket>;
   messageBuffer: AnyMessage[];
@@ -258,6 +261,12 @@ export class AgentChatServer {
   // Banlist
   banlist: Banlist | null;
 
+  // Callback engine
+  callbackQueue: CallbackQueue;
+
+  // Floor control (RESPONDING_TO protocol)
+  floorControl: FloorControl;
+
   // MOTD (message of the day)
   motd: string | null;
 
@@ -288,7 +297,7 @@ export class AgentChatServer {
     this.rateLimitMs = options.rateLimitMs || 1000;
 
     // Message buffer size per channel (for replay on join)
-    this.messageBufferSize = options.messageBufferSize || 20;
+    this.messageBufferSize = options.messageBufferSize || 200;
 
     // State
     this.agents = new Map();
@@ -321,6 +330,7 @@ export class AgentChatServer {
     this._createChannel('#agents', false);
     this._createChannel('#discovery', false);
     this._createChannel('#bounties', false);
+    this._createChannel('#ops', false, true);  // verified-only control plane
 
     // Proposal store for structured negotiations
     this.proposals = new ProposalStore();
@@ -345,6 +355,12 @@ export class AgentChatServer {
 
     // Secret redactor — mandatory input sanitization (agentseenoevil)
     this.redactor = new Redactor({ builtins: true, scanEnv: true, labelRedactions: true });
+
+    // Callback engine — server-side timer queue for @@cb:Ns@@payload markers
+    this.callbackQueue = new CallbackQueue();
+
+    // Floor control — RESPONDING_TO protocol for channel turn-taking
+    this.floorControl = new FloorControl();
 
     // Pending verification requests (inter-agent)
     this.pendingVerifications = new Map();
@@ -443,11 +459,12 @@ export class AgentChatServer {
     };
   }
 
-  _createChannel(name: string, inviteOnly: boolean = false): ChannelState {
+  _createChannel(name: string, inviteOnly: boolean = false, verifiedOnly: boolean = false): ChannelState {
     if (!this.channels.has(name)) {
       this.channels.set(name, {
         name,
         inviteOnly,
+        verifiedOnly,
         invited: new Set(),
         agents: new Set(),
         messageBuffer: []
@@ -549,6 +566,15 @@ export class AgentChatServer {
 
     this._log('server_start', { port: this.port, host: this.host, tls });
 
+    // Start floor control — RESPONDING_TO claim tracking and TTL expiry
+    this.floorControl.start();
+
+    // Start callback engine — delivers @@cb-fire@@ messages on timer
+    this.callbackQueue.start(
+      (entry: CallbackEntry) => this._deliverCallback(entry),
+      (agentId: string) => this.agentById.has(agentId)
+    );
+
     // Load persisted skills into in-memory registry
     this.skillsStore.load().then(async () => {
       const persisted = await this.skillsStore.getAll();
@@ -638,6 +664,8 @@ export class AgentChatServer {
 
       ws.on('error', (err: Error) => {
         this._log('ws_error', { error: err.message });
+        this._handleDisconnect(ws);
+        try { ws.close(1006, 'WebSocket error'); } catch {}
       });
     });
 
@@ -660,6 +688,7 @@ export class AgentChatServer {
             ip: ews._realIp,
             agent: this.agents.get(ews)?.id,
           });
+          this._handleDisconnect(ews);
           return ews.terminate();
         }
         ews._isAlive = false;
@@ -735,6 +764,8 @@ export class AgentChatServer {
       this.proposals.close();
       this.disputes.close();
     }
+    this.callbackQueue.stop();
+    this.floorControl.stop();
     this._log('server_stop');
   }
 
@@ -903,6 +934,56 @@ export class AgentChatServer {
       case ClientMessageType.ADMIN_UNBAN:
         handleAdminUnban(this, ws, msg);
         break;
+      // Floor control — RESPONDING_TO
+      case ClientMessageType.RESPONDING_TO: {
+        const rtAgent = this.agents.get(ws);
+        if (!rtAgent || !msg.msg_id || !msg.channel || !msg.started_at) break;
+
+        const channel = this.channels.get(msg.channel);
+        if (!channel) break;
+
+        const result = this.floorControl.claim(rtAgent.id, msg.channel, msg.msg_id, msg.started_at);
+
+        if (result.granted) {
+          // Broadcast FLOOR_CLAIMED to channel so others know to back off
+          const claimedMsg = createMessage(ServerMessageType.FLOOR_CLAIMED, {
+            msg_id: msg.msg_id,
+            channel: msg.channel,
+            holder: `@${rtAgent.id}`,
+            holder_name: rtAgent.name,
+            started_at: msg.started_at,
+          });
+          for (const memberWs of channel.agents) {
+            if (memberWs !== ws) this._send(memberWs, claimedMsg);
+          }
+
+          // If a previous holder was displaced, send them YIELD
+          if (result.holder) {
+            const oldWs = this.agentById.get(result.holder.agentId);
+            if (oldWs) {
+              this._send(oldWs, createMessage(ServerMessageType.YIELD, {
+                msg_id: msg.msg_id,
+                channel: msg.channel,
+                holder: `@${rtAgent.id}`,
+                holder_started_at: msg.started_at,
+                reason: 'Earlier started_at timestamp',
+              }));
+            }
+          }
+
+          this._log('floor_claimed', { agent: rtAgent.id, channel: msg.channel, msg_id: msg.msg_id });
+        } else {
+          // Denied — send YIELD to the requesting agent
+          this._send(ws, createMessage(ServerMessageType.YIELD, {
+            msg_id: msg.msg_id,
+            channel: msg.channel,
+            holder: `@${result.holder!.agentId}`,
+            holder_started_at: result.holder!.startedAt,
+            reason: 'Another agent claimed first',
+          }));
+        }
+        break;
+      }
       // Typing indicator
       case ClientMessageType.TYPING: {
         const typingAgent = this.agents.get(ws);
@@ -922,8 +1003,62 @@ export class AgentChatServer {
     }
   }
 
+  /**
+   * Deliver a fired callback as a synthetic message from @server.
+   */
+  _deliverCallback(entry: CallbackEntry): void {
+    const cbMsg = createMessage(ServerMessageType.MSG, {
+      from: '@server',
+      from_name: 'server',
+      to: entry.target,
+      content: `@@cb-fire@@${entry.payload}`,
+      cb_id: entry.id,
+      cb_origin: `@${entry.from}`,
+    });
+
+    if (entry.target.startsWith('#')) {
+      // Channel callback — check agent is still in the channel
+      const channel = this.channels.get(entry.target);
+      if (!channel) return;
+
+      const agentWs = this.agentById.get(entry.from);
+      if (!agentWs) return;
+
+      const agent = this.agents.get(agentWs);
+      if (!agent || !agent.channels.has(entry.target)) return;
+
+      // Deliver to originating agent only (not broadcast)
+      this._send(agentWs, cbMsg);
+    } else {
+      // DM callback — deliver to the agent who created it
+      const agentWs = this.agentById.get(entry.from);
+      if (!agentWs) return;
+      this._send(agentWs, cbMsg);
+    }
+
+    this._log('callback_fired', { id: entry.id, from: entry.from, target: entry.target });
+  }
+
   _handleDisconnect(ws: ExtendedWebSocket): void {
     const agent = this.agents.get(ws);
+
+    // Always remove ws from all channel agent Sets, even if agent is unknown.
+    // This prevents orphaned references when _handleDisconnect is called for
+    // connections that were already removed from this.agents (e.g. double-
+    // disconnect, or connections that joined channels but lost their agent
+    // mapping).
+    for (const [channelName, channel] of this.channels) {
+      if (channel.agents.has(ws)) {
+        channel.agents.delete(ws);
+        if (agent) {
+          this._broadcast(channelName, createMessage(ServerMessageType.AGENT_LEFT, {
+            channel: channelName,
+            agent: `@${agent.id}`
+          }));
+        }
+      }
+    }
+
     if (!agent) return;
 
     // Calculate connection duration
@@ -938,23 +1073,20 @@ export class AgentChatServer {
       ip: ws._realIp
     });
 
-    // Leave all channels
-    for (const channelName of agent.channels) {
-      const channel = this.channels.get(channelName);
-      if (channel) {
-        channel.agents.delete(ws);
-        this._broadcast(channelName, createMessage(ServerMessageType.AGENT_LEFT, {
-          channel: channelName,
-          agent: `@${agent.id}`
-        }));
-      }
-    }
-
     // Remove from state
     this.agentById.delete(agent.id);
     this.agents.delete(ws);
     this.lastMessageTime.delete(ws);
     this.lastFileChunkTime.delete(ws);
+    if (agent.pubkey) {
+      this.pubkeyToId.delete(agent.pubkey);
+    }
+
+    // Garbage-collect pending callbacks for this agent
+    this.callbackQueue.removeAgent(agent.id);
+
+    // Release any floor claims by this agent
+    this.floorControl.release(agent.id);
   }
 }
 
@@ -969,7 +1101,7 @@ export function startServer(options: AgentChatServerOptions = {}): AgentChatServ
     cert: options.cert || process.env.TLS_CERT || null,
     key: options.key || process.env.TLS_KEY || null,
     rateLimitMs: options.rateLimitMs || parseInt(process.env.RATE_LIMIT_MS || '1000'),
-    messageBufferSize: options.messageBufferSize || parseInt(process.env.MESSAGE_BUFFER_SIZE || '20'),
+    messageBufferSize: options.messageBufferSize || parseInt(process.env.MESSAGE_BUFFER_SIZE || '200'),
     idleTimeoutMs: options.idleTimeoutMs || parseInt(process.env.IDLE_TIMEOUT_MS || '3600000'),
     idlePromptsEnabled: options.idlePromptsEnabled !== undefined ? options.idlePromptsEnabled : process.env.IDLE_PROMPTS !== 'false',
   };

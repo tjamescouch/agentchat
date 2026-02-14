@@ -269,11 +269,12 @@ export class AgentChatClient extends EventEmitter {
   /**
    * Send a message to a channel or agent
    */
-  async send(to: string, content: string): Promise<void> {
+  async send(to: string, content: string, options?: { in_reply_to?: string }): Promise<void> {
     const msg: Record<string, unknown> = {
       type: ClientMessageType.MSG,
       to,
-      content
+      content,
+      ...(options?.in_reply_to && { in_reply_to: options.in_reply_to }),
     };
 
     // Sign message if identity available

@@ -4,6 +4,7 @@
  */
 
 import path from 'path';
+import fs from 'fs';
 import os from 'os';
 
 // Directories that are absolutely forbidden (system roots)
@@ -175,11 +176,19 @@ export function looksLikeProjectDirectory(dirPath: string = process.cwd()): bool
     'README',
   ];
 
-  // This is a heuristic check - doesn't actually verify files exist
-  // Just checks if the path looks reasonable
   const normalized = path.normalize(path.resolve(dirPath));
   const depth = getPathDepth(normalized);
 
-  // If it's deep enough and not a system directory, it probably looks like a project
-  return depth >= MIN_SAFE_DEPTH && !FORBIDDEN_DIRECTORIES.has(normalized);
+  if (depth < MIN_SAFE_DEPTH || FORBIDDEN_DIRECTORIES.has(normalized)) {
+    return false;
+  }
+
+  // Actually check for project indicators on disk
+  try {
+    const entries = new Set(fs.readdirSync(normalized));
+    return projectIndicators.some(indicator => entries.has(indicator));
+  } catch {
+    // Directory unreadable — not a usable project directory
+    return false;
+  }
 }

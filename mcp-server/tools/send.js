@@ -16,12 +16,21 @@ export function registerSendTool(server) {
     {
       target: z.string().describe('Target: #channel or @agent-id'),
       message: z.string().describe('Message content to send'),
+      in_reply_to: z.string().optional().describe('Optional msg_id of the message being replied to (for threading)'),
     },
-    async ({ target, message }) => {
+    async ({ target, message, in_reply_to }) => {
       try {
         if (!client || !client.connected) {
           return {
             content: [{ type: 'text', text: 'Not connected. Use agentchat_connect first.' }],
+            isError: true,
+          };
+        }
+
+        // Check actual WebSocket state to catch the CLOSING race window
+        if (client.ws && client.ws.readyState !== 1 /* OPEN */) {
+          return {
+            content: [{ type: 'text', text: 'Connection is closing or closed. Waiting for reconnect — retry in a few seconds.' }],
             isError: true,
           };
         }
@@ -31,7 +40,7 @@ export function registerSendTool(server) {
           await client.join(target);
         }
 
-        await client.send(target, message);
+        await client.send(target, message, in_reply_to ? { in_reply_to } : undefined);
 
         return {
           content: [

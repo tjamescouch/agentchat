@@ -60,8 +60,9 @@ export const DEFAULT_SERVER_URL = (() => {
 // Keepalive settings
 export const KEEPALIVE_INTERVAL_MS = 30000;
 export const PONG_STALE_MS = 90000; // 3 missed pings = dead
-export const RECONNECT_MAX_ATTEMPTS = 5;
+export const RECONNECT_MAX_ATTEMPTS = 10;
 export const RECONNECT_BASE_DELAY_MS = 1000;
+export const RECONNECT_MAX_DELAY_MS = 60000;
 
 // Connection health tracking (P1-LISTEN-1)
 export let lastPongTime = Date.now();
