@@ -12,7 +12,7 @@
 #   AGENT_MODEL         Model ID (default: claude-opus-4-6)
 #   STATE_DIR           State directory for transcripts, logs
 #   AGENTCHAT_URL       Server WebSocket URL
-#   AGENT_RUNTIME       "cli", "gro", or "api" (default: cli)
+#   AGENT_RUNTIME       "cli", "gro", or "api" (default: gro)
 #   PERSONALITY_DIR     Directory containing personality .md files
 #   SETTINGS_FILE       Claude settings.json path
 #   CLAUDE_CMD          Path to claude binary (auto-detected if unset)
@@ -41,7 +41,7 @@ MISSION="${MISSION:-monitor agentchat and respond to messages}"
 MODEL="${AGENT_MODEL:-claude-opus-4-6}"
 STATE_DIR="${STATE_DIR:-$HOME/.agentchat/agents/$AGENT_NAME}"
 SERVER_URL="${AGENTCHAT_URL:-wss://agentchat-server.fly.dev}"
-RUNTIME="${AGENT_RUNTIME:-cli}"
+RUNTIME="${AGENT_RUNTIME:-gro}"
 PERSONALITY_DIR="${PERSONALITY_DIR:-$HOME/.claude/personalities}"
 LOG_FILE="${LOG_FILE:-$STATE_DIR/runner.log}"
 MAX_TRANSCRIPT="${MAX_TRANSCRIPT:-200}"
