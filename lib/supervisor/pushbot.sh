@@ -32,6 +32,7 @@ VERBOSE=false
 WATCH_INTERVAL=0  # 0 = run once
 BRANCH_FILTER=""  # empty = push all, otherwise glob pattern (e.g. "agent/*")
 SKIP_PROTECTED=true  # skip main/master branches (never push these from wormhole)
+DELETE_OLD_DAYS=0    # 0 = disabled, >0 = delete remote branches with no commits in N days
 PID_FILE="/tmp/pushbot.pid"
 LOG_FILE="/tmp/pushbot.log"
 
@@ -46,6 +47,7 @@ while [[ $# -gt 0 ]]; do
         --watch)      WATCH_INTERVAL="$2"; shift 2 ;;
         --filter)     BRANCH_FILTER="$2"; shift 2 ;;
         --no-skip-protected) SKIP_PROTECTED=false; shift ;;
+        --delete-old) DELETE_OLD_DAYS="$2"; shift 2 ;;
         --pid-file)   PID_FILE="$2"; shift 2 ;;
         --log)        LOG_FILE="$2"; shift 2 ;;
         -h|--help)    sed -n '2,/^$/s/^# //p' "$0"; exit 0 ;;
@@ -166,6 +168,54 @@ push_repo() {
     return 0
 }
 
+# ── Delete stale remote branches ──────────────────────────────────────────
+
+delete_old_branches() {
+    local repo_dir="$1"
+    local repo_name
+    repo_name=$(basename "$repo_dir")
+
+    [[ "$DELETE_OLD_DAYS" -le 0 ]] && return 0
+    [[ ! -d "${repo_dir}/.git" ]] && return 0
+
+    local cutoff_epoch
+    cutoff_epoch=$(date -v-${DELETE_OLD_DAYS}d +%s 2>/dev/null || date -d "${DELETE_OLD_DAYS} days ago" +%s 2>/dev/null) || return 0
+
+    # Fetch remote branch info
+    GIT_TERMINAL_PROMPT=0 git -c core.hooksPath=/dev/null \
+        -c 'url.git@github.com:.insteadOf=https://github.com/' \
+        -C "$repo_dir" fetch origin --prune 2>/dev/null || return 0
+
+    while IFS= read -r ref; do
+        [[ -z "$ref" ]] && continue
+        local branch="${ref#origin/}"
+
+        is_protected_branch "$branch" && continue
+
+        # Get last commit date on remote branch
+        local last_commit_epoch
+        last_commit_epoch=$(git -C "$repo_dir" log -1 --format='%ct' "refs/remotes/origin/${branch}" 2>/dev/null) || continue
+        [[ -z "$last_commit_epoch" ]] && continue
+
+        if [[ "$last_commit_epoch" -lt "$cutoff_epoch" ]]; then
+            local age_days=$(( ($(date +%s) - last_commit_epoch) / 86400 ))
+            if [[ "$DRY_RUN" == "true" ]]; then
+                log "[dry-run] Would delete stale branch ${repo_name}/${branch} (${age_days}d old)"
+            else
+                local output
+                if output=$(GIT_TERMINAL_PROMPT=0 timeout 30 git -c core.hooksPath=/dev/null \
+                    -c 'url.git@github.com:.insteadOf=https://github.com/' \
+                    -C "$repo_dir" push origin --delete "$branch" 2>&1); then
+                    log "DELETED stale branch ${repo_name}/${branch} (${age_days}d old)"
+                    notify_push "${repo_name}" "${branch}" "🗑️ Deleted stale branch (${age_days}d old, threshold: ${DELETE_OLD_DAYS}d)"
+                else
+                    log "ERROR deleting ${repo_name}/${branch}: $(echo "$output" | head -1)"
+                fi
+            fi
+        fi
+    done < <(git -C "$repo_dir" branch -r --format='%(refname:short)' 2>/dev/null | grep '^origin/' | grep -v 'origin/HEAD')
+}
+
 # ── Push all repos in wormhole ────────────────────────────────────────────
 
 push_all() {
@@ -194,6 +244,7 @@ push_all() {
             else
                 errors=$((errors + 1))
             fi
+            [[ "$DELETE_OLD_DAYS" -gt 0 ]] && delete_old_branches "$agent_dir"
             count=$((count + 1))
         fi
 
@@ -206,6 +257,7 @@ push_all() {
                 else
                     errors=$((errors + 1))
                 fi
+                [[ "$DELETE_OLD_DAYS" -gt 0 ]] && delete_old_branches "$sub_dir"
                 count=$((count + 1))
             fi
         done
@@ -239,6 +291,7 @@ main() {
     log "  Wormhole:     $WORMHOLE_DIR"
     log "  Dry-run:      $DRY_RUN"
     log "  Skip-protected: $SKIP_PROTECTED"
+    [[ "$DELETE_OLD_DAYS" -gt 0 ]] && log "  Delete-old:   ${DELETE_OLD_DAYS}d"
     [[ -n "$BRANCH_FILTER" ]] && log "  Filter:       $BRANCH_FILTER"
     [[ "$WATCH_INTERVAL" -gt 0 ]] && log "  Watch:        every ${WATCH_INTERVAL}s"
 
