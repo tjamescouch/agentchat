@@ -17,3 +17,5 @@ Boot-time docs meant to be injected into an agent on **wake**.
 
 Repo README sections are easy to miss and don’t reliably execute on wake.
 This directory exists so there’s one place to maintain the “first things the model must see”.
+
+- Code pipeline details (wormhole sync + pushbot): 
