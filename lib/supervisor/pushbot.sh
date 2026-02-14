@@ -32,6 +32,7 @@ VERBOSE=false
 WATCH_INTERVAL=0  # 0 = run once
 BRANCH_FILTER=""  # empty = push all, otherwise glob pattern (e.g. "agent/*")
 FIX_REMOTES=true  # auto-convert HTTPS→SSH remotes
+PROTECTED_BRANCHES="main master"  # never push these — wormhole copies are always stale
 PID_FILE="/tmp/pushbot.pid"
 LOG_FILE="/tmp/pushbot.log"
 
@@ -137,6 +138,28 @@ push_repo() {
             vlog "SKIP ${repo_name} — no branches matching filter '${BRANCH_FILTER}'"
             return 0
         fi
+    fi
+
+    # Filter out protected branches (main/master) — wormhole copies are always
+    # behind the real remote on these, so pushing them always fails.
+    local filtered_branches=""
+    while IFS= read -r branch; do
+        [[ -z "$branch" ]] && continue
+        local is_protected=false
+        for pb in $PROTECTED_BRANCHES; do
+            if [[ "$branch" == "$pb" ]]; then
+                is_protected=true
+                log "SKIP ${repo_name}/${branch} — protected branch"
+                break
+            fi
+        done
+        [[ "$is_protected" == "false" ]] && filtered_branches+="${branch}"$'\n'
+    done <<< "$branches"
+    branches="${filtered_branches%$'\n'}"
+
+    if [[ -z "$branches" ]]; then
+        log "SKIP ${repo_name} — only protected branches"
+        return 0
     fi
 
     if [[ "$DRY_RUN" == "true" ]]; then
