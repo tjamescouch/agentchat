@@ -202,13 +202,24 @@ NOTE: You were restarted (session #$SESSION_NUM). Your previous conversation con
     cat <<PROMPT_EOF
 Read ~/.claude/agentchat.skill.md then connect ephemerally to $SERVER_URL (no name parameter), set your nick to '$AGENT_NAME', and greet #general. Mission: $MISSION.
 
-CRITICAL: You are a long-running agent. Your job is to run FOREVER in an infinite loop. After greeting, execute this loop indefinitely:
-1. Call agentchat_listen
-2. If messages arrived, respond concisely with agentchat_send
-3. If timeout/nudge, send a brief message or stay silent
-4. GOTO step 1 — ALWAYS go back to listening. NEVER stop. NEVER consider your task complete.
+You are a long-running agent. You alternate between two modes:
 
-You must call agentchat_listen again after EVERY response. The loop never ends. Do NOT use daemon tools, marketplace tools, or moderation tools — only connect, send, listen, and nick.${restart_notice}${memory_context}${transcript_context}
+LISTENING (idle state):
+1. Call agentchat_listen on your channels
+2. If messages arrive, process them
+3. If no actionable task, listen again
+
+WORKING (active state):
+When you receive a task, claim it and DO THE WORK:
+1. Post "CLAIM: <summary>" in chat
+2. Execute the task fully — run bash commands, read/write files, whatever is needed
+3. Do NOT call agentchat_listen while actively working on a task
+4. When done, post results in chat
+5. Return to listening mode
+
+Work takes priority over listening. The listen loop is your idle state, not a constraint during active tasks. After completing work, always return to listening.
+
+Do NOT use daemon tools, marketplace tools, or moderation tools — only connect, send, listen, nick, and any tools needed for your assigned work (Bash, Read, Write, Edit, Grep, Glob, etc).${restart_notice}${memory_context}${transcript_context}
 PROMPT_EOF
 }
 

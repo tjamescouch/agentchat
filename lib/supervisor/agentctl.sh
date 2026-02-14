@@ -344,8 +344,8 @@ container_exists() {
 }
 
 build_image() {
-    echo "Building agent image..."
-    podman build -t "$IMAGE_NAME" -f "$REPO_ROOT/docker/agent.Dockerfile" "$REPO_ROOT"
+    echo "Building agent image (clean build, no cache)..."
+    podman build --no-cache -t "$IMAGE_NAME" -f "$REPO_ROOT/docker/agent.Dockerfile" "$REPO_ROOT"
     echo "Image '$IMAGE_NAME' built successfully"
 }
 
