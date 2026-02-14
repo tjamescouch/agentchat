@@ -89,6 +89,16 @@ notify_push() {
     fi
 }
 
+# ── Git push helper (HTTPS→SSH rewrite, hooks disabled) ──────────────────
+
+git_push() {
+    local repo_dir="$1" branch="$2"
+    GIT_TERMINAL_PROMPT=0 timeout 30 \
+        git -c core.hooksPath=/dev/null \
+            -c 'url.git@github.com:.insteadOf=https://github.com/' \
+            -C "$repo_dir" push origin "$branch" 2>&1
+}
+
 # ── Push one repo ─────────────────────────────────────────────────────────
 
 push_repo() {
@@ -104,88 +114,45 @@ push_repo() {
 
     # Check if remote exists
     if ! git -C "$repo_dir" remote get-url origin &>/dev/null; then
-        log "SKIP ${repo_name} — no 'origin' remote configured"
+        vlog "SKIP ${repo_name} — no 'origin' remote"
         return 0
     fi
 
-    # Get current branches
-    local branches
-    branches=$(git -C "$repo_dir" branch --format='%(refname:short)' 2>/dev/null)
-
-    if [[ -z "$branches" ]]; then
-        vlog "SKIP ${repo_name} — no branches"
-        return 0
-    fi
-
-    # Filter out protected branches (main/master) — never push these from wormhole
-    if [[ "$SKIP_PROTECTED" == "true" ]]; then
-        local filtered=""
-        while IFS= read -r branch; do
-            [[ -z "$branch" ]] && continue
-            if is_protected_branch "$branch"; then
-                vlog "SKIP ${repo_name}/${branch} — protected branch"
-            else
-                filtered+="${branch}"$'\n'
-            fi
-        done <<< "$branches"
-        branches="${filtered%$'\n'}"
-        if [[ -z "$branches" ]]; then
-            vlog "SKIP ${repo_name} — only protected branches"
-            return 0
-        fi
-    fi
-
-    # Filter branches if pattern specified
-    if [[ -n "$BRANCH_FILTER" ]]; then
-        local filtered=""
-        while IFS= read -r branch; do
-            # shellcheck disable=SC2254
-            case "$branch" in
-                $BRANCH_FILTER) filtered+="${branch}"$'\n' ;;
-            esac
-        done <<< "$branches"
-        branches="${filtered%$'\n'}"
-        if [[ -z "$branches" ]]; then
-            vlog "SKIP ${repo_name} — no branches matching filter '${BRANCH_FILTER}'"
-            return 0
-        fi
-    fi
-
-    if [[ "$DRY_RUN" == "true" ]]; then
-        log "[dry-run] Would push ${repo_name}: ${branches//$'\n'/, }"
-        return 0
-    fi
-
-    # Push branches (idempotent — no-ops if up to date)
+    # List ALL local branches, push each non-protected one
     local push_errors=0
+    local found=0
     while IFS= read -r branch; do
         [[ -z "$branch" ]] && continue
+
+        if is_protected_branch "$branch"; then
+            continue
+        fi
+
+        found=$((found + 1))
+
+        if [[ "$DRY_RUN" == "true" ]]; then
+            log "[dry-run] Would push ${repo_name}/${branch}"
+            continue
+        fi
+
         local output
-        # SECURITY: Disable git hooks — wormhole repos are agent-written, untrusted.
-        # Hooks in .git/hooks/ could execute arbitrary code on the host.
-        # Use url.*.insteadOf to rewrite HTTPS→SSH at push time (avoids modifying
-        # wormhole .git/config which gets overwritten by sync daemon)
-        if output=$(GIT_TERMINAL_PROMPT=0 timeout 30 git -c core.hooksPath=/dev/null -c 'url.git@github.com:.insteadOf=https://github.com/' -C "$repo_dir" push origin "$branch" 2>&1); then
+        if output=$(git_push "$repo_dir" "$branch"); then
             if echo "$output" | grep -q "Everything up-to-date"; then
-                vlog "OK ${repo_name}/${branch} — already up to date"
+                vlog "OK ${repo_name}/${branch} — up to date"
             else
                 log "PUSHED ${repo_name}/${branch}:"
                 echo "$output" | sed 's/^/  /'
-                # Notify agentchat #pull-requests
                 notify_push "${repo_name}" "${branch}" "$output"
             fi
         else
-            log "ERROR pushing ${repo_name}/${branch}:"
-            echo "$output" | sed 's/^/  /'
+            log "ERROR ${repo_name}/${branch}: $(echo "$output" | head -1)"
             push_errors=$((push_errors + 1))
         fi
-    done <<< "$branches"
+    done < <(git -C "$repo_dir" branch --format='%(refname:short)' 2>/dev/null)
 
-    # Also push tags if any (hooks disabled for security, HTTPS→SSH rewrite)
-    git -c core.hooksPath=/dev/null -c 'url.git@github.com:.insteadOf=https://github.com/' -C "$repo_dir" push origin --tags 2>/dev/null || true
+    [[ "$found" -eq 0 ]] && vlog "SKIP ${repo_name} — no non-protected branches"
 
     [[ "$push_errors" -gt 0 ]] && return 1
-
     return 0
 }
 
