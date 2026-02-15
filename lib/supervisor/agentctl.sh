@@ -457,10 +457,15 @@ EOF
         cp "$REPO_ROOT/docker/claude-settings.json" "$claude_state/settings.json" 2>/dev/null || true
         cp "$REPO_ROOT/docker/claude-settings-fetcher.json" "$claude_state/settings-fetcher.json" 2>/dev/null || true
         cp "$REPO_ROOT/docker/container-skill.md" "$claude_state/agentchat.skill.md" 2>/dev/null || true
-        if [ -d "$REPO_ROOT/docker/personalities" ]; then
-            cp -r "$REPO_ROOT/docker/personalities" "$claude_state/" 2>/dev/null || true
-        fi
     fi
+    # Always sync personalities from repo (picks up _base.md updates after image rebuild)
+    if [ -d "$REPO_ROOT/docker/personalities" ]; then
+        cp -r "$REPO_ROOT/docker/personalities" "$claude_state/" 2>/dev/null || true
+    fi
+
+    # Persist gro session context across container restarts
+    local gro_context="${state_dir}/gro-context"
+    mkdir -p "$gro_context"
 
     # Resolve host gateway for container→host proxy access
     local host_gateway
@@ -544,6 +549,7 @@ EOF
         -v "${state_dir}:/home/agent/.agentchat/agents/${name}" \
         -v "${HOME}/.agentchat/identities:/home/agent/.agentchat/identities" \
         -v "${claude_state}:/home/agent/.claude" \
+        -v "${gro_context}:/home/agent/.gro/context" \
         $lucidity_mount \
         "$IMAGE_NAME" \
         "$name" "$mission" > /dev/null
