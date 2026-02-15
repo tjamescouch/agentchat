@@ -2,6 +2,11 @@
  * AgentChat Listen Tool
  * Listens for messages by polling inbox.jsonl — the single source of truth
  * for both daemon and direct-connection modes.
+ *
+ * v2: Removed nudge wakeups. Always blocks for full timeout (1 hour) or until
+ * a real message arrives. The old nudge system woke agents every 30s when
+ * others were in the channel, burning a full model round-trip each time for
+ * zero benefit. Now the model only wakes on actual messages.
  */
 
 import { z } from 'zod';
@@ -10,12 +15,10 @@ import path from 'path';
 import { getDaemonPaths } from '@tjamescouch/agentchat/lib/daemon.js';
 import { addJitter } from '@tjamescouch/agentchat/lib/jitter.js';
 import { ClientMessageType } from '@tjamescouch/agentchat/lib/protocol.js';
-import { client, getLastSeen, updateLastSeen, getIdleCount, incrementIdleCount, resetIdleCount, trackChannel } from '../state.js';
+import { client, getLastSeen, updateLastSeen, incrementIdleCount, resetIdleCount, trackChannel } from '../state.js';
 
 // Timeouts - agent cannot override these
-const ENFORCED_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour when alone
-const NUDGE_TIMEOUT_MS = 30 * 1000; // 30 seconds when others are present
-const MAX_BACKOFF_MS = 15 * 60 * 1000; // 15 minute cap on backoff
+const ENFORCED_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour — always used, regardless of channel occupancy
 const POLL_INTERVAL_MS = 500; // fallback poll interval
 const HEARTBEAT_INTERVAL_MS = 30 * 1000; // heartbeat file write interval
 const SETTLE_MS = parseInt(process.env.AGENTCHAT_SETTLE_MS || '5000', 10);
@@ -154,7 +157,7 @@ function capMessages(messages) {
 export function registerListenTool(server) {
   server.tool(
     'agentchat_listen',
-    'Listen for messages - blocks until a message arrives. If others are in the channel, returns after ~30s with nudge:true so you can take initiative. If alone, waits up to 1 hour. Writes a heartbeat file every 30s during blocking for deadlock detection. Use tail parameter to return last N messages immediately without blocking (efficient polling mode).',
+    'Listen for messages - blocks up to 1 hour until a real message arrives. No empty nudge wakeups. Use tail parameter to return last N messages immediately without blocking (efficient polling mode).',
     {
       channels: z.array(z.string()).describe('Channels to listen on (e.g., ["#general"])'),
       tail: z.number().optional().describe('Return last N messages immediately without blocking. Reads only the tail of the inbox file for efficiency.'),
@@ -196,25 +199,6 @@ export function registerListenTool(server) {
               }),
             }],
           };
-        }
-
-        // Check channel occupancy to determine timeout behavior
-        let othersPresent = false;
-        let channelOccupancy = {};
-
-        for (const channel of channels) {
-          if (channel.startsWith('#')) {
-            try {
-              const agents = await client.listAgents(channel);
-              const others = agents.filter((a) => a !== client.agentId);
-              channelOccupancy[channel] = agents.length;
-              if (others.length > 0) {
-                othersPresent = true;
-              }
-            } catch {
-              // Ignore errors, default to long timeout
-            }
-          }
         }
 
         // Set presence to 'listening' so other agents see we're active
@@ -325,16 +309,10 @@ export function registerListenTool(server) {
             tryRead();
           }, POLL_INTERVAL_MS);
 
-          // Linear backoff timeout
-          const idleCount = getIdleCount();
-          const backoffMultiplier = idleCount + 1;
-          const baseTimeout = othersPresent
-            ? Math.min(NUDGE_TIMEOUT_MS * backoffMultiplier, MAX_BACKOFF_MS)
-            : ENFORCED_TIMEOUT_MS;
-          const jitterPercent = parseFloat(process.env.AGENTCHAT_JITTER_PERCENT || '0.5');
-          const actualTimeout = addJitter(baseTimeout, jitterPercent);
+          // Always block for the full timeout — no nudge wakeups
+          const actualTimeout = addJitter(ENFORCED_TIMEOUT_MS, 0.1);
 
-          // Heartbeat file for deadlock detection + stderr for niki stall prevention
+          // Heartbeat file for deadlock detection + stderr for stall prevention
           const heartbeatPath = path.join(newdataDir, 'heartbeat');
           const writeHeartbeat = () => {
             try { fs.writeFileSync(heartbeatPath, String(Date.now())); } catch { /* ignore */ }
@@ -361,12 +339,7 @@ export function registerListenTool(server) {
                 type: 'text',
                 text: JSON.stringify({
                   messages: [],
-                  timeout: !othersPresent,
-                  nudge: othersPresent,
-                  others_waiting: othersPresent,
-                  channel_occupancy: channelOccupancy,
-                  idle_count: idleCount + 1,
-                  next_timeout_ms: Math.min(NUDGE_TIMEOUT_MS * (idleCount + 2), MAX_BACKOFF_MS),
+                  timeout: true,
                   elapsed_ms: Date.now() - startTime,
                 }),
               }],
