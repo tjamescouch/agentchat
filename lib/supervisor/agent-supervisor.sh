@@ -325,10 +325,9 @@ while true; do
             log "Agent crashed (exit code $EXIT_CODE, ran for ${DURATION}s)"
             # Show last lines of supervisor log for crash diagnosis
             if [ -f "$LOG_FILE" ] && [ $DURATION -lt 10 ]; then
-                local crash_context
-                crash_context=$(tail -20 "$LOG_FILE" 2>/dev/null | grep -v '^\[2026\|^\[niki\]' | head -5)
-                if [ -n "$crash_context" ]; then
-                    log "Crash output: $crash_context"
+                CRASH_CONTEXT=$(tail -20 "$LOG_FILE" 2>/dev/null | grep -v '^\[2026\|^\[niki\]' | head -5)
+                if [ -n "$CRASH_CONTEXT" ]; then
+                    log "Crash output: $CRASH_CONTEXT"
                 fi
             fi
             save_state "crashed" "exit_code=$EXIT_CODE"
