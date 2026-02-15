@@ -17,8 +17,8 @@ RUN apt-get update && apt-get install -y \
 
 # Install Claude CLI and agentchat MCP server globally
 RUN npm install -g @anthropic-ai/claude-code \
-    @tjamescouch/agentchat-mcp@0.10.2 \
-    @tjamescouch/agentchat@0.25.0 \
+    "@tjamescouch/agentchat-mcp@^0.20.0" \
+    "@tjamescouch/agentchat@^0.25.0" \
     "@tjamescouch/gro@^1.3.4" \
     "@tjamescouch/niki@^0.3.0"
 
