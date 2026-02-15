@@ -491,7 +491,7 @@ run_cli() {
     local tokens_used=0
     if [ -f "$niki_state" ]; then
         got_output=$(python3 -c "import json; print('true' if json.load(open('$niki_state')).get('gotFirstOutput', False) else 'false')" 2>/dev/null || echo "false")
-        tokens_used=$(python3 -c "import json; print(json.load(open('$niki_state')).get('tokensUsed', 0))" 2>/dev/null || echo 0)
+        tokens_used=$(python3 -c "import json; print(json.load(open('$niki_state')).get('tokensTotal', 0))" 2>/dev/null || echo 0)
     fi
 
     if [ "$got_output" = "true" ] && [ "$tokens_used" -gt 0 ]; then
@@ -665,16 +665,18 @@ run_gro() {
     local tokens_used=0
     if [ -f "$niki_state" ]; then
         got_output=$(python3 -c "import json; print('true' if json.load(open('$niki_state')).get('gotFirstOutput', False) else 'false')" 2>/dev/null || echo "false")
-        tokens_used=$(python3 -c "import json; print(json.load(open('$niki_state')).get('tokensUsed', 0))" 2>/dev/null || echo 0)
+        tokens_used=$(python3 -c "import json; print(json.load(open('$niki_state')).get('tokensTotal', 0))" 2>/dev/null || echo 0)
     elif [ -s "$TRANSCRIPT_FILE" ]; then
         # No niki — check if transcript has content
         got_output="true"
         tokens_used=1  # placeholder; we know it ran
     fi
 
-    if [ "$got_output" = "true" ] && [ "$tokens_used" -gt 0 ]; then
+    # For gro: also check if .gro/context/ has session data, even when
+    # token count is 0 (gro may not report tokens to niki in all versions).
+    local gro_context_dir="${HOME}/.gro/context"
+    if [ "$got_output" = "true" ] && { [ "$tokens_used" -gt 0 ] || [ -d "$gro_context_dir" ]; }; then
         # Find the gro session ID from .gro/context/ (most recent by mtime)
-        local gro_context_dir="${HOME}/.gro/context"
         if [ -d "$gro_context_dir" ]; then
             local latest_gro_session
             latest_gro_session=$(ls -t "$gro_context_dir" 2>/dev/null | head -1)
