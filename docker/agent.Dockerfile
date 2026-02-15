@@ -9,6 +9,10 @@ RUN apt-get update && apt-get install -y \
     python3 \
     file \
     ripgrep \
+    jq \
+    less \
+    openssh-client \
+    make \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Claude CLI and agentchat MCP server globally
