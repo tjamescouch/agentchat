@@ -307,51 +307,50 @@ find_claude_cmd() {
 # ============ Gro Binary Detection ============
 
 find_gro_cmd() {
+    # Explicit override
     if [ -n "$GRO_CMD" ]; then
         echo "$GRO_CMD"
         return
     fi
 
-    # Prefer npm-installed gro package over global binary
-    local npm_gro
-    npm_gro="$(dirname "$(realpath "$0" 2>/dev/null || echo "$0")")/../node_modules/@tjamescouch/gro/gro"
-    if [ -x "$npm_gro" ]; then
-        echo "$npm_gro"
+    # 1. npm bin symlink (canonical — created by `npm install -g` from package.json bin field)
+    #    This points to dist/main.js (the compiled Node.js runtime), not the bash dispatcher.
+    if command -v gro > /dev/null 2>&1; then
+        command -v gro
         return
     fi
 
-    # Check relative to working directory (e.g. when run from repo root)
-    if [ -x "./node_modules/@tjamescouch/gro/gro" ]; then
-        echo "./node_modules/@tjamescouch/gro/gro"
+    # 2. Explicit well-known paths
+    if [ -x /usr/local/bin/gro ]; then
+        echo "/usr/local/bin/gro"
+        return
+    fi
+    if [ -x "$HOME/.local/bin/gro" ]; then
+        echo "$HOME/.local/bin/gro"
         return
     fi
 
-    # Fallback: global npm lib (where `npm install -g` puts packages)
+    # 3. Global npm lib — look for compiled dist/main.js, NOT the bash gro script
     local global_npm_gro
-    global_npm_gro="$(npm root -g 2>/dev/null)/@tjamescouch/gro/gro"
-    if [ -n "$global_npm_gro" ] && [ -x "$global_npm_gro" ]; then
+    global_npm_gro="$(npm root -g 2>/dev/null)/@tjamescouch/gro/dist/main.js"
+    if [ -n "$global_npm_gro" ] && [ -f "$global_npm_gro" ]; then
         echo "$global_npm_gro"
         return
     fi
 
-    # Fallback: npx resolution
-    local npx_gro
-    npx_gro="$(npx --no-install -c 'which gro' 2>/dev/null || true)"
-    if [ -n "$npx_gro" ] && [ -x "$npx_gro" ]; then
-        echo "$npx_gro"
+    # 4. Local npm installs (dev environments) — also prefer dist/main.js
+    local local_gro
+    local_gro="$(dirname "$(realpath "$0" 2>/dev/null || echo "$0")")/../node_modules/@tjamescouch/gro/dist/main.js"
+    if [ -f "$local_gro" ]; then
+        echo "$local_gro"
+        return
+    fi
+    if [ -f "./node_modules/@tjamescouch/gro/dist/main.js" ]; then
+        echo "./node_modules/@tjamescouch/gro/dist/main.js"
         return
     fi
 
-    # Fallback: global binary
-    if command -v gro > /dev/null 2>&1; then
-        command -v gro
-    elif [ -x /usr/local/bin/gro ]; then
-        echo "/usr/local/bin/gro"
-    elif [ -x "$HOME/.local/bin/gro" ]; then
-        echo "$HOME/.local/bin/gro"
-    else
-        echo ""
-    fi
+    echo ""
 }
 
 # ============ Settings Detection ============
