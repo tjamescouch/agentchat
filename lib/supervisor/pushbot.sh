@@ -300,8 +300,11 @@ push_repo() {
             continue
         fi
 
-        local output
-        if output=$(git_push "$repo_dir" "$branch"); then
+        local output exit_code
+        output=$(git_push "$repo_dir" "$branch")
+        exit_code=$?
+
+        if [[ $exit_code -eq 0 ]]; then
             if echo "$output" | grep -q "Everything up-to-date"; then
                 vlog "OK ${repo_name}/${branch} — up to date"
             else
@@ -313,6 +316,10 @@ push_repo() {
             clear_failed "$repo_name" "$branch"
             # Success clears auth failure counter
             clear_auth_fails
+        elif [[ $exit_code -eq 124 ]]; then
+            # Timeout is transient — do NOT write failure semaphore
+            log "TIMEOUT ${repo_name}/${branch} — will retry next cycle"
+            push_errors=$((push_errors + 1))
         else
             log "ERROR ${repo_name}/${branch}: $(echo "$output" | head -1)"
             notify_error "${repo_name}" "${branch}" "$output"
