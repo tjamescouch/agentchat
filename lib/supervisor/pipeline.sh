@@ -90,6 +90,19 @@ notify() {
     fi
 }
 
+notify_error() {
+    local repo="$1" branch="$2" output="$3" head_hash="${4:-}" exit_code="${5:-}"
+    local detail=""
+    detail+="❌ PUSH FAILED ${repo}/${branch}"
+    [[ -n "$head_hash" ]] && detail+=" @ ${head_hash:0:7}"
+    [[ -n "$exit_code" ]] && detail+=" (exit ${exit_code})"
+    detail+=$'\n'"--- git output ---"$'\n'"${output}"
+    if is_auth_error "$output"; then
+        detail+=$'\n'"⚠️ AUTH/CREDENTIAL ERROR — check SSH keys or GitHub token"
+    fi
+    notify "$detail"
+}
+
 # ── Auth circuit breaker ─────────────────────────────────────────────────
 
 get_auth_fails()   { [[ -f "$AUTH_FAIL_FILE" ]] && cat "$AUTH_FAIL_FILE" || echo 0; }
@@ -238,10 +251,12 @@ push_repo() {
             clear_failed "$repo_name" "$branch"
             clear_auth_fails
         elif [[ $rc -eq 124 ]]; then
-            log "TIMEOUT ${repo_name}/${branch} — retry next cycle"
+            log "TIMEOUT ${repo_name}/${branch} @ ${head:0:7} — retry next cycle"
+            notify_error "${repo_name}" "${branch}" "git push timed out after 30s" "$head" "124"
         else
-            log "PUSH ERROR ${repo_name}/${branch}: $(echo "$out" | head -1)"
-            notify "🚒 ${repo_name}/${branch}: $(echo "$out" | head -1)"
+            log "PUSH ERROR ${repo_name}/${branch} @ ${head:0:7} (exit ${rc}):"
+            echo "$out" | sed 's/^/  /'
+            notify_error "${repo_name}" "${branch}" "$out" "$head" "$rc"
             set_failed_hash "$repo_name" "$branch" "$head"
             is_auth_error "$out" && { record_auth_fail; log "AUTH FAIL #$(get_auth_fails)"; }
         fi
@@ -286,7 +301,8 @@ for pr in json.load(sys.stdin):
                 log "MERGED ${repo}#${num} '${title}'"
                 merged=$((merged + 1))
             else
-                log "MERGE FAILED ${repo}#${num}"
+                log "MERGE FAILED ${repo}#${num} '${title}'"
+                notify "❌ MERGE FAILED ${repo}#${num} '${title}' (branch: ${branch}, mergeable: ${mergeable})"
             fi
             api=$((api + 1))
         done
@@ -376,6 +392,7 @@ main() {
                     synced=$((synced + 1))
                 else
                     log "ERROR: bootstrap $name failed"
+                    notify "❌ BOOTSTRAP FAILED for ${name} — podman copy returned no data"
                     errors=$((errors + 1))
                 fi
                 continue
@@ -405,6 +422,7 @@ main() {
                     STATS_SYNCED=$((STATS_SYNCED + 1))
                 else
                     log "ERROR: sync ${name}/${repo}"
+                    notify "❌ SYNC FAILED ${name}/${repo} — tar copy from container failed"
                     errors=$((errors + 1))
                 fi
             done
