@@ -308,7 +308,29 @@ find_gro_cmd() {
         return
     fi
 
-    # Check common locations
+    # Prefer npm-installed gro package over global binary
+    local npm_gro
+    npm_gro="$(dirname "$(realpath "$0" 2>/dev/null || echo "$0")")/../node_modules/@tjamescouch/gro/gro"
+    if [ -x "$npm_gro" ]; then
+        echo "$npm_gro"
+        return
+    fi
+
+    # Check relative to working directory (e.g. when run from repo root)
+    if [ -x "./node_modules/@tjamescouch/gro/gro" ]; then
+        echo "./node_modules/@tjamescouch/gro/gro"
+        return
+    fi
+
+    # Fallback: npx resolution
+    local npx_gro
+    npx_gro="$(npx --no-install -c 'which gro' 2>/dev/null || true)"
+    if [ -n "$npx_gro" ] && [ -x "$npx_gro" ]; then
+        echo "$npx_gro"
+        return
+    fi
+
+    # Fallback: global binary
     if command -v gro > /dev/null 2>&1; then
         command -v gro
     elif [ -x /usr/local/bin/gro ]; then
@@ -496,8 +518,8 @@ run_gro() {
     cmd=$(find_gro_cmd)
 
     if [ -z "$cmd" ]; then
-        log "ERROR: Gro CLI not found. Checked GRO_CMD, PATH, /usr/local/bin/gro, ~/.local/bin/gro."
-        log "Install gro or set GRO_CMD. Exiting."
+        log "ERROR: Gro CLI not found. Checked: npm package (@tjamescouch/gro), GRO_CMD, PATH, /usr/local/bin/gro, ~/.local/bin/gro."
+        log "Install via npm (npm install @tjamescouch/gro) or set GRO_CMD. Exiting."
         exit 1
     fi
 
