@@ -91,6 +91,13 @@ log_always() {
     echo "$msg" >&2
 }
 
+vlog() {
+    # Verbose-only log (no log file)
+    if [[ "$VERBOSE" == "true" ]]; then
+        echo "[$(date -Iseconds)] [sync] $*" >&2
+    fi
+}
+
 # ── Container discovery ──────────────────────────────────────────────────
 
 discover_containers() {
@@ -181,7 +188,7 @@ sync_container() {
 
     if [[ "$any_changed" == "false" ]]; then
         vlog "SKIP $agent_name — no HEAD changes"
-        return 0
+        return 2  # 2 = no changes (distinct from 0=synced, 1=error)
     fi
 
     log "Changes in $agent_name:${changed_repos} — syncing"
@@ -312,27 +319,31 @@ sync_all() {
         agent_name=$(get_agent_name "$agent_raw")
         [[ -z "$agent_name" ]] && continue
 
-        local ok=false
+        local rc=0
         if [[ "$FIRST_RUN" == "true" ]]; then
             # First run: full sync to catch everything
-            full_sync_container "$container_id" "$agent_name" && ok=true
+            full_sync_container "$container_id" "$agent_name" || rc=$?
         else
             # Subsequent runs: fast incremental (HEAD-check gated)
-            sync_container "$container_id" "$agent_name" && ok=true
+            sync_container "$container_id" "$agent_name" || rc=$?
         fi
 
-        if $ok; then
-            # SECURITY: sanitize after every sync
+        if [[ $rc -eq 0 ]]; then
+            # Actual sync happened — sanitize the output
             sanitize_wormhole "${WORMHOLE_DIR}/${agent_name}" "$agent_name"
-            count=$((count + 1))
+            synced=$((synced + 1))
+        elif [[ $rc -eq 2 ]]; then
+            # No changes — skip sanitize
+            :
         else
             errors=$((errors + 1))
         fi
+        count=$((count + 1))
     done < <(discover_containers)
 
     FIRST_RUN=false
     [[ "$VERBOSE" == "true" || $synced -gt 0 || $errors -gt 0 ]] && \
-        log "Sync cycle: $count containers checked, $errors errors"
+        log "Sync cycle: $count checked, $synced synced, $errors errors"
 }
 
 # ── Signal handling ──────────────────────────────────────────────────────
