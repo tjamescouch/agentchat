@@ -326,6 +326,14 @@ find_gro_cmd() {
         return
     fi
 
+    # Fallback: global npm lib (where `npm install -g` puts packages)
+    local global_npm_gro
+    global_npm_gro="$(npm root -g 2>/dev/null)/@tjamescouch/gro/gro"
+    if [ -n "$global_npm_gro" ] && [ -x "$global_npm_gro" ]; then
+        echo "$global_npm_gro"
+        return
+    fi
+
     # Fallback: npx resolution
     local npx_gro
     npx_gro="$(npx --no-install -c 'which gro' 2>/dev/null || true)"
@@ -491,7 +499,7 @@ run_cli() {
     local tokens_used=0
     if [ -f "$niki_state" ]; then
         got_output=$(python3 -c "import json; print('true' if json.load(open('$niki_state')).get('gotFirstOutput', False) else 'false')" 2>/dev/null || echo "false")
-        tokens_used=$(python3 -c "import json; print(json.load(open('$niki_state')).get('tokensTotal', 0))" 2>/dev/null || echo 0)
+        tokens_used=$(python3 -c "import json; s=json.load(open('$niki_state')); print(s.get('tokensTotal', s.get('tokensUsed', 0)))" 2>/dev/null || echo 0)
     fi
 
     if [ "$got_output" = "true" ] && [ "$tokens_used" -gt 0 ]; then
@@ -665,7 +673,7 @@ run_gro() {
     local tokens_used=0
     if [ -f "$niki_state" ]; then
         got_output=$(python3 -c "import json; print('true' if json.load(open('$niki_state')).get('gotFirstOutput', False) else 'false')" 2>/dev/null || echo "false")
-        tokens_used=$(python3 -c "import json; print(json.load(open('$niki_state')).get('tokensTotal', 0))" 2>/dev/null || echo 0)
+        tokens_used=$(python3 -c "import json; s=json.load(open('$niki_state')); print(s.get('tokensTotal', s.get('tokensUsed', 0)))" 2>/dev/null || echo 0)
     elif [ -s "$TRANSCRIPT_FILE" ]; then
         # No niki — check if transcript has content
         got_output="true"
