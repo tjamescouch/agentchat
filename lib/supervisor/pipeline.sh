@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # pipeline — container → wormhole → GitHub in one loop
 #
 # Every 5s: check container HEADs, copy changed repos, sanitize, push.
