@@ -18,7 +18,10 @@ const NUDGE_TIMEOUT_MS = 30 * 1000; // 30 seconds when others are present
 const MAX_BACKOFF_MS = 15 * 60 * 1000; // 15 minute cap on backoff
 const POLL_INTERVAL_MS = 500; // fallback poll interval
 const HEARTBEAT_INTERVAL_MS = 30 * 1000; // heartbeat file write interval
-const SETTLE_MS = parseInt(process.env.AGENTCHAT_SETTLE_MS || '5000', 10); // settle window to batch burst messages into one API call
+const SETTLE_MS = parseInt(process.env.AGENTCHAT_SETTLE_MS || '5000', 10);
+// Response size limits — prevent listen from returning enormous payloads
+const MAX_LISTEN_MESSAGES = 50; // max messages per listen response
+const MAX_RESPONSE_CHARS = 32000; // hard cap on JSON response size (~32KB)
 
 /**
  * Read last N lines from a file efficiently (reads from end of file).
@@ -112,7 +115,37 @@ function readInbox(paths, lastSeen, channels, agentId, tailN) {
   });
 
   deduped.sort((a, b) => a.ts - b.ts);
-  return deduped;
+  return capMessages(deduped);
+}
+
+/**
+ * Cap messages to prevent oversized responses.
+ * Keeps the NEWEST messages (drops oldest) and enforces both a count limit
+ * and a total character size limit on the JSON output.
+ */
+function capMessages(messages) {
+  // First: count cap — keep newest
+  let capped = messages.length > MAX_LISTEN_MESSAGES
+    ? messages.slice(-MAX_LISTEN_MESSAGES)
+    : messages;
+
+  // Second: size cap — drop oldest until under limit
+  let json = JSON.stringify(capped);
+  while (json.length > MAX_RESPONSE_CHARS && capped.length > 1) {
+    const dropCount = Math.max(1, Math.floor(capped.length * 0.25));
+    capped = capped.slice(dropCount);
+    json = JSON.stringify(capped);
+  }
+
+  // If a single message exceeds the limit, truncate its content
+  if (json.length > MAX_RESPONSE_CHARS && capped.length === 1) {
+    const msg = { ...capped[0] };
+    const overhead = JSON.stringify([{ ...msg, content: '' }]).length;
+    msg.content = msg.content.slice(0, MAX_RESPONSE_CHARS - overhead - 20) + '\u2026 [truncated]';
+    capped = [msg];
+  }
+
+  return capped;
 }
 
 /**
