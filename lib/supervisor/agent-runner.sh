@@ -440,7 +440,7 @@ run_cli() {
         rm -f "$niki_abort_file"
 
         local niki_startup_timeout="${NIKI_STARTUP_TIMEOUT:-600}"
-        local niki_dead_air="${NIKI_DEAD_AIR_TIMEOUT:-5}"
+        local niki_dead_air="${NIKI_DEAD_AIR_TIMEOUT:-1440}"
 
         log "Niki: budget=${niki_budget} timeout=${niki_timeout}s sends=${niki_max_sends}/min tools=${niki_max_tools}/min startup=${niki_startup_timeout}s stall=${niki_stall_timeout}s dead-air=${niki_dead_air}min abort-file=${niki_abort_file}"
 
@@ -605,7 +605,7 @@ run_gro() {
         local niki_state="$STATE_DIR/niki-state.json"
         local niki_abort_file="$STATE_DIR/abort"
         local niki_startup_timeout="${NIKI_STARTUP_TIMEOUT:-600}"
-        local niki_dead_air="${NIKI_DEAD_AIR_TIMEOUT:-5}"
+        local niki_dead_air="${NIKI_DEAD_AIR_TIMEOUT:-1440}"
 
         rm -f "$niki_abort_file"
 

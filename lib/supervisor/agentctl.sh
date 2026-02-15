@@ -543,7 +543,7 @@ EOF
         -e "AGENTCHAT_URL=${AGENTCHAT_URL}" \
         -e "NIKI_STARTUP_TIMEOUT=${NIKI_STARTUP_TIMEOUT:-600}" \
         -e "NIKI_STALL_TIMEOUT=${NIKI_STALL_TIMEOUT:-86400}" \
-        -e "NIKI_DEAD_AIR_TIMEOUT=${NIKI_DEAD_AIR_TIMEOUT:-60}" \
+        -e "NIKI_DEAD_AIR_TIMEOUT=${NIKI_DEAD_AIR_TIMEOUT:-1440}" \
         $github_env \
         -e "LUCIDITY_CLAUDE_CLI=/usr/local/bin/.claude-supervisor" \
         -v "${state_dir}:/home/agent/.agentchat/agents/${name}" \
