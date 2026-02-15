@@ -29,7 +29,7 @@ set -euo pipefail
 # ── Defaults ──────────────────────────────────────────────────────────────
 
 WORMHOLE_DIR="${HOME}/dev/claude/wormhole"
-SYNC_INTERVAL=60
+SYNC_INTERVAL=10  # fast default: HEAD-check gated, cheap when idle
 CONTAINER_SOURCE="/home/agent"
 RUN_ONCE=false
 DRY_RUN=false
@@ -140,6 +140,24 @@ build_exclude_args() {
     echo "${excludes[@]}"
 }
 
+# ── HEAD cache for fast change detection ────────────────────────────────
+# Stores last-seen HEAD for each repo inside each container.
+# Format: HEADS_CACHE["agent/repo"] = "commit_hash"
+declare -A HEADS_CACHE
+
+get_container_heads() {
+    # Get HEAD hashes for all git repos in a container with a single exec call.
+    # Output: "repo_dir commit_hash" per line
+    local container_id="$1"
+    podman exec "$container_id" bash -c '
+        for d in '"${CONTAINER_SOURCE}"'/*/; do
+            [ -d "$d/.git" ] && echo "$(basename "$d") $(git -C "$d" rev-parse HEAD 2>/dev/null)"
+        done
+        # Also check if source dir itself is a repo
+        [ -d '"${CONTAINER_SOURCE}"'/.git ] && echo ". $(git -C '"${CONTAINER_SOURCE}"' rev-parse HEAD 2>/dev/null)"
+    ' 2>/dev/null || true
+}
+
 # ── Sync one container ───────────────────────────────────────────────────
 
 sync_container() {
@@ -147,114 +165,109 @@ sync_container() {
     local agent_name="$2"
     local dest="${WORMHOLE_DIR}/${agent_name}"
 
-    log "Syncing $agent_name ($container_id) → $dest"
+    # ── Fast path: check if any repo HEADs changed ──────────────────────
+    local any_changed=false
+    local changed_repos=""
+    while IFS=' ' read -r repo_name head_hash; do
+        [[ -z "$repo_name" || -z "$head_hash" ]] && continue
+        local cache_key="${agent_name}/${repo_name}"
+        local prev_hash="${HEADS_CACHE[$cache_key]:-}"
+        if [[ "$prev_hash" != "$head_hash" ]]; then
+            any_changed=true
+            changed_repos+=" ${repo_name}"
+            HEADS_CACHE["$cache_key"]="$head_hash"
+        fi
+    done < <(get_container_heads "$container_id")
+
+    if [[ "$any_changed" == "false" ]]; then
+        vlog "SKIP $agent_name — no HEAD changes"
+        return 0
+    fi
+
+    log "Changes in $agent_name:${changed_repos} — syncing"
 
     # Create destination
     mkdir -p "$dest"
 
-    # Build exclude args
-    local exclude_args
-    exclude_args=$(build_exclude_args "$container_id")
-
     if [[ "$DRY_RUN" == "true" ]]; then
         log_always "[dry-run] Would sync $container_id:${CONTAINER_SOURCE}/ → $dest/"
-        log_always "[dry-run] Excludes: $exclude_args"
         return 0
     fi
 
-    # Method 1: rsync via podman exec (preferred — incremental, respects excludes)
-    # Requires rsync installed in the container
-    if podman exec "$container_id" which rsync &>/dev/null; then
-        log "Using rsync for $agent_name"
-
-        # Create a temporary exclude file for rsync
-        local exclude_file
-        exclude_file=$(mktemp)
-        for pattern in "${DEFAULT_EXCLUDES[@]}"; do
-            echo "$pattern" >> "$exclude_file"
-        done
-
-        # Add .syncignore entries
-        local syncignore
-        syncignore=$(podman exec "$container_id" cat "${CONTAINER_SOURCE}/.syncignore" 2>/dev/null || true)
-        if [[ -n "$syncignore" ]]; then
-            while IFS= read -r line; do
-                [[ -z "$line" || "$line" == \#* ]] && continue
-                echo "$line" >> "$exclude_file"
-            done <<< "$syncignore"
+    # Sync only changed repos (tar just the .git + source for each)
+    for repo_name in $changed_repos; do
+        local src_path
+        if [[ "$repo_name" == "." ]]; then
+            src_path="${CONTAINER_SOURCE}"
+        else
+            src_path="${CONTAINER_SOURCE}/${repo_name}"
         fi
+        local repo_dest="${dest}/${repo_name}"
+        [[ "$repo_name" == "." ]] && repo_dest="$dest"
 
-        # Use podman exec to tar from container, pipe to local extraction
-        # Write to temp dir first for crash safety (same pattern as podman cp path)
-        local tar_tmp="${dest}.tmp.$$"
-        rm -rf "$tar_tmp"
-        mkdir -p "$tar_tmp"
+        mkdir -p "$repo_dest"
 
+        # Tar the repo from container, extract locally
         if podman exec "$container_id" tar cf - \
             --exclude='node_modules' \
             --exclude='.cache' \
             --exclude='.npm' \
             --exclude='.local' \
             --exclude='__pycache__' \
-            -C "$(dirname "$CONTAINER_SOURCE")" \
-            "$(basename "$CONTAINER_SOURCE")" \
-            | tar xf - -C "$tar_tmp" --strip-components=1 2>/dev/null; then
-
-            # Incremental merge (preserves repos from previous sessions after restart)
-            if [[ -d "$dest" ]]; then
-                cp -a "$tar_tmp/." "$dest/" 2>/dev/null || true
-                rm -rf "$tar_tmp"
-            else
-                mv "$tar_tmp" "$dest"
-            fi
+            -C "$(dirname "$src_path")" \
+            "$(basename "$src_path")" \
+            2>/dev/null | tar xf - -C "$(dirname "$repo_dest")" --strip-components=0 2>/dev/null; then
+            vlog "Synced ${agent_name}/${repo_name}"
         else
-            log_always "ERROR: tar pipe failed for $agent_name ($container_id)"
-            rm -rf "$tar_tmp"
+            log "ERROR: tar sync failed for ${agent_name}/${repo_name}"
         fi
+    done
+}
 
-        rm -f "$exclude_file"
-        log "tar sync complete for $agent_name"
+# ── Full sync (used on first run to catch repos from previous sessions) ──
+
+full_sync_container() {
+    local container_id="$1"
+    local agent_name="$2"
+    local dest="${WORMHOLE_DIR}/${agent_name}"
+
+    log "Full sync $agent_name ($container_id) → $dest"
+    mkdir -p "$dest"
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log_always "[dry-run] Would full-sync $container_id:${CONTAINER_SOURCE}/ → $dest/"
         return 0
     fi
 
-    # Method 2: podman cp (fallback — full copy each time, but always works)
-    log "Using podman cp for $agent_name (rsync not available)"
+    local tar_tmp="${dest}.tmp.$$"
+    rm -rf "$tar_tmp"
+    mkdir -p "$tar_tmp"
 
-    # podman cp with trailing /. copies contents including dotfiles
-    # We copy to a temp dir first, then move, to avoid partial copies
-    local tmp_dest="${dest}.tmp.$$"
-    rm -rf "$tmp_dest"
-    mkdir -p "$tmp_dest"
-
-    if podman cp "${container_id}:${CONTAINER_SOURCE}/." "$tmp_dest/" 2>/dev/null; then
-        # Remove excluded paths from the copy
-        for pattern in "${DEFAULT_EXCLUDES[@]}"; do
-            # Simple glob removal (works for directory patterns like node_modules/)
-            local clean_pattern="${pattern%/}"
-            find "$tmp_dest" -name "$clean_pattern" -prune -exec rm -rf {} + 2>/dev/null || true
-        done
-
-        # Check for .syncignore and remove those too
-        if [[ -f "${tmp_dest}/.syncignore" ]]; then
-            while IFS= read -r line; do
-                [[ -z "$line" || "$line" == \#* ]] && continue
-                local clean="${line%/}"
-                find "$tmp_dest" -name "$clean" -prune -exec rm -rf {} + 2>/dev/null || true
-            done < "${tmp_dest}/.syncignore"
-        fi
-
-        # Incremental merge (preserves repos from previous sessions after restart)
+    if podman exec "$container_id" tar cf - \
+        --exclude='node_modules' \
+        --exclude='.cache' \
+        --exclude='.npm' \
+        --exclude='.local' \
+        --exclude='__pycache__' \
+        -C "$(dirname "$CONTAINER_SOURCE")" \
+        "$(basename "$CONTAINER_SOURCE")" \
+        | tar xf - -C "$tar_tmp" --strip-components=1 2>/dev/null; then
         if [[ -d "$dest" ]]; then
-            cp -a "$tmp_dest/." "$dest/" 2>/dev/null || true
-            rm -rf "$tmp_dest"
+            cp -a "$tar_tmp/." "$dest/" 2>/dev/null || true
+            rm -rf "$tar_tmp"
         else
-            mv "$tmp_dest" "$dest"
+            mv "$tar_tmp" "$dest"
         fi
+        log "Full sync complete for $agent_name"
 
-        log "podman cp complete for $agent_name"
+        # Populate HEAD cache after full sync
+        while IFS=' ' read -r repo_name head_hash; do
+            [[ -z "$repo_name" || -z "$head_hash" ]] && continue
+            HEADS_CACHE["${agent_name}/${repo_name}"]="$head_hash"
+        done < <(get_container_heads "$container_id")
     else
-        log_always "ERROR: podman cp failed for $agent_name ($container_id)"
-        rm -rf "$tmp_dest"
+        log_always "ERROR: full sync failed for $agent_name ($container_id)"
+        rm -rf "$tar_tmp"
         return 1
     fi
 }
@@ -286,9 +299,12 @@ sanitize_wormhole() {
 
 # ── Main sync loop ───────────────────────────────────────────────────────
 
+FIRST_RUN=true
+
 sync_all() {
     local count=0
     local errors=0
+    local synced=0
 
     while IFS=' ' read -r container_id agent_raw; do
         [[ -z "$container_id" ]] && continue
@@ -296,7 +312,16 @@ sync_all() {
         agent_name=$(get_agent_name "$agent_raw")
         [[ -z "$agent_name" ]] && continue
 
-        if sync_container "$container_id" "$agent_name"; then
+        local ok=false
+        if [[ "$FIRST_RUN" == "true" ]]; then
+            # First run: full sync to catch everything
+            full_sync_container "$container_id" "$agent_name" && ok=true
+        else
+            # Subsequent runs: fast incremental (HEAD-check gated)
+            sync_container "$container_id" "$agent_name" && ok=true
+        fi
+
+        if $ok; then
             # SECURITY: sanitize after every sync
             sanitize_wormhole "${WORMHOLE_DIR}/${agent_name}" "$agent_name"
             count=$((count + 1))
@@ -305,7 +330,9 @@ sync_all() {
         fi
     done < <(discover_containers)
 
-    log "Sync complete: $count containers synced, $errors errors"
+    FIRST_RUN=false
+    [[ "$VERBOSE" == "true" || $synced -gt 0 || $errors -gt 0 ]] && \
+        log "Sync cycle: $count containers checked, $errors errors"
 }
 
 # ── Signal handling ──────────────────────────────────────────────────────
