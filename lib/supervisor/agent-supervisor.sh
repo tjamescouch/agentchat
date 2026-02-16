@@ -98,6 +98,7 @@ save_state() {
   "status": "$status",
   "last_error": "$error",
   "restart_count": $RESTART_COUNT,
+  "backoff": $BACKOFF,
   "started_at": "$STARTED_AT",
   "updated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "pid": $$
@@ -147,9 +148,21 @@ fi
 echo $$ > "$PID_FILE"
 rm -f "$STOP_FILE"
 
-RESTART_COUNT=0
-BACKOFF=$MIN_BACKOFF
-STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+# Restore state from previous supervisor run (prevents reset on supervisor restart)
+if [ -f "$STATE_FILE" ]; then
+    RESTART_COUNT=$(jq -r '.restart_count // 0' "$STATE_FILE" 2>/dev/null || echo 0)
+    BACKOFF=$(jq -r '.backoff // 5' "$STATE_FILE" 2>/dev/null || echo "$MIN_BACKOFF")
+    STARTED_AT=$(jq -r '.started_at // ""' "$STATE_FILE" 2>/dev/null || echo "")
+else
+    RESTART_COUNT=0
+    BACKOFF=$MIN_BACKOFF
+    STARTED_AT=""
+fi
+
+# Set started_at if this is truly first start
+if [ -z "$STARTED_AT" ]; then
+    STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+fi
 
 log "Starting supervisor for agent '$AGENT_NAME'"
 log "Mission: $MISSION"
@@ -344,10 +357,23 @@ while true; do
             BACKOFF=$MAX_BACKOFF
         fi
     else
+        # Successful or long run - reset backoff AND restart counter
         BACKOFF=$MIN_BACKOFF
+        RESTART_COUNT=0
     fi
 
     RESTART_COUNT=$((RESTART_COUNT + 1))
+
+    # Give up if too many consecutive quick crashes
+    if [ $EXIT_CODE -ne 0 ] && [ $DURATION -le 10 ] && [ $RESTART_COUNT -ge 10 ]; then
+        log "========================================="
+        log "GIVING UP: $RESTART_COUNT consecutive crashes (uptime ≤10s each)"
+        log "Manual intervention required. Check logs and fix the issue."
+        log "To restart: agentctl restart $AGENT_NAME"
+        log "========================================="
+        save_state "failed" "too_many_crashes"
+        cleanup
+    fi
 
     # === Memory curation between sessions ===
     # Final curation pass after agent exits — captures everything from the session.
