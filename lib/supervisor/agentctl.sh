@@ -571,6 +571,7 @@ EOF
     podman run -d \
         --name "$(container_name "$name")" \
         --restart on-failure:3 \
+        --tmpfs /tmp:rw,noexec,nosuid,size=256m \
         $labels \
         -e "ANTHROPIC_BASE_URL=${proxy_base_url}" \
         -e "ANTHROPIC_API_KEY=${proxy_api_key}" \
