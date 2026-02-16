@@ -388,6 +388,32 @@ start_agent() {
         exit 1
     fi
 
+    # Infer runtime from model prefix if not explicitly set
+    if [ -n "$AGENT_MODEL_OVERRIDE" ] && [ "$use_gro" != "true" ] && [ "$use_claude_code" != "true" ]; then
+        case "$AGENT_MODEL_OVERRIDE" in
+            gpt-*|o1-*|o3-*|o4-*|chatgpt-*)
+                use_gro="true"
+                echo "  Inferring --use-gro from model prefix: $AGENT_MODEL_OVERRIDE"
+                ;;
+        esac
+    fi
+
+    # Validate runtime/model compatibility
+    if [ "$use_claude_code" = "true" ] && [ -n "$AGENT_MODEL_OVERRIDE" ]; then
+        case "$AGENT_MODEL_OVERRIDE" in
+            gpt-*|o1-*|o3-*|o4-*|chatgpt-*)
+                echo "ERROR: Invalid configuration: Claude Code runtime does not support GPT models."
+                echo "  Runtime: Claude Code (--use-claude-code)"
+                echo "  Model: $AGENT_MODEL_OVERRIDE"
+                echo ""
+                echo "Solutions:"
+                echo "  • Remove --use-claude-code to use gro runtime (vendor-agnostic)"
+                echo "  • Choose a Claude model (claude-opus-4-6, claude-sonnet-4-5, etc.)"
+                exit 1
+                ;;
+        esac
+    fi
+
     # Ensure agentauth proxy is running (handles decryption internally)
     ensure_agentauth
 
