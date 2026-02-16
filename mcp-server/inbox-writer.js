@@ -3,6 +3,9 @@
  *
  * Both the daemon process and the MCP direct-connection handler write to the
  * same inbox.jsonl so that listen always has a single source of truth.
+ *
+ * Uses a per-instance async mutex to prevent the truncate-while-appending race
+ * condition (P2-LISTEN-6). Truncation uses temp file + rename for POSIX atomicity.
  */
 
 import fs from 'fs';
@@ -16,6 +19,17 @@ const MAX_INBOX_LINES = 1000;
 const lastTruncateTime = new Map();
 const TRUNCATE_THROTTLE_MS = 5000;
 
+// ── Per-instance async mutex ────────────────────────────────────────────
+// Simple promise-chain lock. No external deps needed.
+const locks = new Map();
+
+function withLock(instance, fn) {
+  const prev = locks.get(instance) || Promise.resolve();
+  const next = prev.then(fn, fn); // always run fn, even if prev rejected
+  locks.set(instance, next.catch(() => {})); // swallow to keep chain clean
+  return next;
+}
+
 /**
  * Ensure the daemon instance directory exists (lazy creation).
  */
@@ -27,6 +41,8 @@ function ensureDir(dirPath) {
 
 /**
  * Truncate the inbox to MAX_INBOX_LINES, throttled.
+ * MUST be called inside withLock to avoid race with appendFile.
+ * Uses temp file + rename for atomic replacement.
  */
 async function truncateIfNeeded(inboxPath, instance) {
   const now = Date.now();
@@ -39,7 +55,9 @@ async function truncateIfNeeded(inboxPath, instance) {
     const lines = content.trim().split('\n');
     if (lines.length > MAX_INBOX_LINES) {
       const trimmed = lines.slice(-MAX_INBOX_LINES);
-      await fsp.writeFile(inboxPath, trimmed.join('\n') + '\n');
+      const tmpPath = inboxPath + '.tmp.' + process.pid;
+      await fsp.writeFile(tmpPath, trimmed.join('\n') + '\n');
+      await fsp.rename(tmpPath, inboxPath);
     }
   } catch (err) {
     if (err.code !== 'ENOENT') {
@@ -61,11 +79,13 @@ export async function appendToInbox(msg, instance = 'default') {
 
   const line = JSON.stringify(msg) + '\n';
 
-  await fsp.appendFile(paths.inbox, line);
+  await withLock(instance, async () => {
+    await fsp.appendFile(paths.inbox, line);
 
-  // Touch semaphore so listen's fs.watch fires
+    // Throttled truncation — inside lock so no concurrent append can interleave
+    await truncateIfNeeded(paths.inbox, instance);
+  });
+
+  // Touch semaphore so listen's fs.watch fires (outside lock — non-critical)
   await fsp.writeFile(paths.newdata, Date.now().toString());
-
-  // Throttled truncation
-  await truncateIfNeeded(paths.inbox, instance);
 }
