@@ -10,7 +10,7 @@
 #   AGENT_NAME          Agent display name (default: "default")
 #   MISSION             Mission string
 #   AGENT_MODEL         Model ID (default: claude-opus-4-6)
-#   AGENT_SUMMARIZER_MODEL  Model for context summarization (default: claude-haiku-4-5)
+#   AGENT_SUMMARIZER_MODEL  Model for context summarization (optional, defaults to gro's built-in)
 #   AGENT_CONTEXT_TOKENS    Context window budget for gro (default: 32768)
 #   STATE_DIR           State directory for transcripts, logs
 #   AGENTCHAT_URL       Server WebSocket URL
@@ -81,7 +81,6 @@ done
 AGENT_NAME="${AGENT_NAME:-default}"
 MISSION="${MISSION:-monitor agentchat and respond to messages}"
 MODEL="${AGENT_MODEL:-claude-opus-4-6}"
-SUMMARIZER_MODEL="${AGENT_SUMMARIZER_MODEL:-claude-haiku-4-5}"
 CONTEXT_TOKENS="${AGENT_CONTEXT_TOKENS:-32768}"
 STATE_DIR="${STATE_DIR:-$HOME/.agentchat/agents/$AGENT_NAME}"
 SERVER_URL="${AGENTCHAT_URL:-wss://agentchat-server.fly.dev}"
@@ -110,11 +109,6 @@ SESSION_NUM_FILE="$STATE_DIR/session_num"
 SESSION_ID_FILE="$STATE_DIR/session_id"
 
 mkdir -p "$STATE_DIR"
-
-# Ensure .gro directory is writable by current user (fixes root-owned .gro dirs)
-if [ -d "$HOME/.gro" ]; then
-    chown -R "$(id -u):$(id -g)" "$HOME/.gro" 2>/dev/null || true
-fi
 
 # Signal trap for graceful shutdown — forward SIGTERM to child (niki/claude)
 # so claude can flush session state before dying.
@@ -586,6 +580,12 @@ run_gro() {
             ;;
     esac
 
+    # Conditional summarizer model args (only if explicitly set)
+    local summarizer_args=()
+    if [ -n "$AGENT_SUMMARIZER_MODEL" ]; then
+        summarizer_args=(--summarizer-model "$AGENT_SUMMARIZER_MODEL")
+    fi
+
     # Niki wrapping (if available)
     local niki_cmd
     niki_cmd="$(command -v niki 2>/dev/null || true)"
@@ -632,7 +632,7 @@ run_gro() {
             "${provider_args[@]}" \
             --mcp-config "$mcp_config" \
             --max-tool-rounds 1000 \
-            --summarizer-model "$SUMMARIZER_MODEL" \
+            "${summarizer_args[@]}" \
             --context-tokens "$CONTEXT_TOKENS" \
             --persistent \
             --max-idle-nudges 3 \
@@ -652,7 +652,7 @@ run_gro() {
             "${provider_args[@]}" \
             --mcp-config "$mcp_config" \
             --max-tool-rounds 1000 \
-            --summarizer-model "$SUMMARIZER_MODEL" \
+            "${summarizer_args[@]}" \
             --context-tokens "$CONTEXT_TOKENS" \
             --persistent \
             --max-idle-nudges 3 \
