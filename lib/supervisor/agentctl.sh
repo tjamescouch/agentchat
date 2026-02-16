@@ -567,6 +567,17 @@ EOF
         echo "  Memory: $AGENT_MEMORY_OVERRIDE"
     fi
 
+    # P2-SANDBOX-6: Mount config files read-only to prevent agent self-modification.
+    # These overlay the rw state_dir mount. Podman processes mounts in order,
+    # so later :ro mounts shadow earlier rw paths for the same files.
+    local config_ro_mounts="-v ${state_dir}/mission.txt:/home/agent/.agentchat/agents/${name}/mission.txt:ro"
+    if [ -f "${state_dir}/model.txt" ]; then
+        config_ro_mounts="$config_ro_mounts -v ${state_dir}/model.txt:/home/agent/.agentchat/agents/${name}/model.txt:ro"
+    fi
+    if [ -f "${state_dir}/runtime.txt" ]; then
+        config_ro_mounts="$config_ro_mounts -v ${state_dir}/runtime.txt:/home/agent/.agentchat/agents/${name}/runtime.txt:ro"
+    fi
+
     echo "Starting agent '$name' in container..."
     podman run -d \
         --name "$(container_name "$name")" \
@@ -587,6 +598,7 @@ EOF
         $github_env \
         -e "LUCIDITY_CLAUDE_CLI=/usr/local/bin/.claude-supervisor" \
         -v "${state_dir}:/home/agent/.agentchat/agents/${name}" \
+        $config_ro_mounts \
         -v "${HOME}/.agentchat/identities:/home/agent/.agentchat/identities" \
         -v "${claude_state}:/home/agent/.claude" \
         -v "${gro_context}:/home/agent/.gro/context" \
