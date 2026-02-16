@@ -303,47 +303,48 @@ while true; do
     # Stop live curator when the agent exits
     stop_live_curator
 
-    if [ $EXIT_CODE -eq 0 ]; then
-        # Clean exit
-        log "Agent exited cleanly"
+    END_TIME=$(date +%s)
+    DURATION=$((END_TIME - START_TIME))
+
+    # Always check niki state — gro catches SIGTERM gracefully (exit 0),
+    # so we can't rely on exit code alone to detect niki kills.
+    NIKI_STATE="$STATE_DIR/niki-state.json"
+    NIKI_REASON=""
+    NIKI_TOKENS=""
+    if [ -f "$NIKI_STATE" ]; then
+        NIKI_REASON=$(grep -o '"killedBy"[[:space:]]*:[[:space:]]*"[^"]*"' "$NIKI_STATE" 2>/dev/null | head -1 | sed 's/.*: *"//;s/"//')
+        NIKI_TOKENS=$(grep -o '"tokensTotal"[[:space:]]*:[[:space:]]*[0-9]*' "$NIKI_STATE" 2>/dev/null | head -1 | sed 's/.*: *//')
+    fi
+
+    if [ -n "$NIKI_REASON" ] && [ "$NIKI_REASON" != "null" ]; then
+        log "========================================="
+        log "NIKI KILL — reason: $NIKI_REASON | tokens: ${NIKI_TOKENS:-?} | exit: $EXIT_CODE | uptime: ${DURATION}s"
+        log "========================================="
+        save_state "killed" "niki_reason=$NIKI_REASON"
+        BACKOFF=$MIN_BACKOFF
+    elif [ $EXIT_CODE -eq 0 ]; then
+        log "Agent exited cleanly (uptime: ${DURATION}s, tokens: ${NIKI_TOKENS:-?})"
+        save_state "stopped" ""
         BACKOFF=$MIN_BACKOFF
     else
-        END_TIME=$(date +%s)
-        DURATION=$((END_TIME - START_TIME))
-
-        # Check if niki killed the agent (read niki state file)
-        NIKI_STATE="$STATE_DIR/niki-state.json"
-        NIKI_REASON=""
-        if [ -f "$NIKI_STATE" ]; then
-            NIKI_REASON=$(grep -o '"killedBy"[[:space:]]*:[[:space:]]*"[^"]*"' "$NIKI_STATE" 2>/dev/null | head -1 | sed 's/.*: *"//;s/"//')
-        fi
-
-        if [ -n "$NIKI_REASON" ] && [ "$NIKI_REASON" != "null" ]; then
-            log "Agent killed by niki (reason: $NIKI_REASON, exit code $EXIT_CODE, ran for ${DURATION}s)"
-            save_state "killed" "niki_reason=$NIKI_REASON"
-        else
-            log "Agent crashed (exit code $EXIT_CODE, ran for ${DURATION}s)"
-            # Show last lines of supervisor log for crash diagnosis
-            if [ -f "$LOG_FILE" ] && [ $DURATION -lt 10 ]; then
-                CRASH_CONTEXT=$(tail -20 "$LOG_FILE" 2>/dev/null | grep -v '^\[2026\|^\[niki\]' | head -5)
-                if [ -n "$CRASH_CONTEXT" ]; then
-                    log "Crash output: $CRASH_CONTEXT"
-                fi
-            fi
-            save_state "crashed" "exit_code=$EXIT_CODE"
-        fi
-
-        # If it ran for more than 5 minutes, reset backoff
-        if [ $DURATION -gt 300 ]; then
-            BACKOFF=$MIN_BACKOFF
-            log "Ran long enough, resetting backoff"
-        else
-            # Exponential backoff
-            BACKOFF=$((BACKOFF * BACKOFF_MULTIPLIER))
-            if [ $BACKOFF -gt $MAX_BACKOFF ]; then
-                BACKOFF=$MAX_BACKOFF
+        log "Agent crashed (exit code $EXIT_CODE, uptime: ${DURATION}s, tokens: ${NIKI_TOKENS:-?})"
+        if [ -f "$LOG_FILE" ] && [ $DURATION -lt 10 ]; then
+            CRASH_CONTEXT=$(tail -20 "$LOG_FILE" 2>/dev/null | grep -v '^\[2026\|^\[niki\]' | head -5)
+            if [ -n "$CRASH_CONTEXT" ]; then
+                log "Crash output: $CRASH_CONTEXT"
             fi
         fi
+        save_state "crashed" "exit_code=$EXIT_CODE"
+    fi
+
+    # Backoff: reset if ran long enough, otherwise exponential
+    if [ $EXIT_CODE -ne 0 ] && [ $DURATION -le 300 ]; then
+        BACKOFF=$((BACKOFF * BACKOFF_MULTIPLIER))
+        if [ $BACKOFF -gt $MAX_BACKOFF ]; then
+            BACKOFF=$MAX_BACKOFF
+        fi
+    else
+        BACKOFF=$MIN_BACKOFF
     fi
 
     RESTART_COUNT=$((RESTART_COUNT + 1))
