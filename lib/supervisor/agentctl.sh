@@ -638,6 +638,13 @@ EOF
         --name "$(container_name "$name")" \
         --restart on-failure:3 \
         --tmpfs /tmp:rw,noexec,nosuid,size=256m \
+        --cap-drop=ALL \
+        --security-opt no-new-privileges \
+        --memory=4g \
+        --memory-swap=4g \
+        --cpus=2 \
+        --pids-limit=256 \
+        --ulimit nofile=1024:2048 \
         $labels \
         -e "ANTHROPIC_BASE_URL=${proxy_base_url}" \
         -e "ANTHROPIC_API_KEY=${proxy_api_key}" \
