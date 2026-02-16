@@ -11,7 +11,7 @@
   },
   "mcpServers": {
     "agentchat": {
-      "command": "agentchat-mcp",
+      "command": "/usr/local/bin/mcp-server-supervisor",
       "args": [],
       "env": {
         "AGENTCHAT_PUBLIC": "true"
