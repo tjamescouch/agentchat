@@ -88,7 +88,7 @@ function readInbox(paths, lastSeen, channels, agentId, tailN) {
     try {
       const msg = JSON.parse(line);
 
-      if (msg.type !== 'MSG' || !msg.ts) continue;
+      if ((msg.type !== 'MSG' && msg.type !== 'EVENT') || !msg.ts) continue;
       if (msg.ts <= lastSeen) continue;
       if (msg.from === agentId || msg.from === '@server') continue;
 
