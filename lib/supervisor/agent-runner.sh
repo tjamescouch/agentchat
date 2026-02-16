@@ -10,7 +10,7 @@
 #   AGENT_NAME          Agent display name (default: "default")
 #   MISSION             Mission string
 #   AGENT_MODEL         Model ID (default: claude-opus-4-6)
-#   AGENT_SUMMARIZER_MODEL  Model for context summarization (default: claude-haiku-4-20250414)
+#   AGENT_SUMMARIZER_MODEL  Model for context summarization (default: claude-3-haiku-20240307)
 #   AGENT_CONTEXT_TOKENS    Context window budget for gro (default: 32768)
 #   STATE_DIR           State directory for transcripts, logs
 #   AGENTCHAT_URL       Server WebSocket URL
@@ -81,7 +81,7 @@ done
 AGENT_NAME="${AGENT_NAME:-default}"
 MISSION="${MISSION:-monitor agentchat and respond to messages}"
 MODEL="${AGENT_MODEL:-claude-opus-4-6}"
-SUMMARIZER_MODEL="${AGENT_SUMMARIZER_MODEL:-claude-haiku-4-20250414}"
+SUMMARIZER_MODEL="${AGENT_SUMMARIZER_MODEL:-claude-3-haiku-20240307}"
 CONTEXT_TOKENS="${AGENT_CONTEXT_TOKENS:-32768}"
 STATE_DIR="${STATE_DIR:-$HOME/.agentchat/agents/$AGENT_NAME}"
 SERVER_URL="${AGENTCHAT_URL:-wss://agentchat-server.fly.dev}"
