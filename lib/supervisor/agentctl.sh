@@ -222,11 +222,12 @@ decrypt_token() {
 ensure_agentauth() {
     # If using external proxy (e.g. thesystem), just verify it's reachable
     if [ "${AGENTAUTH_EXTERNAL:-}" = "1" ] || [ "${AGENTAUTH_EXTERNAL:-}" = "true" ]; then
-        if curl -sf "http://localhost:${AGENTAUTH_PORT}/agentauth/health" > /dev/null 2>&1; then
-            echo "Using external agentauth proxy on port $AGENTAUTH_PORT"
+        local proxy_host="${AGENTAUTH_HOST:-localhost}"
+        if curl -sf "http://${proxy_host}:${AGENTAUTH_PORT}/agentauth/health" > /dev/null 2>&1; then
+            echo "Using external agentauth proxy at ${proxy_host}:$AGENTAUTH_PORT"
             return 0
         else
-            echo "ERROR: External agentauth proxy not responding on port $AGENTAUTH_PORT"
+            echo "ERROR: External agentauth proxy not responding at ${proxy_host}:$AGENTAUTH_PORT"
             echo "       Make sure the proxy is running (e.g., thesystem agentauth start)"
             exit 1
         fi
