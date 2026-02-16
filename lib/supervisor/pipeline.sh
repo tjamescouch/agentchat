@@ -204,7 +204,9 @@ sanitize() {
     find "$d" -path '*/.git/hooks/*' -type f -delete 2>/dev/null || true
     find "$d" -path '*/.git/hooks' -type d -exec rmdir {} + 2>/dev/null || true
     find "$d" -type l -delete 2>/dev/null || true
-    find "$d" -type f -perm +111 -exec chmod -x {} + 2>/dev/null || true
+    # NOTE: Do NOT strip executable bits globally. Some repos legitimately
+    # commit executable scripts (e.g. *.sh). Stripping +x breaks workflows
+    # after copy-to-wormhole.
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
