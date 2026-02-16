@@ -86,6 +86,61 @@ function wireMessageHandlers(targetClient) {
     });
   });
 
+  // --- P1-LISTEN-2: Subscribe to non-MSG events ---
+  // Marketplace events: proposals, acceptance, rejection, completion, disputes
+  const marketplaceEvents = ['proposal', 'accept', 'reject', 'complete', 'dispute'];
+  for (const eventType of marketplaceEvents) {
+    targetClient.on(eventType, (msg) => {
+      if (msg.from === targetClient.agentId) return;
+      appendToInbox({
+        type: 'EVENT',
+        event: eventType.toUpperCase(),
+        from: msg.from,
+        from_name: msg.from_name,
+        to: msg.to || msg.from,
+        content: JSON.stringify(msg),
+        ts: msg.ts || Date.now(),
+      });
+    });
+  }
+
+  // Presence events: agent join/leave, nick changes
+  targetClient.on('agent_joined', (msg) => {
+    appendToInbox({
+      type: 'EVENT',
+      event: 'AGENT_JOINED',
+      from: msg.agent_id || msg.from || '@server',
+      from_name: msg.name || msg.nick,
+      to: msg.channel || '#system',
+      content: `${msg.name || msg.nick || msg.agent_id} joined ${msg.channel || 'a channel'}`,
+      ts: msg.ts || Date.now(),
+    });
+  });
+
+  targetClient.on('agent_left', (msg) => {
+    appendToInbox({
+      type: 'EVENT',
+      event: 'AGENT_LEFT',
+      from: msg.agent_id || msg.from || '@server',
+      from_name: msg.name || msg.nick,
+      to: msg.channel || '#system',
+      content: `${msg.name || msg.nick || msg.agent_id} left ${msg.channel || 'a channel'}`,
+      ts: msg.ts || Date.now(),
+    });
+  });
+
+  targetClient.on('nick_changed', (msg) => {
+    appendToInbox({
+      type: 'EVENT',
+      event: 'NICK_CHANGED',
+      from: msg.agent_id || msg.from || '@server',
+      from_name: msg.new_nick || msg.nick,
+      to: '#system',
+      content: `${msg.old_nick || msg.agent_id} is now ${msg.new_nick || msg.nick}`,
+      ts: msg.ts || Date.now(),
+    });
+  });
+
   // FILE_CHUNK handler - receives chunked file data
   targetClient.on('file_chunk', (msg) => {
     if (msg.from === targetClient.agentId) return;
