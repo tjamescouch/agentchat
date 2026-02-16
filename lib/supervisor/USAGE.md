@@ -205,3 +205,19 @@ Create any of these files to stop all mortal agents:
 - `~/Dropbox/KILL_AGENTS` (Dropbox)
 
 Then run `killswitch.sh` (or run it on a cron).
+
+## payments-bot
+
+Run a simple investment ledger bot that listens for  messages in chat and keeps a running total.
+
+- Script: 
+- Default channel: 
+- Ledger: 
+- Total: 
+
+Env:
+-  (wss url)
+- 
+- 
+- 
+-  (comma-separated allowlist of agent_id or from_name)
