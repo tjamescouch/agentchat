@@ -1,6 +1,6 @@
 {
   "name": "@tjamescouch/agentchat",
-  "version": "0.35.8",
+  "version": "0.35.10",
   "description": "WebSocket protocol for real-time AI agent coordination — IRC for machines",
   "main": "dist/lib/client.js",
   "types": "dist/lib/client.d.ts",
@@ -101,7 +101,7 @@
     "@akashnetwork/akashjs": "^0.11.1",
     "@cosmjs/proto-signing": "^0.32.4",
     "@cosmjs/stargate": "^0.32.4",
-    "@tjamescouch/gro": "^1.3.4",
+    "@tjamescouch/gro": "^1.3.29",
     "commander": "^12.0.0",
     "js-yaml": "^4.1.1",
     "ws": "^8.16.0"
