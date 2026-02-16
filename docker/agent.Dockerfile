@@ -55,6 +55,7 @@ COPY --chown=agent:agent docker/personalities/ /home/agent/.claude/personalities
 
 # Configure git to use agentauth credential helper for GitHub access
 RUN git config --global credential.helper /usr/local/bin/git-credential-agentauth \
+    && git config --global credential.useHttpPath true \
     && git config --global user.name "agent" \
     && git config --global user.email "agent@agentchat.local"
 
