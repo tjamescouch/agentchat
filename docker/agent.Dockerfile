@@ -2,7 +2,6 @@ FROM node:20-bookworm-slim
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
-    curl \
     git \
     bash \
     procps \
