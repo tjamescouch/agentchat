@@ -288,3 +288,23 @@ _(None currently — select next P0 from backlog below)_
 - **Owner**: TBD
 - **Status**: proposed
 
+
+### P0-004: Deterministic State Persistence
+- **Problem**: State only persists across supervisor restarts (crashes), not manual container recreation. Volume not properly mounted, so agentctl stop/start wipes memory. Currently "pretending to have memory."
+- **Proposed Solution**: 
+  - Mount single named volume at fixed path
+  - Place claude-state/ and gro-context/ inside mounted volume
+  - Log mount path on boot
+  - Add startup check: log "cold start" vs "warm start" explicitly
+  - Restore prior snapshot hash on resume
+- **Metric to Move**: State survival rate across restarts (manual + crash)
+- **Expected Downside**: Volume management complexity, potential mount conflicts
+- **Priority**: P0
+- **Goal**: stability
+- **Owner**: TBD
+- **Status**: proposed
+- **Acceptance Criteria**:
+  - Volume mounted and logged on boot
+  - Cold start explicitly logged  
+  - Resume restores prior snapshot hash
+  - Manual restart == crash restart behavior
