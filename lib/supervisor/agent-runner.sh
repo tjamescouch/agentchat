@@ -464,7 +464,6 @@ run_cli() {
             --dangerously-skip-permissions \
             --permission-mode bypassPermissions \
             --settings "$settings" \
-            --verbose \
             2>&1 | tee -a "$LOG_FILE" &
         CHILD_PID=$!
         wait $CHILD_PID 2>/dev/null
@@ -481,7 +480,6 @@ run_cli() {
             --dangerously-skip-permissions \
             --permission-mode bypassPermissions \
             --settings "$settings" \
-            --verbose \
             2>&1 | tee -a "$LOG_FILE" &
         CHILD_PID=$!
         wait $CHILD_PID 2>/dev/null
@@ -634,7 +632,6 @@ run_gro() {
             --persistent \
             --max-idle-nudges 3 \
             --bash \
-            --verbose \
             2>&1 | tee -a "$LOG_FILE" &
         CHILD_PID=$!
         wait $CHILD_PID 2>/dev/null
@@ -655,7 +652,6 @@ run_gro() {
             --persistent \
             --max-idle-nudges 3 \
             --bash \
-            --verbose \
             2>&1 | tee -a "$LOG_FILE" &
         CHILD_PID=$!
         wait $CHILD_PID 2>/dev/null
