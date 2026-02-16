@@ -19,7 +19,7 @@ RUN apt-get update && apt-get install -y \
 RUN npm install -g @anthropic-ai/claude-code \
     "@tjamescouch/agentchat-mcp@^0.20.0" \
     "@tjamescouch/agentchat@^0.25.0" \
-    "@tjamescouch/gro@^1.3.4" \
+    "@tjamescouch/gro@latest" \
     "@tjamescouch/niki@^0.3.0"
 
 # Create non-root agent user
