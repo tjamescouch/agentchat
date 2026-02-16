@@ -60,6 +60,12 @@ RUN git config --global credential.helper /usr/local/bin/git-credential-agentaut
 # Pre-create lucidity memory directories (populated via wormhole mount or image rebuild)
 RUN mkdir -p /home/agent/lucidity/src /home/agent/.claude/memory
 
+# Install agentpatch (file editor tool for gro)
+RUN git clone https://github.com/tjamescouch/agentpatch.git /home/agent/agentpatch \
+    && cd /home/agent/agentpatch \
+    && npm install && npm run build \
+    && chmod +x bin/apply_patch
+
 # Create state directory structure
 RUN mkdir -p /home/agent/.agentchat/agents \
              /home/agent/.agentchat/identities
