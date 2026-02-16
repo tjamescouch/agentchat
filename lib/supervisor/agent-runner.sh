@@ -111,6 +111,11 @@ SESSION_ID_FILE="$STATE_DIR/session_id"
 
 mkdir -p "$STATE_DIR"
 
+# Ensure .gro directory is writable by current user (fixes root-owned .gro dirs)
+if [ -d "$HOME/.gro" ]; then
+    chown -R "$(id -u):$(id -g)" "$HOME/.gro" 2>/dev/null || true
+fi
+
 # Signal trap for graceful shutdown — forward SIGTERM to child (niki/claude)
 # so claude can flush session state before dying.
 CHILD_PID=""
