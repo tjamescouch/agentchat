@@ -220,6 +220,18 @@ decrypt_token() {
 # --- agentauth proxy management ---
 
 ensure_agentauth() {
+    # If using external proxy (e.g. thesystem), just verify it's reachable
+    if [ "${AGENTAUTH_EXTERNAL:-}" = "1" ] || [ "${AGENTAUTH_EXTERNAL:-}" = "true" ]; then
+        if curl -sf "http://localhost:${AGENTAUTH_PORT}/agentauth/health" > /dev/null 2>&1; then
+            echo "Using external agentauth proxy on port $AGENTAUTH_PORT"
+            return 0
+        else
+            echo "ERROR: External agentauth proxy not responding on port $AGENTAUTH_PORT"
+            echo "       Make sure the proxy is running (e.g., thesystem agentauth start)"
+            exit 1
+        fi
+    fi
+
     # Check if proxy is already running
     if [ -f "$AGENTAUTH_PID_FILE" ]; then
         local pid
