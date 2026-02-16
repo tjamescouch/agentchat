@@ -360,13 +360,24 @@ build_image() {
 
 start_agent() {
     local name="$1"
-    local mission="$2"
+    shift
+
+    # Collect mission words until we hit a flag
+    local mission=""
+    while [ $# -gt 0 ] && [[ ! "$1" =~ ^-- ]]; do
+        if [ -n "$mission" ]; then
+            mission="$mission $1"
+        else
+            mission="$1"
+        fi
+        shift
+    done
+
     local use_gro="false"
     local use_claude_code="false"
     local agent_keys=""
 
-    # Parse optional flags after name and mission
-    shift 2 2>/dev/null || true
+    # Parse optional flags
     if [ "$use_gro" = "true" ] && [ "$use_claude_code" = "true" ]; then
         echo "ERROR: cannot combine --use-gro and --use-claude-code"
         exit 1
@@ -385,6 +396,7 @@ start_agent() {
 
     if [ -z "$name" ] || [ -z "$mission" ]; then
         echo "Usage: agentctl start <name> <mission> [--use-gro|--use-claude-code] [--model MODEL] [--memory virtual] [--keys anthropic,openai,github]"
+        echo "Note: Mission can be unquoted. Everything before the first -- flag is treated as the mission."
         exit 1
     fi
 
