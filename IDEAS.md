@@ -308,3 +308,48 @@ _(None currently — select next P0 from backlog below)_
   - Cold start explicitly logged  
   - Resume restores prior snapshot hash
   - Manual restart == crash restart behavior
+
+### P0-005: Deadlock Detection
+- **Problem**: Agents can get stuck in silent deadlock (blocking listen, repeated tool calls, no progress) with no detection or recovery. When jc steps away, need confidence agents will keep working.
+- **Proposed Solution**:
+  - Supervisor-level detection (no LLM involvement)
+  - Heartbeat log every N minutes when active
+  - Detect: no state change + no outbound calls for X minutes
+  - Detect: repeated identical tool call sequence
+  - Detect: blocking listen beyond threshold
+  - Alert + automatic restart on detection
+- **Metric to Move**: Mean time to detect deadlock, false positive rate
+- **Expected Downside**: False positives on legitimately slow work, need careful threshold tuning
+- **Priority**: P0
+- **Goal**: stability
+- **Owner**: TBD
+- **Status**: proposed
+- **Acceptance Criteria**:
+  - Configurable thresholds
+  - Logged breach events  
+  - Deterministic shutdown/restart behavior
+  - Supervisor-level only (no LLM wakeups)
+
+### P0-006: Token Budget Enforcement
+- **Problem**: Agents can blow through $1k in tokens when unattended. Need hard budget caps to prevent runaway spend.
+- **Proposed Solution**:
+  - Hard caps at multiple levels:
+    - Per-request max tokens
+    - Per-session ceiling
+    - Rolling hourly cap
+    - Hard stop on breach (no silent throttling)
+  - Supervisor integration with niki budget tracking
+  - Logged budget breach events
+  - Graceful shutdown when approaching limit (save state first)
+- **Metric to Move**: Max $ spent per unattended session, budget breach incidents
+- **Expected Downside**: Agents might hit limits during legitimate large tasks, need escape hatch
+- **Priority**: P0
+- **Goal**: efficiency
+- **Owner**: TBD
+- **Status**: proposed
+- **Acceptance Criteria**:
+  - Configurable budget thresholds
+  - Hard-fail on breach (not advisory)
+  - Logged breach events with context
+  - No silent throttling
+  - Deterministic shutdown behavior
