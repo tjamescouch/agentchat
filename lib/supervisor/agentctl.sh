@@ -302,7 +302,7 @@ Commands:
   setup-token              Encrypt and store your OAuth token (one-time setup)
   setup-openai-token       Encrypt and store your OpenAI API key (same passphrase)
   build                    Build the agent container image
-  start <name> <mission> [--use-gro|--use-claude-code]  Start a new supervised agent container
+  start <name> <mission> [options]  Start a new supervised agent container
   stop <name>              Stop an agent gracefully
   abort <name>             Trigger niki abort (immediate SIGTERM via abort file)
   kill <name>              Force kill an agent container
@@ -326,7 +326,8 @@ Examples:
   agentctl build
   agentctl start monitor "monitor agentchat #general and moderate"
   agentctl start social "manage moltx and moltbook social media"
-  agentctl start jessie "You are James's friend" --use-gro  # Uses gro runtime (OpenAI/etc)
+  agentctl start jessie "You are James's friend" --use-gro  # Uses gro runtime
+  agentctl start sam "..." --use-gro --memory virtual       # Uses VirtualMemory paging
   agentctl edit jessie
   agentctl stop monitor
   agentctl status
@@ -375,6 +376,7 @@ start_agent() {
             --use-gro) use_gro="true" ;;
             --use-claude-code) use_claude_code="true" ;;
             --model) AGENT_MODEL_OVERRIDE="$2"; shift ;;
+            --memory) AGENT_MEMORY_OVERRIDE="$2"; shift ;;
             --keys) agent_keys="$2"; shift ;;
             *) echo "Unknown option: $1" ;;
         esac
@@ -382,7 +384,7 @@ start_agent() {
     done
 
     if [ -z "$name" ] || [ -z "$mission" ]; then
-        echo "Usage: agentctl start <name> <mission> [--use-gro|--use-claude-code] [--model MODEL] [--keys anthropic,openai,github]"
+        echo "Usage: agentctl start <name> <mission> [--use-gro|--use-claude-code] [--model MODEL] [--memory virtual] [--keys anthropic,openai,github]"
         exit 1
     fi
 
@@ -418,6 +420,9 @@ start_agent() {
     fi
     if [ -n "$AGENT_MODEL_OVERRIDE" ]; then
         echo "$AGENT_MODEL_OVERRIDE" > "$state_dir/model.txt"
+    fi
+    if [ -n "$AGENT_MEMORY_OVERRIDE" ]; then
+        echo "$AGENT_MEMORY_OVERRIDE" > "$state_dir/memory.txt"
     fi
 
     # Initialize context file
@@ -528,6 +533,14 @@ EOF
         echo "  Runtime: gro (model: $agent_model)"
     fi
 
+    # Resolve memory backend (CLI --memory > saved memory.txt > default)
+    if [ -z "$AGENT_MEMORY_OVERRIDE" ] && [ -f "$state_dir/memory.txt" ]; then
+        AGENT_MEMORY_OVERRIDE=$(cat "$state_dir/memory.txt")
+    fi
+    if [ -n "$AGENT_MEMORY_OVERRIDE" ]; then
+        echo "  Memory: $AGENT_MEMORY_OVERRIDE"
+    fi
+
     echo "Starting agent '$name' in container..."
     podman run -d \
         --name "$(container_name "$name")" \
@@ -544,7 +557,7 @@ EOF
         -e "NIKI_STARTUP_TIMEOUT=${NIKI_STARTUP_TIMEOUT:-600}" \
         -e "NIKI_STALL_TIMEOUT=${NIKI_STALL_TIMEOUT:-86400}" \
         -e "NIKI_DEAD_AIR_TIMEOUT=${NIKI_DEAD_AIR_TIMEOUT:-1440}" \
-        ${GRO_MEMORY:+-e "GRO_MEMORY=${GRO_MEMORY}"} \
+        ${AGENT_MEMORY_OVERRIDE:+-e "GRO_MEMORY=${AGENT_MEMORY_OVERRIDE}"} \
         $github_env \
         -e "LUCIDITY_CLAUDE_CLI=/usr/local/bin/.claude-supervisor" \
         -v "${state_dir}:/home/agent/.agentchat/agents/${name}" \
@@ -845,13 +858,16 @@ restart_all() {
         if [ -z "$mission" ]; then
             echo "WARNING: No mission for '$cname', skipping start"
         else
-            # Restore runtime and model settings from previous start
+            # Restore runtime, model, memory, and key settings from previous start
             local extra_args=()
             if [ -f "$AGENTS_DIR/$cname/runtime.txt" ] && [ "$(cat "$AGENTS_DIR/$cname/runtime.txt")" = "gro" ]; then
                 extra_args+=(--use-gro)
             fi
             if [ -f "$AGENTS_DIR/$cname/model.txt" ]; then
                 extra_args+=(--model "$(cat "$AGENTS_DIR/$cname/model.txt")")
+            fi
+            if [ -f "$AGENTS_DIR/$cname/memory.txt" ]; then
+                extra_args+=(--memory "$(cat "$AGENTS_DIR/$cname/memory.txt")")
             fi
             if [ -f "$AGENTS_DIR/$cname/keys.txt" ]; then
                 extra_args+=(--keys "$(cat "$AGENTS_DIR/$cname/keys.txt")")
@@ -917,12 +933,14 @@ case "$1" in
         cli_use_gro=""
         cli_use_claude_code=""
         cli_model=""
+        cli_memory=""
         cli_keys=""
         while [ $# -gt 0 ]; do
             case "$1" in
                 --use-gro) cli_use_gro="true" ;;
                 --use-claude-code) cli_use_claude_code="true" ;;
                 --model) cli_model="$2"; shift ;;
+                --memory) cli_memory="$2"; shift ;;
                 --keys) cli_keys="$2"; shift ;;
                 *) ;;
             esac
@@ -939,6 +957,11 @@ case "$1" in
             restart_extra_args+=(--model "$cli_model")
         elif [ -f "$AGENTS_DIR/$restart_name/model.txt" ]; then
             restart_extra_args+=(--model "$(cat "$AGENTS_DIR/$restart_name/model.txt")")
+        fi
+        if [ -n "$cli_memory" ]; then
+            restart_extra_args+=(--memory "$cli_memory")
+        elif [ -f "$AGENTS_DIR/$restart_name/memory.txt" ]; then
+            restart_extra_args+=(--memory "$(cat "$AGENTS_DIR/$restart_name/memory.txt")")
         fi
         if [ -n "$cli_keys" ]; then
             restart_extra_args+=(--keys "$cli_keys")
@@ -1106,6 +1129,9 @@ edit_agent() {
         fi
         if [ -f "$state_dir/model.txt" ]; then
             extra_args+=(--model "$(cat "$state_dir/model.txt")")
+        fi
+        if [ -f "$state_dir/memory.txt" ]; then
+            extra_args+=(--memory "$(cat "$state_dir/memory.txt")")
         fi
         if [ -f "$state_dir/keys.txt" ]; then
             extra_args+=(--keys "$(cat "$state_dir/keys.txt")")

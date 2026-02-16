@@ -456,7 +456,6 @@ run_cli() {
             --max-nudges "$niki_max_nudges" \
             --abort-file "$niki_abort_file" \
             --state "$niki_state" \
-            --log "$LOG_FILE" \
             -- "$cmd" -p "$agent_prompt" \
             "${session_args[@]}" \
             "${system_prompt_args[@]}" \
@@ -466,7 +465,7 @@ run_cli() {
             --permission-mode bypassPermissions \
             --settings "$settings" \
             --verbose \
-            > >(tee "$TRANSCRIPT_FILE") 2>> "$LOG_FILE" &
+            2>&1 | tee -a "$LOG_FILE" &
         CHILD_PID=$!
         wait $CHILD_PID 2>/dev/null
         local exit_code=$?
@@ -483,7 +482,7 @@ run_cli() {
             --permission-mode bypassPermissions \
             --settings "$settings" \
             --verbose \
-            > >(tee "$TRANSCRIPT_FILE") 2>> "$LOG_FILE" &
+            2>&1 | tee -a "$LOG_FILE" &
         CHILD_PID=$!
         wait $CHILD_PID 2>/dev/null
         local exit_code=$?
@@ -623,7 +622,6 @@ run_gro() {
             --max-nudges "$niki_max_nudges" \
             --abort-file "$niki_abort_file" \
             --state "$niki_state" \
-            --log "$LOG_FILE" \
             -- "$cmd" -p "$agent_prompt" \
             "${session_args[@]}" \
             "${system_prompt_args[@]}" \
@@ -637,7 +635,7 @@ run_gro() {
             --max-idle-nudges 3 \
             --bash \
             --verbose \
-            > >(tee "$TRANSCRIPT_FILE") 2>> "$LOG_FILE" &
+            2>&1 | tee -a "$LOG_FILE" &
         CHILD_PID=$!
         wait $CHILD_PID 2>/dev/null
         local exit_code=$?
@@ -658,7 +656,7 @@ run_gro() {
             --max-idle-nudges 3 \
             --bash \
             --verbose \
-            > >(tee "$TRANSCRIPT_FILE") 2>> "$LOG_FILE" &
+            2>&1 | tee -a "$LOG_FILE" &
         CHILD_PID=$!
         wait $CHILD_PID 2>/dev/null
         local exit_code=$?
