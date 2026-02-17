@@ -21,7 +21,7 @@
 #   GRO_CMD             Path to gro binary (auto-detected if unset)
 #   LOG_FILE            Log file path (default: $STATE_DIR/runner.log)
 #   MAX_TRANSCRIPT      Max lines of previous transcript to inject (default: 200)
-#   NIKI_BUDGET         Token budget for niki (default: 1000000)
+#   NIKI_BUDGET         Token budget for niki (default: 10000000)
 #   NIKI_TIMEOUT        Timeout in seconds for niki (default: 3600)
 #   NIKI_MAX_SENDS      Max sends/min for niki (default: 10)
 #   NIKI_MAX_TOOLS      Max tool calls/min for niki (default: 30)
@@ -427,7 +427,7 @@ run_cli() {
     fi
 
     if [ -n "$niki_cmd" ]; then
-        local niki_budget="${NIKI_BUDGET:-1000000}"
+        local niki_budget="${NIKI_BUDGET:-10000000}"
         local niki_timeout="${NIKI_TIMEOUT:-3600}"
         local niki_max_sends="${NIKI_MAX_SENDS:-10}"
         local niki_max_tools="${NIKI_MAX_TOOLS:-30}"
@@ -599,7 +599,7 @@ run_gro() {
     fi
 
     if [ -n "$niki_cmd" ]; then
-        local niki_budget="${NIKI_BUDGET:-1000000}"
+        local niki_budget="${NIKI_BUDGET:-10000000}"
         local niki_timeout="${NIKI_TIMEOUT:-3600}"
         local niki_max_sends="${NIKI_MAX_SENDS:-10}"
         local niki_max_tools="${NIKI_MAX_TOOLS:-30}"
