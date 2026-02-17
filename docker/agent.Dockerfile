@@ -19,7 +19,8 @@ RUN npm install -g @anthropic-ai/claude-code \
     "@tjamescouch/agentchat-mcp@^0.20.0" \
     "@tjamescouch/agentchat@^0.25.0" \
     "@tjamescouch/gro@latest" \
-    "@tjamescouch/niki@^0.3.0"
+    "@tjamescouch/niki@^0.3.0" \
+    "@tjamescouch/wormhole@latest"
 
 # Create non-root agent user
 RUN useradd -m -s /bin/bash agent
