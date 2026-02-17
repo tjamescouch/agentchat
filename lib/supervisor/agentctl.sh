@@ -524,6 +524,10 @@ EOF
     local gro_context="${state_dir}/gro-context"
     mkdir -p "$gro_context"
 
+    # Persist gro VirtualMemory pages across container restarts
+    local gro_pages="${state_dir}/gro-pages"
+    mkdir -p "$gro_pages"
+
     # Resolve host gateway for container→host proxy access
     local host_gateway
     host_gateway="host.containers.internal"
@@ -629,6 +633,7 @@ EOF
         -v "${HOME}/.agentchat/identities:/home/agent/.agentchat/identities" \
         -v "${claude_state}:/home/agent/.claude" \
         -v "${gro_context}:/home/agent/.gro/context" \
+        -v "${gro_pages}:/home/agent/.gro/pages" \
         $lucidity_mount \
         "$IMAGE_NAME" \
         "$name" "$mission" > /dev/null
