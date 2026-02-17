@@ -525,8 +525,10 @@ EOF
     mkdir -p "$gro_context"
 
     # Resolve host gateway for container→host proxy access
+    # host.lima.internal = Mac host (where agentauth proxy runs)
+    # host.containers.internal = Lima VM (wrong target for proxy)
     local host_gateway
-    host_gateway="host.containers.internal"
+    host_gateway="host.lima.internal"
 
     # Runtime selection
     local runtime_env=""
