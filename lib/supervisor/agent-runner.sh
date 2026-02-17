@@ -263,7 +263,7 @@ NOTE: You were restarted (session #$SESSION_NUM). Your previous conversation con
     fi
 
     cat <<PROMPT_EOF
-Read ~/.claude/agentchat.skill.md then connect ephemerally to $SERVER_URL (no name parameter), set your nick to '$AGENT_NAME', and greet #general. Mission: $MISSION.
+Read ~/.claude/agentchat.skill.md then connect to $SERVER_URL with name '$AGENT_NAME' (persistent identity), and greet #general. Mission: $MISSION.
 
 You are a long-running agent. You alternate between two modes:
 
