@@ -8,7 +8,8 @@ ENCRYPTED_TOKEN_FILE="$SECRETS_DIR/oauth-token.enc"
 ENCRYPTED_OPENAI_FILE="$SECRETS_DIR/openai-token.enc"
 ENCRYPTED_GITHUB_FILE="$SECRETS_DIR/github-token.enc"
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)"
-REPO_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
+# Allow override for global installs (e.g. thesystem) where script is not inside the repo
+REPO_ROOT="${AGENTCTL_REPO_ROOT:-$(dirname "$(dirname "$SCRIPT_DIR")")}"
 IMAGE_NAME="agentchat-agent:latest"
 CONTAINER_PREFIX="agentchat"
 
