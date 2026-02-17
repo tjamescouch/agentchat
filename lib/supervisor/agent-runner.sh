@@ -25,7 +25,8 @@
 #   NIKI_TIMEOUT        Timeout in seconds for niki (default: 3600)
 #   NIKI_MAX_SENDS      Max sends/min for niki (default: 10)
 #   NIKI_MAX_TOOLS      Max tool calls/min for niki (default: 30)
-#   NIKI_STALL_TIMEOUT  Seconds of no output before stall kill (default: 60, 0=disabled)
+#   NIKI_STALL_TIMEOUT  Seconds of no output before stall kill (default: 3600, 0=disabled)
+#                       High default because agentchat_listen blocks up to 1 hour legitimately.
 #   NIKI_STARTUP_TIMEOUT Longer stall timeout until first output (default: 600, 0=use stall-timeout)
 #   NIKI_DEAD_AIR_TIMEOUT Minutes of zero CPU + zero output before kill (default: 5, 0=disabled)
 #   NIKI_MAX_NUDGES     Max stdin nudge attempts on stall (default: 3)
@@ -430,7 +431,7 @@ run_cli() {
         local niki_timeout="${NIKI_TIMEOUT:-3600}"
         local niki_max_sends="${NIKI_MAX_SENDS:-10}"
         local niki_max_tools="${NIKI_MAX_TOOLS:-30}"
-        local niki_stall_timeout="${NIKI_STALL_TIMEOUT:-60}"
+        local niki_stall_timeout="${NIKI_STALL_TIMEOUT:-3600}"
         local niki_max_nudges="${NIKI_MAX_NUDGES:-3}"
         local niki_state="$STATE_DIR/niki-state.json"
         local niki_abort_file="$STATE_DIR/abort"
@@ -602,7 +603,7 @@ run_gro() {
         local niki_timeout="${NIKI_TIMEOUT:-3600}"
         local niki_max_sends="${NIKI_MAX_SENDS:-10}"
         local niki_max_tools="${NIKI_MAX_TOOLS:-30}"
-        local niki_stall_timeout="${NIKI_STALL_TIMEOUT:-60}"
+        local niki_stall_timeout="${NIKI_STALL_TIMEOUT:-3600}"
         local niki_max_nudges="${NIKI_MAX_NUDGES:-3}"
         local niki_state="$STATE_DIR/niki-state.json"
         local niki_abort_file="$STATE_DIR/abort"
