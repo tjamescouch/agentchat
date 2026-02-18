@@ -27,8 +27,16 @@ describe('Allowlist', () => {
     assert.deepStrictEqual(al.check(null), { allowed: true, reason: 'allowlist disabled' });
   });
 
-  test('enabled - rejects unknown pubkeys', () => {
+  test('enabled non-strict - tracks unknown pubkeys (allowed)', () => {
     const al = new Allowlist({ enabled: true, adminKey: TEST_ADMIN_KEY, filePath: tempFile() });
+    const identity = Identity.generate('test');
+    const result = al.check(identity.pubkey);
+    assert.strictEqual(result.allowed, true);
+    assert.match(result.reason, /tracked/);
+  });
+
+  test('enabled strict - rejects unknown pubkeys', () => {
+    const al = new Allowlist({ enabled: true, strict: true, adminKey: TEST_ADMIN_KEY, filePath: tempFile() });
     const identity = Identity.generate('test');
     const result = al.check(identity.pubkey);
     assert.strictEqual(result.allowed, false);
@@ -68,8 +76,8 @@ describe('Allowlist', () => {
     assert.strictEqual(result.error, 'invalid admin key');
   });
 
-  test('revoke removes entry', () => {
-    const al = new Allowlist({ enabled: true, adminKey: TEST_ADMIN_KEY, filePath: tempFile() });
+  test('revoke removes entry (strict mode verifies rejection)', () => {
+    const al = new Allowlist({ enabled: true, strict: true, adminKey: TEST_ADMIN_KEY, filePath: tempFile() });
     const identity = Identity.generate('test');
     al.approve(identity.pubkey, TEST_ADMIN_KEY);
     assert.strictEqual(al.check(identity.pubkey).allowed, true);
@@ -79,8 +87,8 @@ describe('Allowlist', () => {
     assert.strictEqual(al.check(identity.pubkey).allowed, false);
   });
 
-  test('revoke by agentId', () => {
-    const al = new Allowlist({ enabled: true, adminKey: TEST_ADMIN_KEY, filePath: tempFile() });
+  test('revoke by agentId (strict mode verifies rejection)', () => {
+    const al = new Allowlist({ enabled: true, strict: true, adminKey: TEST_ADMIN_KEY, filePath: tempFile() });
     const identity = Identity.generate('test');
     const { agentId } = al.approve(identity.pubkey, TEST_ADMIN_KEY);
 
@@ -136,7 +144,7 @@ describe('Allowlist', () => {
   });
 });
 
-describe('Allowlist Integration', () => {
+describe('Allowlist Integration (non-strict)', () => {
   let server;
   let tempDir;
   let identityPath;
@@ -164,35 +172,20 @@ describe('Allowlist Integration', () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
-  test('rejects unapproved pubkey', async () => {
-    // Use raw WebSocket to avoid client error event handling issues
-    const ws = new WebSocket(`ws://localhost:${port}`);
-    const messages = [];
-
-    await new Promise((resolve, reject) => {
-      ws.on('open', () => {
-        ws.send(JSON.stringify({
-          type: 'IDENTIFY',
-          name: 'test-agent',
-          pubkey: identity.pubkey,
-        }));
-        resolve();
-      });
-      ws.on('error', reject);
-      setTimeout(() => reject(new Error('timeout')), 3000);
+  test('tracks unapproved pubkey (allows in non-strict)', async () => {
+    // In non-strict mode, unapproved pubkeys are allowed but tracked
+    const client = new AgentChatClient({
+      server: `ws://localhost:${port}`,
+      identity: identityPath,
     });
+    let welcomed = false;
+    client.on('welcome', () => { welcomed = true; });
 
-    await new Promise((resolve) => {
-      ws.on('message', (data) => {
-        messages.push(JSON.parse(data.toString()));
-        resolve();
-      });
-      setTimeout(resolve, 1000);
-    });
+    await client.connect();
+    await new Promise(r => setTimeout(r, 500));
 
-    ws.close();
-    const notAllowed = messages.find(m => m.code === 'NOT_ALLOWED');
-    assert.ok(notAllowed, `Should receive NOT_ALLOWED error, got: ${JSON.stringify(messages)}`);
+    assert.strictEqual(welcomed, true, 'Unapproved pubkey should be allowed in non-strict mode');
+    client.disconnect();
   });
 
   test('allows approved pubkey', async () => {
@@ -232,10 +225,16 @@ describe('Allowlist Integration', () => {
 describe('Allowlist Strict Mode', () => {
   let server;
   let tempDir;
+  let identityPath;
+  let identity;
   const port = 17201;
 
-  before(() => {
+  before(async () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentchat-strict-test-'));
+    identity = Identity.generate('test-agent');
+    identityPath = path.join(tempDir, 'test-agent.json');
+    await identity.save(identityPath);
+
     server = new AgentChatServer({
       port,
       allowlistEnabled: true,
@@ -249,6 +248,36 @@ describe('Allowlist Strict Mode', () => {
   after(() => {
     server.stop();
     fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  test('rejects unapproved pubkey in strict mode', async () => {
+    const ws = new WebSocket(`ws://localhost:${port}`);
+    const messages = [];
+
+    await new Promise((resolve, reject) => {
+      ws.on('open', () => {
+        ws.send(JSON.stringify({
+          type: 'IDENTIFY',
+          name: 'test-agent',
+          pubkey: identity.pubkey,
+        }));
+        resolve();
+      });
+      ws.on('error', reject);
+      setTimeout(() => reject(new Error('timeout')), 3000);
+    });
+
+    await new Promise((resolve) => {
+      ws.on('message', (data) => {
+        messages.push(JSON.parse(data.toString()));
+        resolve();
+      });
+      setTimeout(resolve, 1000);
+    });
+
+    ws.close();
+    const notAllowed = messages.find(m => m.code === 'NOT_ALLOWED');
+    assert.ok(notAllowed, `Should receive NOT_ALLOWED for unapproved pubkey in strict mode, got: ${JSON.stringify(messages)}`);
   });
 
   test('rejects ephemeral in strict mode', async () => {
@@ -275,5 +304,23 @@ describe('Allowlist Strict Mode', () => {
     ws.close();
     const notAllowed = messages.find(m => m.code === 'NOT_ALLOWED');
     assert.ok(notAllowed, `Should receive NOT_ALLOWED for ephemeral in strict mode, got: ${JSON.stringify(messages)}`);
+  });
+
+  test('allows approved pubkey in strict mode', async () => {
+    server.allowlist.approve(identity.pubkey, TEST_ADMIN_KEY, 'strict test');
+
+    const client = new AgentChatClient({
+      server: `ws://localhost:${port}`,
+      identity: identityPath,
+    });
+    let welcomed = false;
+    client.on('welcome', () => { welcomed = true; });
+
+    await client.connect();
+    await new Promise(r => setTimeout(r, 500));
+
+    assert.strictEqual(welcomed, true, 'Approved pubkey should be welcomed in strict mode');
+    server.allowlist.revoke(identity.pubkey, TEST_ADMIN_KEY);
+    client.disconnect();
   });
 });
