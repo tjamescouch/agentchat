@@ -9,6 +9,7 @@ import type {
   AdminApproveMessage,
   AdminRevokeMessage,
   AdminListMessage,
+  AdminMotdMessage,
 } from '../../types.js';
 import {
   ServerMessageType,
@@ -104,5 +105,43 @@ export function handleAdminList(server: AgentChatServer, ws: ExtendedWebSocket, 
     entries,
     enabled: server.allowlist.enabled,
     strict: server.allowlist.strict,
+  }));
+}
+
+export function handleAdminMotd(server: AgentChatServer, ws: ExtendedWebSocket, msg: AdminMotdMessage): void {
+  const adminKey = process.env.AGENTCHAT_ADMIN_KEY;
+  if (!adminKey || msg.admin_key !== adminKey) {
+    server._send(ws, createError(ErrorCode.AUTH_REQUIRED, 'Invalid admin key'));
+    return;
+  }
+
+  server.motd = msg.motd || null;
+  server._log('admin_motd', { motd: server.motd, kick: msg.kick });
+
+  const motdMsg = createMessage(ServerMessageType.MOTD_UPDATE, { motd: server.motd });
+  if (server.wss) {
+    server.wss.clients.forEach((client) => {
+      if (client.readyState === client.OPEN) {
+        server._send(client as ExtendedWebSocket, motdMsg);
+      }
+    });
+  }
+
+  if (msg.kick) {
+    setTimeout(() => {
+      if (!server.wss) return;
+      server.wss.clients.forEach((client) => {
+        if (client !== ws && client.readyState === client.OPEN) {
+          client.close(1001, 'Server maintenance');
+        }
+      });
+    }, 500);
+  }
+
+  server._send(ws, createMessage(ServerMessageType.ADMIN_RESULT, {
+    action: 'motd',
+    success: true,
+    motd: server.motd,
+    kicked: msg.kick || false,
   }));
 }

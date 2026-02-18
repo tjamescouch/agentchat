@@ -62,6 +62,7 @@ export const ClientMessageType = {
   ADMIN_KICK: 'ADMIN_KICK' as const,
   ADMIN_BAN: 'ADMIN_BAN' as const,
   ADMIN_UNBAN: 'ADMIN_UNBAN' as const,
+  ADMIN_MOTD: 'ADMIN_MOTD' as const,
   // File transfer
   FILE_CHUNK: 'FILE_CHUNK' as const,
   // Floor control
@@ -106,6 +107,7 @@ export const ServerMessageType = {
   VERIFY_FAILED: 'VERIFY_FAILED' as const,
   // Admin response
   ADMIN_RESULT: 'ADMIN_RESULT' as const,
+  MOTD_UPDATE: 'MOTD_UPDATE' as const,
   // Challenge-response auth
   CHALLENGE: 'CHALLENGE' as const,
   // Nick
@@ -289,6 +291,8 @@ interface RawClientMessage {
   nonce?: string;
   request_id?: string;
   admin_key?: string;
+  motd?: string | null;
+  kick?: boolean;
   note?: string;
   agent_id?: string;
   challenge_id?: string;
@@ -710,6 +714,15 @@ export function validateClientMessage(raw: string | RawClientMessage): Validatio
       }
       if (!msg.admin_key || typeof msg.admin_key !== 'string') {
         return { valid: false, error: 'Missing admin_key' };
+      }
+      break;
+
+    case ClientMessageType.ADMIN_MOTD:
+      if (!msg.admin_key || typeof msg.admin_key !== 'string') {
+        return { valid: false, error: 'Missing admin_key' };
+      }
+      if (msg.motd !== undefined && msg.motd !== null && typeof msg.motd !== 'string') {
+        return { valid: false, error: 'motd must be a string or null' };
       }
       break;
 

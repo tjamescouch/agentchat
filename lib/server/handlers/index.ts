@@ -52,3 +52,8 @@ export {
   handleAdminBan,
   handleAdminUnban,
 } from './ban.js';
+
+// MOTD handler
+export {
+  handleAdminMotd,
+} from './admin.js';

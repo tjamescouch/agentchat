@@ -44,6 +44,7 @@ export enum ClientMessageType {
   ADMIN_KICK = 'ADMIN_KICK',
   ADMIN_BAN = 'ADMIN_BAN',
   ADMIN_UNBAN = 'ADMIN_UNBAN',
+  ADMIN_MOTD = 'ADMIN_MOTD',
   // File transfer
   FILE_CHUNK = 'FILE_CHUNK'
 }
@@ -92,6 +93,7 @@ export enum ServerMessageType {
   // Moderation
   KICKED = 'KICKED',
   BANNED = 'BANNED',
+  MOTD_UPDATE = 'MOTD_UPDATE',
   // File transfer
   FILE_CHUNK = 'FILE_CHUNK'
 }
@@ -355,6 +357,13 @@ export interface AdminUnbanMessage extends BaseMessage {
   admin_key: string;
 }
 
+export interface AdminMotdMessage extends BaseMessage {
+  type: 'ADMIN_MOTD';
+  admin_key: string;
+  motd: string | null;
+  kick?: boolean;
+}
+
 export interface VerifyIdentityMessage extends BaseMessage {
   type: ClientMessageType.VERIFY_IDENTITY;
   challenge_id: string;
@@ -464,6 +473,7 @@ export type ClientMessage =
   | AdminKickMessage
   | AdminBanMessage
   | AdminUnbanMessage
+  | AdminMotdMessage
   | FileChunkMessage;
 
 // ============ Server Messages ============
