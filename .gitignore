@@ -1,10 +1,25 @@
+# OS files
 .DS_Store
-build
-dist
-node_modules
-.agentchat
+Thumbs.db
 
-# Secrets and credentials - NEVER commit these
+# Dependencies
+node_modules/
+
+# Build output — TypeScript compiles to dist/
+dist/
+build/
+
+# Compiled JS in source dirs (use dist/ instead)
+lib/**/*.js
+lib/**/*.js.map
+lib/**/*.d.ts
+lib/**/*.d.ts.map
+bin/**/*.js
+bin/**/*.js.map
+bin/**/*.d.ts
+bin/**/*.d.ts.map
+
+# Secrets and credentials — NEVER commit
 *.pem
 *.key
 *-wallet.json
@@ -23,34 +38,15 @@ akash-wallet.json
 deploy.yaml
 *.sdl
 
-.claude
-
-# Sensitive directories - NEVER commit
+# Sensitive directories — NEVER commit
 .claude/
 .ssh/
 .owl/
 .agentchat/
-.env
-.env.*
-*.pem
-*.key
-identity.json
-*-identity.json
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# Dependencies
-node_modules/
-
-# Build output
-dist/
-build/
 
 # Logs
 *.log
 logs/
 
-
+# Misc
 bans.json

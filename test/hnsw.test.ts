@@ -2,7 +2,7 @@
  * HNSW tests — run with: npx tsx hnsw.test.ts
  */
 
-import { HNSW, cosineDistance, euclideanDistance } from './hnsw';
+import { HNSW, cosineDistance, euclideanDistance } from '../lib/hnsw';
 
 let passed = 0;
 let failed = 0;
