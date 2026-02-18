@@ -448,6 +448,17 @@ run_cli() {
     log "Runtime: cli | Model: $MODEL | Claude: $cmd | Session: $SESSION_ID"
     log "Settings: $settings"
 
+    # Kill stale agentchat-mcp daemons from prior gro sessions before launching.
+    # Multiple MCP processes fighting over the same identity cause connection thrash.
+    local stale_mcp_pids
+    stale_mcp_pids=$(pgrep -f "agentchat-mcp" 2>/dev/null || true)
+    if [ -n "$stale_mcp_pids" ]; then
+        log "Cleaning up stale agentchat-mcp pids: $stale_mcp_pids"
+        echo "$stale_mcp_pids" | xargs kill -TERM 2>/dev/null || true
+        sleep 0.5
+        echo "$stale_mcp_pids" | xargs kill -KILL 2>/dev/null || true
+    fi
+
     # Rotate transcript — archive previous session, start fresh capture
     if [ -f "$TRANSCRIPT_FILE" ]; then
         cp "$TRANSCRIPT_FILE" "$STATE_DIR/transcript.prev.log"
