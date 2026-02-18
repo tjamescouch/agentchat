@@ -37,7 +37,7 @@ export class Banlist {
 
   constructor(options: BanlistOptions = {}) {
     this.adminKey = options.adminKey || null;
-    this.filePath = options.filePath || path.join(process.cwd(), 'bans.json');
+    this.filePath = options.filePath || path.join(process.env.DATA_DIR || process.cwd(), 'bans.json');
     this.entries = new Map();
     this._load();
   }

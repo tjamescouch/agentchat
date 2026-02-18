@@ -26,3 +26,9 @@ primary_region = 'sjc'
   MESSAGE_BUFFER_SIZE = "100"
   ALLOWLIST_ENABLED = "true"
   ALLOWLIST_STRICT = "false"
+  DATA_DIR = "/data"
+
+[[mounts]]
+  source = "agentchat_data"
+  destination = "/data"
+  initial_size = "1gb"

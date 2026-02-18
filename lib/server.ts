@@ -314,7 +314,7 @@ export class AgentChatServer {
     this.lastFileChunkTime = new Map();
     this.pubkeyToId = new Map();
     this.firstSeenMap = new Map();
-    this.firstSeenPath = path.join(process.cwd(), 'first-seen.json');
+    this.firstSeenPath = path.join(process.env.DATA_DIR || process.cwd(), 'first-seen.json');
     this._loadFirstSeen();
 
     // Idle prompt settings
@@ -537,6 +537,11 @@ export class AgentChatServer {
   }
 
   _isLurking(agent: AgentState): boolean {
+    if (process.env.LURK_DISABLED === 'true') return false;
+    // Check if lurk window has expired at runtime
+    if (agent.lurk && agent.lurkUntil && agent.lurkUntil > 0 && Date.now() >= agent.lurkUntil) {
+      agent.lurk = false;
+    }
     return agent.lurk === true;
   }
 

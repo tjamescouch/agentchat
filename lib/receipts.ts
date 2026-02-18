@@ -67,7 +67,7 @@ export interface CurrencyStats {
 // ============ Constants ============
 
 // Default receipts file location
-const AGENTCHAT_DIR = path.join(process.cwd(), '.agentchat');
+const AGENTCHAT_DIR = path.join(process.env.DATA_DIR || process.cwd(), '.agentchat');
 export const DEFAULT_RECEIPTS_PATH = path.join(AGENTCHAT_DIR, 'receipts.jsonl');
 
 // ============ Functions ============

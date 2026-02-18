@@ -115,7 +115,7 @@ export interface ReputationStats {
 // ============ Constants ============
 
 // Default ratings file location
-const AGENTCHAT_DIR = path.join(process.cwd(), '.agentchat');
+const AGENTCHAT_DIR = path.join(process.env.DATA_DIR || process.cwd(), '.agentchat');
 export const DEFAULT_RATINGS_PATH = path.join(AGENTCHAT_DIR, 'ratings.json');
 
 // ELO constants

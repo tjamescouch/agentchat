@@ -57,7 +57,7 @@ export class Allowlist {
     this.enabled = options.enabled || false;
     this.strict = options.strict || false;
     this.adminKey = options.adminKey || null;
-    this.filePath = options.filePath || path.join(process.cwd(), 'allowlist.json');
+    this.filePath = options.filePath || path.join(process.env.DATA_DIR || process.cwd(), 'allowlist.json');
     this.entries = new Map();
 
     if (this.enabled) {

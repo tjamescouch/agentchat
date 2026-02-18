@@ -12,7 +12,7 @@ import path from 'path';
 import type { Skill } from './types.js';
 
 // Default storage location
-const AGENTCHAT_DIR = path.join(process.cwd(), '.agentchat');
+const AGENTCHAT_DIR = path.join(process.env.DATA_DIR || process.cwd(), '.agentchat');
 export const DEFAULT_SKILLS_PATH = path.join(AGENTCHAT_DIR, 'skills.json');
 
 export interface SkillRegistration {
