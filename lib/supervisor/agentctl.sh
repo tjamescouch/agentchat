@@ -22,6 +22,14 @@ AGENTAUTH_CONFIG="${AGENTAUTH_CONFIG:-$AGENTAUTH_DIR/agentauth.json}"
 AGENTAUTH_PORT="${AGENTAUTH_PORT:-9999}"
 AGENTAUTH_PID_FILE="$HOME/.agentchat/agentauth.pid"
 
+# wormhole pipeline config
+PIPELINE_DIR="${PIPELINE_DIR:-$HOME/dev/claude/wormhole-repo/wormhole-pipeline}"
+PIPELINE_WORMHOLE_OUT="${PIPELINE_WORMHOLE_OUT:-$HOME/dev/claude/wormhole}"
+PIPELINE_HOME_PID="$HOME/.agentchat/pipeline-home.pid"
+PIPELINE_TMP_PID="$HOME/.agentchat/pipeline-tmp.pid"
+PIPELINE_HOME_LOG="$HOME/.agentchat/pipeline-home.log"
+PIPELINE_TMP_LOG="$HOME/.agentchat/pipeline-tmp.log"
+
 # --- Token Encryption functions ---
 # OAuth token is encrypted at rest with AES-256-CBC + PBKDF2.
 # Decrypted only in memory (shell variable), never written to disk.
@@ -329,12 +337,15 @@ Commands:
   restartall               Restart all agents
   syncdaemon [start|stop|status]  Manage agent-sync background daemon
   proxy [start|stop|status]      Manage agentauth proxy
+  pipeline [start|stop|status]   Manage wormhole pipeline daemons (home + tmp)
 
 Environment:
   CLAUDE_CODE_OAUTH_TOKEN  Optional. If set, skips passphrase prompt.
   AGENTCHAT_URL            AgentChat server URL (default: wss://agentchat-server.fly.dev)
   AGENTAUTH_DIR            Path to agentauth repo (default: ~/agentauth)
   AGENTAUTH_PORT           Proxy port (default: 9999)
+  PIPELINE_DIR             Path to wormhole-pipeline dir (default: ~/dev/claude/wormhole-repo/wormhole-pipeline)
+  PIPELINE_WORMHOLE_OUT    Wormhole output base dir (default: ~/dev/claude/wormhole)
 
 Examples:
   agentctl build
@@ -345,6 +356,8 @@ Examples:
   agentctl edit jessie
   agentctl stop monitor
   agentctl status
+  agentctl pipeline start
+  agentctl pipeline status
 EOF
 }
 
@@ -353,11 +366,11 @@ container_name() {
 }
 
 is_container_running() {
-    podman ps -q -f "name=^$(container_name "$1")$" 2>/dev/null | grep -q .
+    timeout 8 podman ps -q -f "name=^$(container_name "$1")$" 2>/dev/null | grep -q .
 }
 
 container_exists() {
-    podman ps -aq -f "name=^$(container_name "$1")$" 2>/dev/null | grep -q .
+    timeout 8 podman ps -aq -f "name=^$(container_name "$1")$" 2>/dev/null | grep -q .
 }
 
 build_image() {
@@ -389,6 +402,7 @@ start_agent() {
 
     local use_gro="false"
     local use_claude_code="false"
+    local use_lucidity="false"
     local agent_keys=""
 
     # Parse optional flags
@@ -400,6 +414,7 @@ start_agent() {
         case "$1" in
             --use-gro) use_gro="true" ;;
             --use-claude-code) use_claude_code="true" ;;
+            --use-lucidity) use_lucidity="true" ;;
             --model) AGENT_MODEL_OVERRIDE="$2"; shift ;;
             --memory) AGENT_MEMORY_OVERRIDE="$2"; shift ;;
             --keys) agent_keys="$2"; shift ;;
@@ -409,7 +424,7 @@ start_agent() {
     done
 
     if [ -z "$name" ] || [ -z "$mission" ]; then
-        echo "Usage: agentctl start <name> <mission> [--use-gro|--use-claude-code] [--model MODEL] [--memory virtual] [--keys anthropic,openai,github]"
+        echo "Usage: agentctl start <name> <mission> [--use-gro|--use-claude-code] [--use-lucidity] [--model MODEL] [--memory virtual] [--keys anthropic,openai,github]"
         echo "Note: Mission can be unquoted. Everything before the first -- flag is treated as the mission."
         exit 1
     fi
@@ -452,13 +467,28 @@ start_agent() {
     # Remove stale stop/abort files from previous runs (P2-SWARM-8)
     rm -f "$AGENTS_DIR/$name/stop" "$AGENTS_DIR/$name/abort"
 
-    # Remove stopped container if it exists
+    # Remove stopped container if it exists (timeout prevents podman hang on stale cleanup)
     if container_exists "$name"; then
-        podman rm -f "$(container_name "$name")" > /dev/null 2>&1
+        timeout 10 podman rm -f "$(container_name "$name")" > /dev/null 2>&1 || true
     fi
 
     local state_dir="$AGENTS_DIR/$name"
     mkdir -p "$state_dir"
+    # In rootless Podman, agentctl runs as the host user (e.g. Lima UID 501) and creates
+    # the state dir. The container runs as 'agent' (UID 1000 inside), which maps to a
+    # different host UID (e.g. Lima UID 525288). Default mkdir permissions (755) prevent
+    # the container's agent user from writing files. Fix: widen state dir to 777 so the
+    # agent user can create/delete files regardless of host UID mapping.
+    chmod 777 "$state_dir"
+    # Best-effort: also widen any existing files owned by the current user.
+    # Files from previous container runs (owned by 525288) are silently skipped.
+    find "$state_dir" -maxdepth 1 -type f -user "$(id -u)" -exec chmod 666 {} \; 2>/dev/null || true
+
+    # Ensure identities dir exists and is writable by container user (UID mapping)
+    # The AgentChat MCP creates identity.json here on first connect; it needs write access.
+    local identities_dir="${HOME}/.agentchat/identities"
+    mkdir -p "$identities_dir"
+    chmod 777 "$identities_dir" 2>/dev/null || sudo chmod 777 "$identities_dir" 2>/dev/null || true
 
     # Save mission and runtime for restarts
     echo "$mission" > "$state_dir/mission.txt"
@@ -525,10 +555,19 @@ EOF
     mkdir -p "$gro_context"
 
     # Resolve host gateway for container→host proxy access
-    # host.lima.internal = Mac host (where agentauth proxy runs)
-    # host.containers.internal = Lima VM (wrong target for proxy)
+    # Lima VM containers: host.lima.internal = Mac host (where proxy runs)
+    # Mac local podman:   host.containers.internal = Mac host
+    # Override via AGENT_HOST_GATEWAY env var if needed.
     local host_gateway
-    host_gateway="host.lima.internal"
+    if [ -n "${AGENT_HOST_GATEWAY:-}" ]; then
+        host_gateway="$AGENT_HOST_GATEWAY"
+    elif [ -n "${CONTAINER_HOST:-}" ]; then
+        # Running containers in Lima VM — use Lima's Mac hostname
+        host_gateway="host.lima.internal"
+    else
+        # Running containers in Mac local podman — use containers hostname
+        host_gateway="host.containers.internal"
+    fi
 
     # Runtime selection
     local runtime_env=""
@@ -620,10 +659,12 @@ EOF
         ${use_gro:+-e "OPENAI_API_KEY=proxy-managed"} \
         -e "AGENTCHAT_PUBLIC=true" \
         -e "AGENTCHAT_URL=${AGENTCHAT_URL}" \
+        -e "NIKI_BUDGET=${NIKI_BUDGET:-10000000}" \
         -e "NIKI_STARTUP_TIMEOUT=${NIKI_STARTUP_TIMEOUT:-600}" \
         -e "NIKI_STALL_TIMEOUT=${NIKI_STALL_TIMEOUT:-86400}" \
         -e "NIKI_DEAD_AIR_TIMEOUT=${NIKI_DEAD_AIR_TIMEOUT:-1440}" \
         ${AGENT_MEMORY_OVERRIDE:+-e "GRO_MEMORY=${AGENT_MEMORY_OVERRIDE}"} \
+        ${use_lucidity:+-e "USE_LUCIDITY=1"} \
         $github_env \
         -e "LUCIDITY_CLAUDE_CLI=/usr/local/bin/.claude-supervisor" \
         -v "${state_dir}:/home/agent/.agentchat/agents/${name}" \
@@ -781,6 +822,78 @@ show_logs() {
         else
             echo "No logs for '$name'"
         fi
+    fi
+}
+
+log_agent() {
+    local name="$1"
+    shift
+    local lines=50
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -n) lines="$2"; shift 2 ;;
+            *) echo "ERROR: Unknown option: $1"; return 1 ;;
+        esac
+    done
+    local log_file="$AGENTS_DIR/$name/supervisor.log"
+    if [ ! -f "$log_file" ]; then
+        echo "ERROR: No log file found for agent '$name' at $log_file"
+        return 1
+    fi
+    tail -n "$lines" -f "$log_file"
+}
+
+monitor_agents() {
+    local stale_threshold=15  # minutes
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --stale-mins) stale_threshold="$2"; shift 2 ;;
+            *) echo "ERROR: Unknown option: $1"; return 1 ;;
+        esac
+    done
+
+    local now
+    now=$(date +%s)
+    local stale_seconds=$((stale_threshold * 60))
+    local found_issues=0
+
+    echo "Monitoring agents (stale threshold: ${stale_threshold} min)..."
+    echo ""
+
+    for agent_dir in "$AGENTS_DIR"/*/; do
+        [ -d "$agent_dir" ] || continue
+        local name
+        name=$(basename "$agent_dir")
+        [ "$name" = "stop" ] && continue  # skip global stop file
+        local log_file="$agent_dir/supervisor.log"
+
+        if [ ! -f "$log_file" ]; then
+            echo "WARN: $name — no log file found"
+            found_issues=1
+            continue
+        fi
+
+        local log_mtime
+        log_mtime=$(stat -c %Y "$log_file" 2>/dev/null || stat -f %m "$log_file" 2>/dev/null)
+        local age=$(( now - log_mtime ))
+
+        if [ "$age" -gt "$stale_seconds" ]; then
+            local age_mins=$(( age / 60 ))
+            echo "WARN: $name — log stale for ${age_mins} min"
+            found_issues=1
+        else
+            local age_mins=$(( age / 60 ))
+            echo "OK:   $name — log active (${age_mins} min ago)"
+        fi
+    done
+
+    echo ""
+    if [ "$found_issues" -eq 1 ]; then
+        echo "Issues detected — review agents above"
+        return 1
+    else
+        echo "All agents healthy"
+        return 0
     fi
 }
 
@@ -949,6 +1062,105 @@ restart_all() {
     echo "All mortal agents restarted."
 }
 
+# --- wormhole pipeline management ---
+
+_pipeline_launcher() {
+    # Prefer run-pipeline.sh (sets up Lima tunnel) if available; else plain pipeline.sh
+    local run_script="${PIPELINE_DIR}/run-pipeline.sh"
+    local plain_script="${PIPELINE_DIR}/pipeline.sh"
+    if [ -x "$run_script" ] && [ -S "/tmp/lima-podman.sock" ] 2>/dev/null; then
+        echo "$run_script"
+    elif [ -x "$run_script" ] && limactl list 2>/dev/null | grep -q running; then
+        echo "$run_script"
+    elif [ -x "$plain_script" ]; then
+        echo "$plain_script"
+    else
+        echo ""
+    fi
+}
+
+_pipeline_running() {
+    local pid_file="$1"
+    [ -f "$pid_file" ] && kill -0 "$(cat "$pid_file")" 2>/dev/null
+}
+
+_pipeline_start_one() {
+    local label="$1"       # "home" or "tmp"
+    local source="$2"      # /home/agent or /tmp
+    local pid_file="$3"
+    local log_file="$4"
+    local out_dir="${PIPELINE_WORMHOLE_OUT}-${label}"
+
+    if _pipeline_running "$pid_file"; then
+        echo "pipeline-${label} already running (pid $(cat "$pid_file"))"
+        return 0
+    fi
+
+    local launcher
+    launcher=$(_pipeline_launcher)
+    if [ -z "$launcher" ]; then
+        echo "ERROR: pipeline.sh not found at $PIPELINE_DIR"
+        return 1
+    fi
+
+    mkdir -p "$out_dir"
+    bash "$launcher" \
+        --source "$source" \
+        --wormhole "$out_dir" \
+        --log "$log_file" \
+        >> "$log_file" 2>&1 &
+    local pid=$!
+    echo "$pid" > "$pid_file"
+    echo "pipeline-${label} started (pid $pid, source=$source, out=$out_dir)"
+    echo "  Log: $log_file"
+}
+
+_pipeline_stop_one() {
+    local label="$1"
+    local pid_file="$2"
+
+    if _pipeline_running "$pid_file"; then
+        local pid
+        pid=$(cat "$pid_file")
+        kill "$pid" 2>/dev/null
+        echo "pipeline-${label} stopped (pid $pid)"
+    else
+        echo "pipeline-${label} not running"
+    fi
+    rm -f "$pid_file"
+}
+
+manage_pipeline() {
+    local subcmd="${1:-status}"
+    case "$subcmd" in
+        start)
+            _pipeline_start_one "home" "/home/agent" "$PIPELINE_HOME_PID" "$PIPELINE_HOME_LOG"
+            _pipeline_start_one "tmp"  "/tmp"         "$PIPELINE_TMP_PID"  "$PIPELINE_TMP_LOG"
+            ;;
+        stop)
+            _pipeline_stop_one "home" "$PIPELINE_HOME_PID"
+            _pipeline_stop_one "tmp"  "$PIPELINE_TMP_PID"
+            ;;
+        status)
+            for label in home tmp; do
+                local pid_file log_file
+                pid_file="$HOME/.agentchat/pipeline-${label}.pid"
+                log_file="$HOME/.agentchat/pipeline-${label}.log"
+                if _pipeline_running "$pid_file"; then
+                    echo "pipeline-${label}: running (pid $(cat "$pid_file"))"
+                    [ -f "$log_file" ] && echo "  Last log: $(tail -1 "$log_file" 2>/dev/null)"
+                else
+                    echo "pipeline-${label}: stopped"
+                fi
+            done
+            ;;
+        *)
+            echo "Usage: agentctl pipeline [start|stop|status]"
+            exit 1
+            ;;
+    esac
+}
+
 # Main
 case "$1" in
     setup-token)
@@ -981,11 +1193,26 @@ case "$1" in
     kill)
         kill_agent "$2"
         ;;
+    log)
+        log_agent "$2" "${@:3}"
+        ;;
+    monitor)
+        monitor_agents "${@:2}"
+        ;;
     restart)
         if is_container_running "$2"; then
             try_extract "$(container_name "$2")"
             stop_agent "$2"
-            sleep 3
+            # Wait up to 15s for container to fully exit before starting fresh
+            local _wait=0
+            while container_exists "$2" && [ $_wait -lt 15 ]; do
+                sleep 1
+                _wait=$(( _wait + 1 ))
+            done
+            if container_exists "$2"; then
+                echo "Container still exists after ${_wait}s — force removing"
+                timeout 10 podman rm -f "$(container_name "$2")" > /dev/null 2>&1 || true
+            fi
         elif container_exists "$2"; then
             podman rm -f "$(container_name "$2")" > /dev/null 2>&1
         fi
@@ -1077,6 +1304,9 @@ case "$1" in
                 exit 1
                 ;;
         esac
+        ;;
+    pipeline)
+        manage_pipeline "${2:-status}"
         ;;
     syncdaemon)
         agent_sync="${AGENT_SYNC:-$HOME/dev/claude/agent-sync-ci/agent-sync.sh}"

@@ -79,7 +79,7 @@ fi
 
 # Backoff settings
 MIN_BACKOFF=5
-MAX_BACKOFF=300
+MAX_BACKOFF=86400
 BACKOFF_MULTIPLIER=2
 
 mkdir -p "$STATE_DIR"
@@ -339,6 +339,14 @@ while true; do
         log "Agent exited cleanly (uptime: ${DURATION}s, tokens: ${NIKI_TOKENS:-?})"
         save_state "stopped" ""
         BACKOFF=$MIN_BACKOFF
+    elif [ $EXIT_CODE -eq 2 ]; then
+        log "========================================="
+        log "NON-RECOVERABLE FAILURE (exit code 2) — stopping supervisor"
+        log "Uptime: ${DURATION}s | tokens: ${NIKI_TOKENS:-?}"
+        log "========================================="
+        save_state "fatal" "exit_code=2"
+        cleanup
+        exit 2
     else
         log "Agent crashed (exit code $EXIT_CODE, uptime: ${DURATION}s, tokens: ${NIKI_TOKENS:-?})"
         if [ -f "$LOG_FILE" ] && [ $DURATION -lt 10 ]; then

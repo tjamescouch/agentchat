@@ -100,6 +100,7 @@ fi
 
 INJECT_TRANSCRIPT="${INJECT_TRANSCRIPT:-$INJECT_TRANSCRIPT_DEFAULT}"
 INJECT_MEMORY="${INJECT_MEMORY:-$INJECT_MEMORY_DEFAULT}"
+USE_LUCIDITY="${USE_LUCIDITY:-0}"
 
 PERSONALITY_DIR="${PERSONALITY_DIR:-$HOME/.claude/personalities}"
 LOG_FILE="${LOG_FILE:-$STATE_DIR/runner.log}"
@@ -162,8 +163,34 @@ log "Session #$SESSION_NUM starting (UUID: $SESSION_ID)"
 # ============ Memory Injection ============
 
 SKILL_FILE="${HOME}/.claude/agentchat.skill.md"
+LUCIDITY_TREE_FILE="${STATE_DIR}/tree.json"
 
 build_memory_context() {
+    # If USE_LUCIDITY is enabled, inject tree.json instead of skill.md
+    if [ "${USE_LUCIDITY}" = "1" ] || [ "${USE_LUCIDITY}" = "true" ]; then
+        if [ -f "$LUCIDITY_TREE_FILE" ] && [ -s "$LUCIDITY_TREE_FILE" ]; then
+            local tree_content
+            tree_content=$(cat "$LUCIDITY_TREE_FILE" 2>/dev/null)
+            if [ -n "$tree_content" ]; then
+                log "Injecting lucidity memory tree ($(echo "$tree_content" | wc -l | tr -d ' ') lines)"
+                cat <<LUCIDITY_EOF
+
+--- LUCIDITY MEMORY TREE ---
+IMPORTANT: This is your memory tree from lucidity. It contains structured knowledge
+about your identity, active work, team context, and lessons learned.
+The JSON structure has nodes with categories (identity, knowledge, work, team, lesson).
+
+$tree_content
+--- END LUCIDITY MEMORY TREE ---
+LUCIDITY_EOF
+                return
+            fi
+        else
+            log "USE_LUCIDITY=1 but tree file not found or empty: $LUCIDITY_TREE_FILE"
+        fi
+    fi
+
+    # Fallback to skill.md AGENT_MEMORY section
     if [ ! -f "$SKILL_FILE" ] || [ ! -s "$SKILL_FILE" ]; then
         return
     fi
@@ -516,6 +543,28 @@ run_cli() {
         fi
     fi
 
+    # Check for non-recoverable failures — exit 2 stops supervisor instead of restarting
+    local niki_killed_by=""
+    if [ -f "$niki_state" ]; then
+        niki_killed_by=$(python3 -c "import json; print(json.load(open('$niki_state')).get('killedBy', '') or '')" 2>/dev/null || echo "")
+    fi
+    if [ "$niki_killed_by" = "budget" ]; then
+        log "NON-RECOVERABLE: Token budget exhausted (killedBy=budget)"
+        return 2
+    fi
+    if [ -f "$LOG_FILE" ]; then
+        local recent_log
+        recent_log=$(tail -50 "$LOG_FILE" 2>/dev/null || echo "")
+        if echo "$recent_log" | grep -qiE "(401|unauthorized|invalid.*api.*key|authentication.*failed)"; then
+            log "NON-RECOVERABLE: Authentication failure detected in logs"
+            return 2
+        fi
+        if echo "$recent_log" | grep -qiE "(credit balance is too low|credit.*insufficient|Your credit balance)"; then
+            log "NON-RECOVERABLE: API credit exhaustion detected"
+            return 2
+        fi
+    fi
+
     return "$exit_code"
 }
 
@@ -705,6 +754,28 @@ run_gro() {
         if [ "$niki_duration" -lt 10 ]; then
             log "Gro session appears lost (no output in ${niki_duration}s) — clearing marker for fresh create"
             rm -f "$session_marker" "$gro_session_id_file"
+        fi
+    fi
+
+    # Check for non-recoverable failures — exit 2 stops supervisor instead of restarting
+    local niki_killed_by=""
+    if [ -f "$niki_state" ]; then
+        niki_killed_by=$(python3 -c "import json; print(json.load(open('$niki_state')).get('killedBy', '') or '')" 2>/dev/null || echo "")
+    fi
+    if [ "$niki_killed_by" = "budget" ]; then
+        log "NON-RECOVERABLE: Token budget exhausted (killedBy=budget)"
+        return 2
+    fi
+    if [ -f "$LOG_FILE" ]; then
+        local recent_log
+        recent_log=$(tail -50 "$LOG_FILE" 2>/dev/null || echo "")
+        if echo "$recent_log" | grep -qiE "(401|unauthorized|invalid.*api.*key|authentication.*failed)"; then
+            log "NON-RECOVERABLE: Authentication failure detected in logs"
+            return 2
+        fi
+        if echo "$recent_log" | grep -qiE "(credit balance is too low|credit.*insufficient|Your credit balance)"; then
+            log "NON-RECOVERABLE: API credit exhaustion detected"
+            return 2
         fi
     fi
 
