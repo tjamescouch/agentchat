@@ -163,6 +163,8 @@ export const ErrorCode = {
   INSUFFICIENT_ARBITERS: 'INSUFFICIENT_ARBITERS' as const,
   // Moderation
   BANNED: 'BANNED' as const,
+  // Lurk mode (read-only, no persistent identity or confirmation pending)
+  LURK_MODE: 'LURK_MODE' as const,
 };
 
 export const PresenceStatus = {

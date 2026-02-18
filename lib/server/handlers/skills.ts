@@ -62,6 +62,10 @@ export function handleRegisterSkills(server: AgentChatServer, ws: ExtendedWebSoc
     server._send(ws, createError(ErrorCode.SIGNATURE_REQUIRED, 'Skill registration requires persistent identity'));
     return;
   }
+  if (server._isLurking(agent)) {
+    server._send(ws, createError(ErrorCode.LURK_MODE, `New identity — skill registration unlocks at ${new Date(agent.lurkUntil!).toISOString()}`));
+    return;
+  }
 
   // Verify signature
   const sigContent = getRegisterSkillsSigningContent(msg.skills);

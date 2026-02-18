@@ -41,6 +41,15 @@ export function handleMsg(server: AgentChatServer, ws: ExtendedWebSocket, msg: M
     return;
   }
 
+  // Lurk mode: ephemeral agents and new identities within 1-hour confirmation window cannot send
+  if (server._isLurking(agent)) {
+    const reason = agent.lurkUntil
+      ? `New identity — sending unlocks at ${new Date(agent.lurkUntil).toISOString()}`
+      : 'Persistent identity required to send messages';
+    server._send(ws, createError(ErrorCode.LURK_MODE, reason));
+    return;
+  }
+
   // Rate limiting: 1 message per second per agent
   const now = Date.now();
   const lastTime = server.lastMessageTime.get(ws) || 0;

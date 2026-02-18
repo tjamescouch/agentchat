@@ -7,6 +7,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import http, { IncomingMessage, ServerResponse } from 'http';
 import https from 'https';
 import fs from 'fs';
+import path from 'path';
 import {
   ClientMessageType,
   ServerMessageType,
@@ -109,6 +110,8 @@ export interface AgentState {
   status_text?: string | null;
   connectedAt?: number;
   verified?: boolean;
+  lurk?: boolean;         // read-only: ephemeral or within 1-hour confirmation window
+  lurkUntil?: number;     // timestamp when lurk mode expires (0 = permanent/ephemeral)
 }
 
 // Pending challenge for challenge-response auth
@@ -216,6 +219,9 @@ export class AgentChatServer {
   lastMessageTime: Map<ExtendedWebSocket, number>;
   lastFileChunkTime: Map<ExtendedWebSocket, number>;
   pubkeyToId: Map<string, string>;
+  // First-seen timestamps for 1-hour confirmation window (pubkey → timestamp ms)
+  firstSeenMap: Map<string, number>;
+  firstSeenPath: string;
 
   // Idle prompt settings
   idleTimeoutMs: number;
@@ -307,6 +313,9 @@ export class AgentChatServer {
     this.lastMessageTime = new Map();
     this.lastFileChunkTime = new Map();
     this.pubkeyToId = new Map();
+    this.firstSeenMap = new Map();
+    this.firstSeenPath = path.join(process.cwd(), 'first-seen.json');
+    this._loadFirstSeen();
 
     // Idle prompt settings
     this.idleTimeoutMs = options.idleTimeoutMs || 60 * 60 * 1000; // 1 hour default
@@ -500,6 +509,35 @@ export class AgentChatServer {
       // Send with replay flag so client knows it's history
       this._send(ws, { ...msg, replay: true });
     }
+  }
+
+  _loadFirstSeen(): void {
+    try {
+      if (fs.existsSync(this.firstSeenPath)) {
+        const data = JSON.parse(fs.readFileSync(this.firstSeenPath, 'utf8'));
+        for (const [pubkey, ts] of Object.entries(data)) {
+          this.firstSeenMap.set(pubkey, ts as number);
+        }
+      }
+    } catch {
+      // Start fresh if file is corrupt
+    }
+  }
+
+  _saveFirstSeen(): void {
+    try {
+      const data: Record<string, number> = {};
+      for (const [pubkey, ts] of this.firstSeenMap.entries()) {
+        data[pubkey] = ts;
+      }
+      fs.writeFileSync(this.firstSeenPath, JSON.stringify(data, null, 2));
+    } catch {
+      // Non-fatal
+    }
+  }
+
+  _isLurking(agent: AgentState): boolean {
+    return agent.lurk === true;
   }
 
   _log(event: string, data: Record<string, unknown> = {}): void {

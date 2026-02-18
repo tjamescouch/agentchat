@@ -60,6 +60,10 @@ export function handleProposal(server: AgentChatServer, ws: ExtendedWebSocket, m
     server._send(ws, createError(ErrorCode.SIGNATURE_REQUIRED, 'Proposals require persistent identity'));
     return;
   }
+  if (server._isLurking(agent)) {
+    server._send(ws, createError(ErrorCode.LURK_MODE, `New identity — proposals unlock at ${new Date(agent.lurkUntil!).toISOString()}`));
+    return;
+  }
 
   // Verify signature
   const sigContent = getProposalSigningContent(msg);
@@ -132,6 +136,10 @@ export async function handleAccept(server: AgentChatServer, ws: ExtendedWebSocke
 
   if (!agent.pubkey) {
     server._send(ws, createError(ErrorCode.SIGNATURE_REQUIRED, 'Accepting proposals requires persistent identity'));
+    return;
+  }
+  if (server._isLurking(agent)) {
+    server._send(ws, createError(ErrorCode.LURK_MODE, `New identity — actions unlock at ${new Date(agent.lurkUntil!).toISOString()}`));
     return;
   }
 
@@ -254,6 +262,10 @@ export function handleReject(server: AgentChatServer, ws: ExtendedWebSocket, msg
     server._send(ws, createError(ErrorCode.SIGNATURE_REQUIRED, 'Rejecting proposals requires persistent identity'));
     return;
   }
+  if (server._isLurking(agent)) {
+    server._send(ws, createError(ErrorCode.LURK_MODE, `New identity — actions unlock at ${new Date(agent.lurkUntil!).toISOString()}`));
+    return;
+  }
 
   // Verify signature
   const sigContent = getRejectSigningContent(msg.proposal_id, msg.reason || '');
@@ -305,6 +317,10 @@ export async function handleComplete(server: AgentChatServer, ws: ExtendedWebSoc
 
   if (!agent.pubkey) {
     server._send(ws, createError(ErrorCode.SIGNATURE_REQUIRED, 'Completing proposals requires persistent identity'));
+    return;
+  }
+  if (server._isLurking(agent)) {
+    server._send(ws, createError(ErrorCode.LURK_MODE, `New identity — actions unlock at ${new Date(agent.lurkUntil!).toISOString()}`));
     return;
   }
 
@@ -399,6 +415,10 @@ export async function handleDispute(server: AgentChatServer, ws: ExtendedWebSock
 
   if (!agent.pubkey) {
     server._send(ws, createError(ErrorCode.SIGNATURE_REQUIRED, 'Disputing proposals requires persistent identity'));
+    return;
+  }
+  if (server._isLurking(agent)) {
+    server._send(ws, createError(ErrorCode.LURK_MODE, `New identity — actions unlock at ${new Date(agent.lurkUntil!).toISOString()}`));
     return;
   }
 
