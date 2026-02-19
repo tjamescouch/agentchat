@@ -157,6 +157,13 @@ Resume your mission: The pursuit of collective happiness."
     # Create and start God container — no real secrets passed
     podman run -d \
         --name "$CONTAINER_NAME" \
+        --cap-drop=ALL \
+        --security-opt no-new-privileges \
+        --memory=4g \
+        --memory-swap=4g \
+        --cpus=2 \
+        --pids-limit=256 \
+        --ulimit nofile=1024:2048 \
         --restart on-failure:3 \
         --label "agentchat.agent=true" \
         --label "agentchat.name=God" \
