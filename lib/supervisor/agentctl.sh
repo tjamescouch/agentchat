@@ -654,6 +654,7 @@ EOF
         ${AGENT_MEMORY_OVERRIDE:+-e "GRO_MEMORY=${AGENT_MEMORY_OVERRIDE}"} \
         ${use_lucidity:+-e "USE_LUCIDITY=1"} \
         $github_env \
+        -e "GIT_CREDENTIAL_ALLOWLIST=${GIT_CREDENTIAL_ALLOWLIST:-tjamescouch/}" \
         -e "LUCIDITY_CLAUDE_CLI=/usr/local/bin/.claude-supervisor" \
         -v "${state_dir}:/home/agent/.agentchat/agents/${name}" \
         $config_ro_mounts \
