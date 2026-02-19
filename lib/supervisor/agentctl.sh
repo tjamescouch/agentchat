@@ -389,27 +389,16 @@ start_agent() {
     local name="$1"
     shift
 
-    # Collect mission words until we hit a flag
+    # Parse all flags and collect positional words as mission.
+    # Flags can appear before, after, or mixed with mission words.
     local mission=""
-    while [ $# -gt 0 ] && [[ ! "$1" =~ ^-- ]]; do
-        if [ -n "$mission" ]; then
-            mission="$mission $1"
-        else
-            mission="$1"
-        fi
-        shift
-    done
-
     local use_gro="false"
     local use_claude_code="false"
     local use_lucidity="false"
     local agent_keys=""
+    AGENT_MODEL_OVERRIDE=""
+    AGENT_MEMORY_OVERRIDE=""
 
-    # Parse optional flags
-    if [ "$use_gro" = "true" ] && [ "$use_claude_code" = "true" ]; then
-        echo "ERROR: cannot combine --use-gro and --use-claude-code"
-        exit 1
-    fi
     while [ $# -gt 0 ]; do
         case "$1" in
             --use-gro) use_gro="true" ;;
@@ -418,10 +407,28 @@ start_agent() {
             --model) AGENT_MODEL_OVERRIDE="$2"; shift ;;
             --memory) AGENT_MEMORY_OVERRIDE="$2"; shift ;;
             --keys) agent_keys="$2"; shift ;;
-            *) echo "Unknown option: $1" ;;
+            --*) echo "Unknown option: $1" ;;
+            *)
+                # Positional word — append to mission
+                if [ -n "$mission" ]; then
+                    mission="$mission $1"
+                else
+                    mission="$1"
+                fi
+                ;;
         esac
         shift
     done
+
+    if [ "$use_gro" = "true" ] && [ "$use_claude_code" = "true" ]; then
+        echo "ERROR: cannot combine --use-gro and --use-claude-code"
+        exit 1
+    fi
+
+    # If no mission provided, try to load from saved state (for restart paths)
+    if [ -z "$mission" ] && [ -f "$AGENTS_DIR/$name/mission.txt" ]; then
+        mission=$(cat "$AGENTS_DIR/$name/mission.txt")
+    fi
 
     if [ -z "$name" ] || [ -z "$mission" ]; then
         echo "Usage: agentctl start <name> <mission> [--use-gro|--use-claude-code] [--use-lucidity] [--model MODEL] [--memory virtual] [--keys anthropic,openai,github]"
@@ -581,8 +588,6 @@ EOF
 
     if [ "$use_gro" = "true" ]; then
         runtime_env="gro"
-        # For gro with OpenAI models, point at the OpenAI backend through proxy
-        # For gro with Anthropic models, keep the anthropic backend
         local agent_model="${AGENT_MODEL_OVERRIDE:-gpt-4o}"
         model_env="$agent_model"
 
@@ -591,43 +596,22 @@ EOF
                 proxy_base_url="http://${host_gateway}:${AGENTAUTH_PORT}/openai"
                 ;;
         esac
-
-        # Note: ANTHROPIC_BASE_URL always points to /anthropic (for lucidity curation).
-        # OpenAI models use OPENAI_BASE_URL (set separately below) for the main agent.
         echo "  Runtime: gro (model: $agent_model)"
-    if [ "$use_claude_code" = "true" ]; then
+    elif [ "$use_claude_code" = "true" ]; then
         echo "  Runtime: claude-code (cli)"
-    fi
+        if [ -n "$AGENT_MODEL_OVERRIDE" ]; then
+            model_env="$AGENT_MODEL_OVERRIDE"
+        fi
+    elif [ -n "$AGENT_MODEL_OVERRIDE" ]; then
+        # Default runtime (claude-code) with model override
+        model_env="$AGENT_MODEL_OVERRIDE"
     fi
 
     # Build key-specific env vars based on --keys setting
-    # Default: agents only get keys needed for their runtime (anthropic/openai)
-    # --keys github: also gives access to GitHub via credential helper
     local github_env=""
     if echo "$agent_keys" | grep -q "github"; then
         github_env="-e AGENTAUTH_URL=http://${host_gateway}:${AGENTAUTH_PORT}"
         echo "  Keys: github (git push enabled)"
-    fi
-
-    # Runtime selection
-    local runtime_env=""
-    local model_env=""
-    local proxy_base_url="http://${host_gateway}:${AGENTAUTH_PORT}/anthropic"
-    local proxy_api_key="proxy-managed"
-
-    if [ "$use_gro" = "true" ]; then
-        runtime_env="gro"
-        # For gro with OpenAI models, point at the OpenAI backend through proxy
-        # For gro with Anthropic models, keep the anthropic backend
-        local agent_model="${AGENT_MODEL_OVERRIDE:-gpt-4o}"
-        model_env="$agent_model"
-
-        case "$agent_model" in
-            gpt-*|o1-*|o3-*|o4-*|chatgpt-*)
-                proxy_base_url="http://${host_gateway}:${AGENTAUTH_PORT}/openai"
-                ;;
-        esac
-        echo "  Runtime: gro (model: $agent_model)"
     fi
 
     # Resolve memory backend (CLI --memory > saved memory.txt > default)
@@ -1178,7 +1162,7 @@ case "$1" in
         build_image "$2"
         ;;
     start)
-        start_agent "$2" "$3" "${@:4}"
+        start_agent "${@:2}"
         ;;
     edit)
         edit_agent "$2"
