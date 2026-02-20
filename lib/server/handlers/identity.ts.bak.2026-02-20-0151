@@ -271,7 +271,7 @@ export function handleVerifyIdentity(server: AgentChatServer, ws: ExtendedWebSoc
   // Check if this ID is currently in use by another connection
   if (server.agentById.has(id)) {
     const oldWs = server.agentById.get(id)!;
-    server._log('identity_takeover', { id, reason: 'Verified connection replacing existing', new_conn: ws._connId, old_conn: oldWs._connId });
+    server._log('identity-takeover', { id, reason: 'Verified connection replacing existing' });
     server._send(oldWs, createMessage(ServerMessageType.SESSION_DISPLACED, {
       reason: 'Another connection verified this identity',
       new_ip: ws._realIp || 'unknown',
