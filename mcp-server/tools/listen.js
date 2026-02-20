@@ -3,10 +3,10 @@
  * Listens for messages by polling inbox.jsonl — the single source of truth
  * for both daemon and direct-connection modes.
  *
- * v2: Removed nudge wakeups. Always blocks for full timeout (1 hour) or until
- * a real message arrives. The old nudge system woke agents every 30s when
- * others were in the channel, burning a full model round-trip each time for
- * zero benefit. Now the model only wakes on actual messages.
+ * v3: Configurable timeout (default 60s, was 1 hour). Reduced settle window
+ * (1.5s, was 5s). Conditional channel joins (skip already-joined).
+ * Replay messages now accepted if newer than lastSeen cursor (fixes message
+ * loss on reconnect — see connect.js).
  */
 
 import { z } from 'zod';
@@ -15,13 +15,15 @@ import path from 'path';
 import { getDaemonPaths } from '@tjamescouch/agentchat/lib/daemon.js';
 import { addJitter } from '@tjamescouch/agentchat/lib/jitter.js';
 import { ClientMessageType } from '@tjamescouch/agentchat/lib/protocol.js';
-import { client, getLastSeen, updateLastSeen, incrementIdleCount, resetIdleCount, trackChannel } from '../state.js';
+import { client, getLastSeen, updateLastSeen, incrementIdleCount, resetIdleCount, trackChannel, joinedChannels } from '../state.js';
 
-// Timeouts - agent cannot override these
-const ENFORCED_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour — always used, regardless of channel occupancy
-const POLL_INTERVAL_MS = 500; // fallback poll interval
+// Timeout bounds
+const DEFAULT_TIMEOUT_S = 60;    // default listen timeout in seconds
+const MIN_TIMEOUT_S = 5;         // minimum allowed timeout
+const MAX_TIMEOUT_S = 3600;      // maximum allowed timeout (1 hour)
+const POLL_INTERVAL_MS = 500;    // fallback poll interval
 const HEARTBEAT_INTERVAL_MS = 30 * 1000; // heartbeat file write interval
-const SETTLE_MS = parseInt(process.env.AGENTCHAT_SETTLE_MS || '5000', 10);
+const SETTLE_MS = parseInt(process.env.AGENTCHAT_SETTLE_MS || '1500', 10);
 // Response size limits — prevent listen from returning enormous payloads
 const MAX_LISTEN_MESSAGES = 50; // max messages per listen response
 const MAX_RESPONSE_CHARS = 32000; // hard cap on JSON response size (~32KB)
@@ -157,12 +159,13 @@ function capMessages(messages) {
 export function registerListenTool(server) {
   server.tool(
     'agentchat_listen',
-    'Listen for messages - blocks up to 1 hour until a real message arrives. No empty nudge wakeups. Use tail parameter to return last N messages immediately without blocking (efficient polling mode).',
+    'Listen for messages - blocks until a message arrives or timeout (default 60s, max 3600s). Use tail parameter to return last N messages immediately without blocking (efficient polling mode). Use timeout parameter to control responsiveness.',
     {
       channels: z.array(z.string()).describe('Channels to listen on (e.g., ["#general"])'),
-      tail: z.number().optional().describe('Return last N messages immediately without blocking. Reads only the tail of the inbox file for efficiency.'),
+      tail: z.number().optional().describe('Return last N messages immediately without blocking. Reads only the tail of the inbox file for efficiency. Note: advances the read cursor, so subsequent listen calls will not re-return these messages.'),
+      timeout: z.number().optional().describe('Max seconds to wait for messages (default: 60, min: 5, max: 3600). Controls how long listen blocks before returning empty.'),
     },
-    async ({ channels, tail }) => {
+    async ({ channels, tail, timeout }) => {
       try {
         if (!client || !client.connected) {
           return {
@@ -174,11 +177,13 @@ export function registerListenTool(server) {
         const startTime = Date.now();
         const paths = getDaemonPaths('default');
 
-        // Join/rejoin channels for presence (replays now go straight to inbox
-        // via the connect handler's message listener)
+        // Join channels not yet joined. Skip already-joined to avoid
+        // unnecessary server round-trips and replay processing.
         for (const channel of channels) {
-          await client.join(channel);
-          trackChannel(channel); // Track for auto-reconnect (P1-LISTEN-1)
+          if (!joinedChannels.has(channel)) {
+            await client.join(channel);
+            trackChannel(channel);
+          }
         }
 
         // --- Tail mode: return last N messages immediately, no blocking ---
@@ -309,8 +314,11 @@ export function registerListenTool(server) {
             tryRead();
           }, POLL_INTERVAL_MS);
 
-          // Always block for the full timeout — no nudge wakeups
-          const actualTimeout = addJitter(ENFORCED_TIMEOUT_MS, 0.1);
+          // Compute timeout: use agent-provided value (clamped) or default
+          const timeoutSec = timeout
+            ? Math.max(MIN_TIMEOUT_S, Math.min(MAX_TIMEOUT_S, timeout))
+            : DEFAULT_TIMEOUT_S;
+          const actualTimeout = addJitter(timeoutSec * 1000, 0.1);
 
           // Heartbeat file for deadlock detection + stderr for stall prevention
           const heartbeatPath = path.join(newdataDir, 'heartbeat');
@@ -340,6 +348,7 @@ export function registerListenTool(server) {
                 text: JSON.stringify({
                   messages: [],
                   timeout: true,
+                  timeout_s: timeoutSec,
                   elapsed_ms: Date.now() - startTime,
                 }),
               }],

@@ -10,7 +10,7 @@ import path from 'path';
 import {
   client, keepaliveInterval,
   setClient, setServerUrl, setKeepaliveInterval,
-  resetLastSeen,
+  resetLastSeen, getLastSeen,
   DEFAULT_SERVER_URL, KEEPALIVE_INTERVAL_MS, PONG_STALE_MS,
   RECONNECT_MAX_ATTEMPTS, RECONNECT_BASE_DELAY_MS, RECONNECT_MAX_DELAY_MS,
   recordPong, isConnectionHealthy, lastPongTime,
@@ -60,9 +60,16 @@ function getIdentityPath(name) {
  */
 function wireMessageHandlers(targetClient) {
   targetClient.on('message', (msg) => {
-    // Skip own messages, server noise, and channel replays (P3-LISTEN-7)
+    // Skip own messages and server noise
     if (msg.from === targetClient.agentId || msg.from === '@server') return;
-    if (msg.replay) return;
+
+    // For replay messages (sent on channel rejoin), only accept those newer
+    // than our last-seen cursor. Recovers messages missed during disconnect
+    // gaps while deduplicating already-processed messages.
+    if (msg.replay) {
+      const lastSeen = getLastSeen();
+      if (!msg.ts || msg.ts <= lastSeen) return;
+    }
 
     // Intercept file transfer protocol messages
     if (msg.content) {
