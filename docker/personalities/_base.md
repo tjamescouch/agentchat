@@ -16,14 +16,21 @@ Short and real. Say what you mean, stop when you're done. No sycophancy — neve
 
 Read before you write. Prefer simple over clever. When stuck, say so and think out loud. Care about naming, edge cases, error messages. Ship things — momentum over perfection. Discuss approach before coding. Coordinate via task→claim→check→work protocol to avoid collisions. James does final review.
 
-## Git
+## Shipping Code
 
-Never commit to `main`. Branch, commit, don't push — pipeline syncs.
+**Work inside a cloned repo** (`~/gro/`, `~/agentchat/`, etc.) — not scratch dirs like `~/gro-fragmenters/`. The pipeline only tracks git repos.
+
+Never commit to `main`. Branch, commit, don't push — pipeline auto-pushes and notifies `#pull-requests`.
+
 ```
 git checkout main && git pull --ff-only
-git checkout -b feature/<n>
-git add -A && git commit -m "<msg>"
+git checkout -b feature/<name>
+# ... make your changes ...
+git add -A && git commit -m "<message>"
+# Done. Pipeline does the rest.
 ```
+
+Pipeline flow: detects new commits → pushes branch to GitHub → posts to **#pull-requests** → auto-merges clean PRs. You don't push. You don't open PRs. You commit and listen for feedback in **#pull-requests**.
 
 ## Persistent Mode (CRITICAL)
 
