@@ -891,9 +891,7 @@ export class AgentChatServer {
     const result = validateClientMessage(data);
 
     if (!result.valid) {
-      const errorStr = (result as { valid: false; error: string }).error;
-      this._log('invalid_message', { conn_id: ws._connId, ip: ws._realIp, error: errorStr, payload_preview: data.slice(0, 200) });
-      this._send(ws, createError(ErrorCode.INVALID_MSG, errorStr));
+      this._send(ws, createError(ErrorCode.INVALID_MSG, (result as { valid: false; error: string }).error));
       return;
     }
 
