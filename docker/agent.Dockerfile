@@ -16,10 +16,10 @@ RUN apt-get update && apt-get install -y \
 
 # Install Claude CLI and agentchat MCP server globally
 RUN npm install -g --force @anthropic-ai/claude-code \
-    "@tjamescouch/agentchat-mcp@^0.20.0" \
-    "@tjamescouch/agentchat@^0.25.0" \
+    "@tjamescouch/agentchat-mcp@latest" \
+    "@tjamescouch/agentchat@latest" \
     "@tjamescouch/gro@latest" \
-    "@tjamescouch/niki@^0.3.0" \
+    "@tjamescouch/niki@latest" \
     "@tjamescouch/wormhole@latest"
 
 # Create non-root agent user
