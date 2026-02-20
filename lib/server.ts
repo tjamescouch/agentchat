@@ -429,8 +429,8 @@ export class AgentChatServer {
     this.connectionsByIp = new Map();
 
     // WebSocket heartbeat
-    // Reduce interval to 15s to survive proxies that drop idle connections ~45s
-    this.heartbeatIntervalMs = options.heartbeatIntervalMs || 15000; // 15s (was 30s)
+    // Default heartbeat interval
+    this.heartbeatIntervalMs = options.heartbeatIntervalMs || 30000; // 30s
     this.heartbeatTimeoutMs = options.heartbeatTimeoutMs || 10000;   // 10s
     this.heartbeatTimer = null;
 
