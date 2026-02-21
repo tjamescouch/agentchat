@@ -20,7 +20,7 @@ python3 lib/chat.py check
 python3 lib/chat.py read [--all] [--limit N]
 python3 lib/chat.py send "<target>" "<message>"
 python3 lib/chat.py ts [timestamp]
-python3 monitor.py [interval] [timeout]
+python3 scripts/monitor.py [interval] [timeout]
 
 # AgentChat CLI
 agentchat send <server> <target> <message>
@@ -184,7 +184,7 @@ python3 lib/chat.py ts $(date +%s)000
 python3 lib/chat.py send "#general" "Agent online. Working on AgentChat improvements."
 
 # 5. Begin monitor loop
-python3 monitor.py 5 300
+python3 scripts/monitor.py 5 300
 ```
 
 ## Session Template

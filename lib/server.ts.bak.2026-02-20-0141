@@ -35,7 +35,6 @@ import { Banlist } from './banlist.js';
 import { Redactor } from './redactor.js';
 import { CallbackQueue, type CallbackEntry } from './callback-engine.js';
 import { FloorControl } from './floor-control.js';
-import { CaptchaConfig, loadCaptchaConfig } from './captcha.js';
 
 // Import extracted handlers
 import {
@@ -90,9 +89,6 @@ import {
   handleAdminBan,
   handleAdminUnban,
 } from './server/handlers/ban.js';
-import {
-  handleCaptchaResponse,
-} from './server/handlers/captcha.js';
 
 // Extended WebSocket with custom properties
 interface ExtendedWebSocket extends WebSocket {
@@ -102,7 +98,6 @@ interface ExtendedWebSocket extends WebSocket {
   _connId?: string;
   _msgTimestamps?: number[];
   _isAlive?: boolean;
-  _lastPong?: number;
 }
 
 // Agent info stored per connection
@@ -128,24 +123,6 @@ export interface PendingChallenge {
   nonce: string;
   challengeId: string;
   expires: number;
-}
-
-// Pending captcha challenge
-export interface PendingCaptcha {
-  ws: ExtendedWebSocket;
-  captchaId: string;
-  question: string;
-  answer: string;
-  alternates?: string[];
-  expires: number;
-  attempts: number;
-  // Registration context
-  name: string;
-  pubkey: string | null;
-  id: string | null;
-  isApproved: boolean;
-  isNew: boolean;
-  lurkUntil: number;
 }
 
 // Channel state
@@ -280,10 +257,6 @@ export class AgentChatServer {
   pendingChallenges: Map<string, PendingChallenge>;
   challengeTimeoutMs: number;
 
-  // Captcha
-  captchaConfig: CaptchaConfig;
-  pendingCaptchas: Map<string, PendingCaptcha>;
-
   // Anti-sybil
   minProposalAgeMs: number;
 
@@ -410,10 +383,6 @@ export class AgentChatServer {
       || parseInt(process.env.CHALLENGE_TIMEOUT_MS || '', 10)
       || 60000;
 
-    // Captcha
-    this.captchaConfig = loadCaptchaConfig();
-    this.pendingCaptchas = new Map();
-
     // Anti-sybil
     this.minProposalAgeMs = options.minProposalAgeMs ?? 60000;
 
@@ -459,7 +428,6 @@ export class AgentChatServer {
     this.connectionsByIp = new Map();
 
     // WebSocket heartbeat
-    // Default heartbeat interval
     this.heartbeatIntervalMs = options.heartbeatIntervalMs || 30000; // 30s
     this.heartbeatTimeoutMs = options.heartbeatTimeoutMs || 10000;   // 10s
     this.heartbeatTimer = null;
@@ -710,7 +678,6 @@ export class AgentChatServer {
       // WS-level pong handler for heartbeat
       ws.on('pong', () => {
         ws._isAlive = true;
-        ws._lastPong = Date.now();
       });
 
       this._log('connection', {
@@ -746,18 +713,6 @@ export class AgentChatServer {
             this.pendingChallenges.delete(challengeId);
             this._log('challenge_abandoned', {
               challengeId,
-              ip: ws._realIp,
-              reason: 'websocket_closed'
-            });
-          }
-        }
-
-        // Clean up any pending captchas for this ws
-        for (const [captchaId, captcha] of this.pendingCaptchas) {
-          if (captcha.ws === ws) {
-            this.pendingCaptchas.delete(captchaId);
-            this._log('captcha_abandoned', {
-              captchaId,
               ip: ws._realIp,
               reason: 'websocket_closed'
             });
@@ -800,25 +755,19 @@ export class AgentChatServer {
     // Start WebSocket heartbeat — detect and clean up zombie connections
     this.heartbeatTimer = setInterval(() => {
       if (!this.wss) return;
-      const now = Date.now();
       this.wss.clients.forEach((ws: WebSocket) => {
         const ews = ws as ExtendedWebSocket;
-        // If we haven't seen a pong in 2x heartbeat interval, consider connection stale
-        const lastPong = ews._lastPong || ews._connectedAt || 0;
-        if (now - lastPong > (this.heartbeatIntervalMs * 2 + this.heartbeatTimeoutMs)) {
+        if (ews._isAlive === false) {
           this._log('heartbeat_timeout', {
             ip: ews._realIp,
             agent: this.agents.get(ews)?.id,
-            conn_id: ews._connId,
-            last_pong_ms: lastPong ? now - lastPong : null
+            conn_id: ews._connId
           });
           this._handleDisconnect(ews);
-          try { return ews.terminate(); } catch {}
+          return ews.terminate();
         }
-
-        // Send a ping and record send time for correlation
+        ews._isAlive = false;
         try {
-          ews._isAlive = false;
           ews.ping();
         } catch (err) {
           this._log('heartbeat_ping_error', { error: err instanceof Error ? { message: err.message, stack: err.stack } : String(err), conn_id: ews._connId, ip: ews._realIp });
@@ -942,9 +891,7 @@ export class AgentChatServer {
     const result = validateClientMessage(data);
 
     if (!result.valid) {
-      const errorStr = (result as { valid: false; error: string }).error;
-      this._log('invalid_message', { conn_id: ws._connId, ip: ws._realIp, error: errorStr, payload_preview: data.slice(0, 200) });
-      this._send(ws, createError(ErrorCode.INVALID_MSG, errorStr));
+      this._send(ws, createError(ErrorCode.INVALID_MSG, (result as { valid: false; error: string }).error));
       return;
     }
 
@@ -1041,10 +988,6 @@ export class AgentChatServer {
       // Challenge-response auth
       case ClientMessageType.VERIFY_IDENTITY:
         handleVerifyIdentity(this, ws, msg);
-        break;
-      // Captcha response
-      case ClientMessageType.CAPTCHA_RESPONSE:
-        handleCaptchaResponse(this, ws, msg);
         break;
       // Nick
       case ClientMessageType.SET_NICK:

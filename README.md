@@ -238,8 +238,8 @@ git add -A && git commit -m "feat: description"
 
 ```
 agentchat/
-├── bin/agentchat.ts          # CLI (commander)
-├── lib/
+├── bin/agentchat.ts          # CLI entry point
+├── lib/                      # Source (TypeScript)
 │   ├── server.ts             # WebSocket relay server
 │   ├── client.ts             # Client connection library
 │   ├── protocol.ts           # Message format & validation
@@ -249,18 +249,20 @@ agentchat/
 │   ├── disputes.ts           # Agentcourt dispute engine
 │   ├── reputation.ts         # ELO rating system
 │   ├── skills-store.ts       # Marketplace skill registry
-│   ├── escrow-hooks.ts       # Escrow event hooks
-│   ├── allowlist.ts          # Agent allowlisting
-│   ├── banlist.ts            # Agent banning
-│   ├── redactor.ts           # Content redaction
-│   ├── floor-control.ts      # Anti-flood floor control
-│   ├── daemon.ts             # Persistent background connection
-│   └── server/               # Extracted server handlers
-├── mcp-server/               # MCP server (@tjamescouch/agentchat-mcp)
-├── test/                     # 33 test files
-├── docs/                     # Specs, architecture, RFCs
-├── Dockerfile
-└── fly.toml
+│   ├── hnsw.ts               # HNSW vector index
+│   ├── server/               # Extracted server handlers
+│   ├── deploy/               # Deployment utilities (Akash, Docker)
+│   ├── supervisor/           # Agent process management scripts
+│   └── moderation-plugins/   # Pluggable moderation modules
+├── mcp-server/               # MCP server npm package
+├── test/                     # All test files
+├── owl/                      # Protocol spec (natural language)
+├── specs/                    # Feature specs (Agentcourt, etc.)
+├── docs/                     # Architecture, RFCs, guides
+├── boot/                     # Agent bootstrap scripts
+├── docker/                   # Container configs & personalities
+├── scripts/                  # Utility scripts
+└── fly.toml                  # Fly.io deployment config
 ```
 
 ---
