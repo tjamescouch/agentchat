@@ -252,6 +252,16 @@ build_system_prompt() {
         log "Loaded base personality"
     fi
 
+    # Load per-agent personality overlay if it exists (e.g., personalities/Sam.md)
+    local agent_personality="$PERSONALITY_DIR/${AGENT_NAME}.md"
+    if [ -f "$agent_personality" ]; then
+        prompt="${prompt}
+
+---
+$(cat "$agent_personality")"
+        log "Loaded agent personality: $AGENT_NAME"
+    fi
+
     # Public server IP disclaimer — only included when AGENTCHAT_PUBLIC is set
     if [ "${AGENTCHAT_PUBLIC:-}" = "true" ]; then
         local disclaimer="
