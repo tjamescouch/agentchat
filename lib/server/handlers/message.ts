@@ -141,13 +141,10 @@ export function handleMsg(server: AgentChatServer, ws: ExtendedWebSocket, msg: M
       redacted: true
     });
 
-    // Create a redacted copy for logging/storage where needed
-    const redactedOut = { ...outMsg, content: '[redacted]', _redacted: true } as any;
-
     // Send to target (full message)
     server._send(targetWs, outMsg);
-    // Echo back to sender (redacted echo to avoid logging content on client side)
-    server._send(ws, redactedOut);
+    // Echo back to sender (full content — sender already knows what they sent)
+    server._send(ws, outMsg);
   }
 }
 
