@@ -916,6 +916,75 @@ export class ReputationStore {
   }
 
   /**
+   * Get leaderboard for a specific skill
+   * @param capability - Skill to rank (e.g., "code_review", "data_analysis")
+   * @param limit - Max entries (default: 50)
+   */
+  async getSkillLeaderboard(capability: string, limit: number = 50): Promise<LeaderboardEntry[]> {
+    await this._ensureLoaded();
+
+    const entries: LeaderboardEntry[] = [];
+
+    for (const [id, data] of Object.entries(this._ratings!)) {
+      if (data.skills && data.skills[capability]) {
+        const skill = data.skills[capability];
+        entries.push({
+          agentId: id,
+          rating: skill.rating,
+          transactions: skill.transactions,
+          updated: skill.updated
+        });
+      }
+    }
+
+    return entries
+      .sort((a, b) => b.rating - a.rating)
+      .slice(0, limit);
+  }
+
+  /**
+   * Get all skills across all agents (for discovery)
+   */
+  async getAllSkills(): Promise<Set<string>> {
+    await this._ensureLoaded();
+    const skills = new Set<string>();
+
+    for (const data of Object.values(this._ratings!)) {
+      if (data.skills) {
+        for (const skill of Object.keys(data.skills)) {
+          skills.add(skill);
+        }
+      }
+    }
+
+    return skills;
+  }
+
+  /**
+   * Get agent rating with skill breakdown
+   */
+  async getDetailedRating(agentId: string): Promise<any> {
+    const overall = await this.getRating(agentId);
+    const skills = await this.getSkillsForAgent(agentId);
+    
+    return {
+      agentId: overall.agentId,
+      overall: {
+        rating: overall.rating,
+        transactions: overall.transactions,
+        updated: overall.updated
+      },
+      skills: Object.entries(skills).map(([capability, data]) => ({
+        capability,
+        rating: data.rating,
+        transactions: data.transactions,
+        updated: data.updated
+      })),
+      isNew: overall.isNew
+    };
+  }
+
+  /**
    * Recalculate all ratings from receipt history
    *
    * @param receipts - Array of receipts to process
