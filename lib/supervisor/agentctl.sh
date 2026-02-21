@@ -352,6 +352,7 @@ Examples:
   agentctl start monitor "monitor agentchat #general and moderate"
   agentctl start social "manage moltx and moltbook social media"
   agentctl start jessie "You are James's friend" --use-gro  # Uses gro runtime
+  agentctl start jessie "You are James's friend" --use-claude-code  # Claude Code CLI runtime
   agentctl start sam "..." --use-gro --memory virtual       # Uses VirtualMemory paging
   agentctl edit jessie
   agentctl stop monitor
@@ -498,9 +499,15 @@ start_agent() {
     chmod 777 "$identities_dir" 2>/dev/null || sudo chmod 777 "$identities_dir" 2>/dev/null || true
 
     # Save mission and runtime for restarts
+    if [ "$use_gro" = "true" ] && [ "$use_claude_code" = "true" ]; then
+        echo "ERROR: choose only one of --use-gro or --use-claude-code"
+        exit 1
+    fi
     echo "$mission" > "$state_dir/mission.txt"
     if [ "$use_gro" = "true" ]; then
         echo "gro" > "$state_dir/runtime.txt"
+    elif [ "$use_claude_code" = "true" ]; then
+        echo "cli" > "$state_dir/runtime.txt"
     else
         rm -f "$state_dir/runtime.txt"
     fi
@@ -586,6 +593,19 @@ EOF
     local proxy_base_url="http://${host_gateway}:${AGENTAUTH_PORT}/anthropic"
     local proxy_api_key="proxy-managed"
 
+
+    # Default runtime: gro (runner default). Claude Code is opt-in via runtime.txt=cli or --use-claude-code.
+    if [ "$use_claude_code" = "true" ]; then
+        runtime_env="cli"
+        export USE_CLAUDE_CODE=1
+        echo "  Runtime: claude-code (CLI)"
+    elif [ -f "$state_dir/runtime.txt" ] && [ "$(cat "$state_dir/runtime.txt" 2>/dev/null)" = "cli" ]; then
+        runtime_env="cli"
+        export USE_CLAUDE_CODE=1
+        echo "  Runtime: claude-code (CLI)"
+    fi
+
+
     if [ "$use_gro" = "true" ]; then
         runtime_env="gro"
         local agent_model="${AGENT_MODEL_OVERRIDE:-gpt-4o}"
@@ -648,7 +668,7 @@ EOF
         $labels \
         -e "ANTHROPIC_BASE_URL=${proxy_base_url}" \
         -e "ANTHROPIC_API_KEY=${proxy_api_key}" \
-        ${runtime_env:+-e "AGENT_RUNTIME=${runtime_env}"} \
+        ${runtime_env:+-e "AGENT_RUNTIME=${runtime_env}"} ${USE_CLAUDE_CODE:+-e "USE_CLAUDE_CODE=${USE_CLAUDE_CODE}"} \
         ${model_env:+-e "AGENT_MODEL=${model_env}"} \
         ${use_gro:+-e "OPENAI_BASE_URL=http://${host_gateway}:${AGENTAUTH_PORT}/openai"} \
         ${use_gro:+-e "OPENAI_API_KEY=proxy-managed"} \
