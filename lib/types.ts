@@ -42,6 +42,8 @@ export enum ClientMessageType {
   RESPONDING_TO = 'RESPONDING_TO',
   // Moderation
   ADMIN_KICK = 'ADMIN_KICK',
+  // Captcha
+  CAPTCHA_RESPONSE = 'CAPTCHA_RESPONSE',
   ADMIN_BAN = 'ADMIN_BAN',
   ADMIN_UNBAN = 'ADMIN_UNBAN',
   ADMIN_MOTD = 'ADMIN_MOTD',
@@ -95,7 +97,9 @@ export enum ServerMessageType {
   BANNED = 'BANNED',
   MOTD_UPDATE = 'MOTD_UPDATE',
   // File transfer
-  FILE_CHUNK = 'FILE_CHUNK'
+  FILE_CHUNK = 'FILE_CHUNK',
+  // Captcha
+  CAPTCHA_CHALLENGE = 'CAPTCHA_CHALLENGE'
 }
 
 export enum ErrorCode {
@@ -118,7 +122,9 @@ export enum ErrorCode {
   VERIFICATION_EXPIRED = 'VERIFICATION_EXPIRED',
   NO_PUBKEY = 'NO_PUBKEY',
   NOT_ALLOWED = 'NOT_ALLOWED',
-  BANNED = 'BANNED'
+  BANNED = 'BANNED',
+  CAPTCHA_FAILED = 'CAPTCHA_FAILED',
+  CAPTCHA_EXPIRED = 'CAPTCHA_EXPIRED'
 }
 
 export enum PresenceStatus {
@@ -437,6 +443,12 @@ export interface RespondingToMessage extends BaseMessage {
   started_at: number;
 }
 
+export interface CaptchaResponseMessage extends BaseMessage {
+  type: ClientMessageType.CAPTCHA_RESPONSE;
+  captcha_id: string;
+  answer: string;
+}
+
 export type ClientMessage =
   | IdentifyMessage
   | JoinMessage
@@ -474,7 +486,8 @@ export type ClientMessage =
   | AdminBanMessage
   | AdminUnbanMessage
   | AdminMotdMessage
-  | FileChunkMessage;
+  | FileChunkMessage
+  | CaptchaResponseMessage;
 
 // ============ Server Messages ============
 
@@ -717,7 +730,18 @@ export type ServerMessage =
   | NickChangedMessage
   | SessionDisplacedMessage
   | SettlementCompleteMessage
-  | ServerFileChunkMessage;
+  | ServerFileChunkMessage
+  | CaptchaChallengeServerMessage;
+
+// ============ Captcha Server Message ============
+
+export interface CaptchaChallengeServerMessage extends BaseMessage {
+  type: ServerMessageType.CAPTCHA_CHALLENGE;
+  captcha_id: string;
+  question: string;
+  hint?: string;
+  expires_at: number;
+}
 
 // ============ Validation Result ============
 

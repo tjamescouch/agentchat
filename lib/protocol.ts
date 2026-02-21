@@ -67,6 +67,8 @@ export const ClientMessageType = {
   FILE_CHUNK: 'FILE_CHUNK' as const,
   // Floor control
   RESPONDING_TO: 'RESPONDING_TO' as const,
+  // Captcha
+  CAPTCHA_RESPONSE: 'CAPTCHA_RESPONSE' as const,
 };
 
 export const ServerMessageType = {
@@ -126,6 +128,8 @@ export const ServerMessageType = {
   // Floor control
   YIELD: 'YIELD' as const,
   FLOOR_CLAIMED: 'FLOOR_CLAIMED' as const,
+  // Captcha
+  CAPTCHA_CHALLENGE: 'CAPTCHA_CHALLENGE' as const,
 };
 
 export const ErrorCode = {
@@ -165,6 +169,9 @@ export const ErrorCode = {
   BANNED: 'BANNED' as const,
   // Lurk mode (read-only, no persistent identity or confirmation pending)
   LURK_MODE: 'LURK_MODE' as const,
+  // Captcha
+  CAPTCHA_FAILED: 'CAPTCHA_FAILED' as const,
+  CAPTCHA_EXPIRED: 'CAPTCHA_EXPIRED' as const,
 };
 
 export const PresenceStatus = {
@@ -298,6 +305,8 @@ interface RawClientMessage {
   note?: string;
   agent_id?: string;
   challenge_id?: string;
+  captcha_id?: string;
+  answer?: string;
   signature?: string;
   timestamp?: number;
   nick?: string;
@@ -728,6 +737,15 @@ export function validateClientMessage(raw: string | RawClientMessage): Validatio
       }
       break;
 
+    case ClientMessageType.CAPTCHA_RESPONSE:
+      if (!msg.captcha_id || typeof msg.captcha_id !== 'string') {
+        return { valid: false, error: 'Missing or invalid captcha_id' };
+      }
+      if (!msg.answer || typeof msg.answer !== 'string') {
+        return { valid: false, error: 'Missing or invalid answer' };
+      }
+      break;
+
     default:
       return { valid: false, error: `Unknown message type: ${msg.type}` };
   }
@@ -834,4 +852,14 @@ export function generateChallengeId(): string {
  */
 export function generateAuthSigningContent(nonce: string, challengeId: string, timestamp: number): string {
   return `AGENTCHAT_AUTH|${nonce}|${challengeId}|${timestamp}`;
+}
+
+/**
+ * Generate a unique captcha ID
+ * Format: captcha_<timestamp36>_<random>
+ */
+export function generateCaptchaId(): string {
+  const timestamp = Date.now().toString(36);
+  const random = crypto.randomBytes(4).toString('hex');
+  return `captcha_${timestamp}_${random}`;
 }

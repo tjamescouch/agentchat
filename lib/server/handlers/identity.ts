@@ -25,6 +25,7 @@ import {
   pubkeyToAgentId,
 } from '../../protocol.js';
 import { Identity } from '../../identity.js';
+import { sendCaptchaChallenge, completeRegistration } from './captcha.js';
 
 // Extended WebSocket with custom properties
 interface ExtendedWebSocket extends WebSocket {
@@ -119,6 +120,12 @@ export function handleIdentify(server: AgentChatServer, ws: ExtendedWebSocket, m
     }));
   } else {
     // Ephemeral agent: lurk-only (read/listen, no send)
+    // Gate through captcha if enabled
+    if (server.captchaConfig.enabled) {
+      sendCaptchaChallenge(server, ws, { name: msg.name });
+      return;
+    }
+
     const id = generateAgentId();
 
     const agent = {
@@ -267,6 +274,20 @@ export function handleVerifyIdentity(server: AgentChatServer, ws: ExtendedWebSoc
   const isNew = (now - firstSeen) < CONFIRMATION_MS;
   const lurkUntil = isNew ? (firstSeen + CONFIRMATION_MS) : 0;
 
+  // Captcha gate: if enabled and not allowlisted, send captcha before completing registration
+  if (server.captchaConfig.enabled && !(server.captchaConfig.skipAllowlisted && isApproved)) {
+    sendCaptchaChallenge(server, ws, {
+      name: challenge.name,
+      pubkey: challenge.pubkey,
+      id,
+      isApproved,
+      isNew,
+      lurkUntil,
+    });
+    return;
+  }
+
+  // No captcha needed — complete registration directly
   const agent = {
     id,
     name: challenge.name,

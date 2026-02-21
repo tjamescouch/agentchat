@@ -35,6 +35,7 @@ import { Banlist } from './banlist.js';
 import { Redactor } from './redactor.js';
 import { CallbackQueue, type CallbackEntry } from './callback-engine.js';
 import { FloorControl } from './floor-control.js';
+import { CaptchaConfig, loadCaptchaConfig } from './captcha.js';
 
 // Import extracted handlers
 import {
@@ -89,6 +90,9 @@ import {
   handleAdminBan,
   handleAdminUnban,
 } from './server/handlers/ban.js';
+import {
+  handleCaptchaResponse,
+} from './server/handlers/captcha.js';
 
 // Extended WebSocket with custom properties
 interface ExtendedWebSocket extends WebSocket {
@@ -122,6 +126,24 @@ export interface PendingChallenge {
   nonce: string;
   challengeId: string;
   expires: number;
+}
+
+// Pending captcha challenge
+export interface PendingCaptcha {
+  ws: ExtendedWebSocket;
+  captchaId: string;
+  question: string;
+  answer: string;
+  alternates?: string[];
+  expires: number;
+  attempts: number;
+  // Registration context
+  name: string;
+  pubkey: string | null;
+  id: string | null;
+  isApproved: boolean;
+  isNew: boolean;
+  lurkUntil: number;
 }
 
 // Channel state
@@ -256,6 +278,10 @@ export class AgentChatServer {
   pendingChallenges: Map<string, PendingChallenge>;
   challengeTimeoutMs: number;
 
+  // Captcha
+  captchaConfig: CaptchaConfig;
+  pendingCaptchas: Map<string, PendingCaptcha>;
+
   // Anti-sybil
   minProposalAgeMs: number;
 
@@ -381,6 +407,10 @@ export class AgentChatServer {
     this.challengeTimeoutMs = options.challengeTimeoutMs
       || parseInt(process.env.CHALLENGE_TIMEOUT_MS || '', 10)
       || 60000;
+
+    // Captcha
+    this.captchaConfig = loadCaptchaConfig();
+    this.pendingCaptchas = new Map();
 
     // Anti-sybil
     this.minProposalAgeMs = options.minProposalAgeMs ?? 60000;
@@ -694,6 +724,18 @@ export class AgentChatServer {
           }
         }
 
+        // Clean up any pending captchas for this ws
+        for (const [captchaId, captcha] of this.pendingCaptchas) {
+          if (captcha.ws === ws) {
+            this.pendingCaptchas.delete(captchaId);
+            this._log('captcha_abandoned', {
+              captchaId,
+              ip: ws._realIp,
+              reason: 'websocket_closed'
+            });
+          }
+        }
+
         // Log if connection closed without ever identifying (drive-by)
         if (!this.agents.has(ws)) {
           const duration = ws._connectedAt ? Math.round((Date.now() - ws._connectedAt) / 1000) : 0;
@@ -953,6 +995,10 @@ export class AgentChatServer {
       // Challenge-response auth
       case ClientMessageType.VERIFY_IDENTITY:
         handleVerifyIdentity(this, ws, msg);
+        break;
+      // Captcha response
+      case ClientMessageType.CAPTCHA_RESPONSE:
+        handleCaptchaResponse(this, ws, msg);
         break;
       // Nick
       case ClientMessageType.SET_NICK:
