@@ -93,6 +93,7 @@ export function handleProposal(server: AgentChatServer, ws: ExtendedWebSocket, m
     currency: msg.currency,
     payment_code: (msg as ProposalMessage & { payment_code?: string }).payment_code,
     terms: msg.terms,
+    capability: msg.capability || null,
     expires: msg.expires,
     sig: msg.sig,
     elo_stake: msg.elo_stake || null

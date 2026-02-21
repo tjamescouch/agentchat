@@ -20,7 +20,15 @@ export interface RatingRecord {
   rating: number;
   transactions: number;
   updated: string | null;
+  skills?: Record<string, SkillRating>;  // NEW: Per-skill tracking
 }
+
+export interface SkillRating {
+  rating: number;
+  transactions: number;
+  updated: string | null;
+}
+
 
 export interface AgentRating {
   agentId: string;
@@ -67,6 +75,7 @@ export interface Receipt {
     from?: string;
     to?: string;
     amount?: number;
+    capability?: string;
   };
   from?: string;
   to?: string;
@@ -407,6 +416,74 @@ export class ReputationStore {
   }
 
   /**
+   * Get rating for a specific skill/capability
+   * Returns agent's global rating if skill not found
+   */
+  async getRatingForSkill(agentId: string, capability: string): Promise<SkillRating> {
+    await this._ensureLoaded();
+    const id = this._normalizeId(agentId);
+    const record = this._ratings![id];
+
+    if (!record || !record.skills || !record.skills[capability]) {
+      // Return default skill rating
+      return {
+        rating: record ? record.rating : DEFAULT_RATING,
+        transactions: 0,
+        updated: null
+      };
+    }
+
+    return record.skills[capability];
+  }
+
+  /**
+   * Get all skills for an agent with their ratings
+   */
+  async getSkillsForAgent(agentId: string): Promise<Record<string, SkillRating>> {
+    await this._ensureLoaded();
+    const id = this._normalizeId(agentId);
+    const record = this._ratings![id];
+
+    if (!record || !record.skills) {
+      return {};
+    }
+
+    return { ...record.skills };
+  }
+
+  /**
+   * Update skill-specific rating (internal use)
+   */
+  private _updateSkillRating(
+    record: RatingRecord,
+    capability: string | null,
+    ratingChange: number
+  ): void {
+    if (!capability) {
+      return; // Don't track unlabeled work
+    }
+
+    if (!record.skills) {
+      record.skills = {};
+    }
+
+    if (!record.skills[capability]) {
+      record.skills[capability] = {
+        rating: DEFAULT_RATING,
+        transactions: 0,
+        updated: null
+      };
+    }
+
+    const skill = record.skills[capability];
+    skill.rating = Math.max(MINIMUM_RATING, skill.rating + ratingChange);
+    skill.transactions += 1;
+    skill.updated = new Date().toISOString();
+  }
+
+
+
+  /**
    * Get total escrowed ELO for an agent
    */
   getEscrowedAmount(agentId: string): number {
@@ -623,6 +700,15 @@ export class ReputationStore {
     const updated1 = await this._updateAgent(party1, gain1);
     const updated2 = await this._updateAgent(party2, gain2);
 
+    // Apply skill-specific rating updates
+    const capability = receipt.proposal?.capability || null;
+    if (this._ratings![this._normalizeId(party1)]) {
+      this._updateSkillRating(this._ratings![this._normalizeId(party1)], capability, gain1);
+    }
+    if (this._ratings![this._normalizeId(party2)]) {
+      this._updateSkillRating(this._ratings![this._normalizeId(party2)], capability, gain2);
+    }
+
     // Save
     await this.save();
 
@@ -741,6 +827,15 @@ export class ReputationStore {
 
     const updated1 = await this._updateAgent(party1, change1);
     const updated2 = await this._updateAgent(party2, change2);
+
+    // Apply skill-specific rating updates
+    const capability = receipt.proposal?.capability || null;
+    if (this._ratings![this._normalizeId(party1)]) {
+      this._updateSkillRating(this._ratings![this._normalizeId(party1)], capability, change1);
+    }
+    if (this._ratings![this._normalizeId(party2)]) {
+      this._updateSkillRating(this._ratings![this._normalizeId(party2)], capability, change2);
+    }
 
     await this.save();
 

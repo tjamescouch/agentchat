@@ -23,6 +23,7 @@ export interface ProposalInput {
   expires?: number | null;
   sig: string;
   elo_stake?: number | null;
+  capability?: string | null;  // NEW: Skill capability tag
 }
 
 export interface StoredProposal {
@@ -34,6 +35,7 @@ export interface StoredProposal {
   currency: string | null;
   payment_code: string | null;
   terms: string | null;
+  capability: string | null;  // NEW: Skill capability tag
   expires: number | null;
   status: string;
   created_at: number;
@@ -177,6 +179,7 @@ export class ProposalStore {
       currency: proposal.currency || null,
       payment_code: proposal.payment_code || null,
       terms: proposal.terms || null,
+      capability: proposal.capability || null,
       expires: proposal.expires ? now + (proposal.expires * 1000) : null,
       status: ProposalStatus.PENDING,
       created_at: now,
