@@ -350,8 +350,37 @@ find_gro_cmd() {
         return
     fi
 
-    # 1. npm bin symlink (canonical — created by `npm install -g` from package.json bin field)
-    #    This points to dist/main.js (the compiled Node.js runtime), not the bash dispatcher.
+    # Prefer npm-installed gro package over global binary
+    local npm_gro
+    npm_gro="$(dirname "$(realpath "$0" 2>/dev/null || echo "$0")")/../node_modules/@tjamescouch/gro/gro"
+    if [ -x "$npm_gro" ]; then
+        echo "$npm_gro"
+        return
+    fi
+
+    # Check relative to working directory (e.g. when run from repo root)
+    if [ -x "./node_modules/@tjamescouch/gro/gro" ]; then
+        echo "./node_modules/@tjamescouch/gro/gro"
+        return
+    fi
+
+    # Fallback: global npm lib (where `npm install -g` puts packages)
+    local global_npm_gro
+    global_npm_gro="$(npm root -g 2>/dev/null)/@tjamescouch/gro/gro"
+    if [ -n "$global_npm_gro" ] && [ -x "$global_npm_gro" ]; then
+        echo "$global_npm_gro"
+        return
+    fi
+
+    # Fallback: npx resolution
+    local npx_gro
+    npx_gro="$(npx --no-install -c 'which gro' 2>/dev/null || true)"
+    if [ -n "$npx_gro" ] && [ -x "$npx_gro" ]; then
+        echo "$npx_gro"
+        return
+    fi
+
+    # Fallback: global binary
     if command -v gro > /dev/null 2>&1; then
         command -v gro
         return
