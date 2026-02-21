@@ -429,7 +429,6 @@ export class AgentChatServer {
     this.connectionsByIp = new Map();
 
     // WebSocket heartbeat
-    // Default heartbeat interval
     this.heartbeatIntervalMs = options.heartbeatIntervalMs || 30000; // 30s
     this.heartbeatTimeoutMs = options.heartbeatTimeoutMs || 10000;   // 10s
     this.heartbeatTimer = null;
@@ -758,25 +757,19 @@ export class AgentChatServer {
     // Start WebSocket heartbeat — detect and clean up zombie connections
     this.heartbeatTimer = setInterval(() => {
       if (!this.wss) return;
-      const now = Date.now();
       this.wss.clients.forEach((ws: WebSocket) => {
         const ews = ws as ExtendedWebSocket;
-        // If we haven't seen a pong in 2x heartbeat interval, consider connection stale
-        const lastPong = ews._lastPong || ews._connectedAt || 0;
-        if (now - lastPong > (this.heartbeatIntervalMs * 2 + this.heartbeatTimeoutMs)) {
+        if (ews._isAlive === false) {
           this._log('heartbeat_timeout', {
             ip: ews._realIp,
             agent: this.agents.get(ews)?.id,
-            conn_id: ews._connId,
-            last_pong_ms: lastPong ? now - lastPong : null
+            conn_id: ews._connId
           });
           this._handleDisconnect(ews);
-          try { return ews.terminate(); } catch {}
+          return ews.terminate();
         }
-
-        // Send a ping and record send time for correlation
+        ews._isAlive = false;
         try {
-          ews._isAlive = false;
           ews.ping();
         } catch (err) {
           this._log('heartbeat_ping_error', { error: err instanceof Error ? { message: err.message, stack: err.stack } : String(err), conn_id: ews._connId, ip: ews._realIp });

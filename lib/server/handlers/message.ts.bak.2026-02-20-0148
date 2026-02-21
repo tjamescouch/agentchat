@@ -144,21 +144,10 @@ export function handleMsg(server: AgentChatServer, ws: ExtendedWebSocket, msg: M
       return;
     }
 
-    // Log DM send event with redaction metadata (do not log content)
-    server._log('dm_send', {
-      from: agent.id,
-      to: targetId,
-      content_length: outMsg.content ? outMsg.content.length : 0,
-      redacted: true
-    });
-
-    // Create a redacted copy for logging/storage where needed
-    const redactedOut = { ...outMsg, content: '[redacted]', _redacted: true } as any;
-
-    // Send to target (full message)
+    // Send to target
     server._send(targetWs, outMsg);
-    // Echo back to sender (redacted echo to avoid logging content on client side)
-    server._send(ws, redactedOut);
+    // Echo back to sender
+    server._send(ws, outMsg);
   }
 }
 
