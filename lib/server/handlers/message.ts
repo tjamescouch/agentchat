@@ -5,6 +5,7 @@
 
 import type { WebSocket } from 'ws';
 import type { AgentChatServer } from '../../server.js';
+import type { ExtendedWebSocket } from '../../server.js';
 import type {
   MsgMessage,
   JoinMessage,
@@ -24,12 +25,6 @@ import {
 } from '../../protocol.js';
 import { parseCallbacks } from '../../callback-engine.js';
 
-// Extended WebSocket with custom properties
-interface ExtendedWebSocket extends WebSocket {
-  _connectedAt?: number;
-  _realIp?: string;
-  _userAgent?: string;
-}
 
 /**
  * Handle MSG command - route messages to channels or agents

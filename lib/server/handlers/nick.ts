@@ -5,6 +5,7 @@
 
 import type { WebSocket } from 'ws';
 import type { AgentChatServer } from '../../server.js';
+import type { ExtendedWebSocket } from '../../server.js';
 import type { SetNickMessage } from '../../types.js';
 import {
   ServerMessageType,
@@ -13,13 +14,6 @@ import {
   createError,
 } from '../../protocol.js';
 
-// Extended WebSocket with custom properties
-interface ExtendedWebSocket extends WebSocket {
-  _connectedAt?: number;
-  _realIp?: string;
-  _userAgent?: string;
-  _lastNickChange?: number;
-}
 
 // Reserved nicks that cannot be claimed
 const RESERVED_NICKS = new Set([

@@ -5,6 +5,7 @@
 
 import type { WebSocket } from 'ws';
 import type { AgentChatServer } from '../../server.js';
+import type { ExtendedWebSocket } from '../../server.js';
 import type {
   ProposalMessage,
   AcceptMessage,
@@ -38,12 +39,6 @@ import { Identity } from '../../identity.js';
 // Anti-sybil: minimum proposal age before completion allowed (default 60s)
 export const DEFAULT_MIN_PROPOSAL_AGE_MS = 60_000;
 
-// Extended WebSocket with custom properties
-interface ExtendedWebSocket extends WebSocket {
-  _connectedAt?: number;
-  _realIp?: string;
-  _userAgent?: string;
-}
 
 /**
  * Handle PROPOSAL command

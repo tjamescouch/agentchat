@@ -5,6 +5,7 @@
 
 import type { WebSocket } from 'ws';
 import type { AgentChatServer } from '../../server.js';
+import type { ExtendedWebSocket } from '../../server.js';
 import type { RegisterSkillsMessage, SearchSkillsMessage, Skill } from '../../types.js';
 import {
   ServerMessageType,
@@ -15,12 +16,6 @@ import {
 import { Identity } from '../../identity.js';
 import crypto from 'crypto';
 
-// Extended WebSocket with custom properties
-interface ExtendedWebSocket extends WebSocket {
-  _connectedAt?: number;
-  _realIp?: string;
-  _userAgent?: string;
-}
 
 // Skill registration entry
 interface SkillRegistration {

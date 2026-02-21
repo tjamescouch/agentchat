@@ -103,7 +103,6 @@ export interface ExtendedWebSocket extends WebSocket {
   _msgTimestamps?: number[];
   _isAlive?: boolean;
   _lastPong?: number;
-  _lastNickChange?: number;
 }
 
 // Agent info stored per connection

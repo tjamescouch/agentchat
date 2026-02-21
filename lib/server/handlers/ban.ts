@@ -5,6 +5,7 @@
 
 import type { WebSocket } from 'ws';
 import type { AgentChatServer } from '../../server.js';
+import type { ExtendedWebSocket } from '../../server.js';
 import type {
   AdminKickMessage,
   AdminBanMessage,
@@ -17,12 +18,6 @@ import {
   createError,
 } from '../../protocol.js';
 
-// Extended WebSocket with custom properties
-interface ExtendedWebSocket extends WebSocket {
-  _connectedAt?: number;
-  _realIp?: string;
-  _userAgent?: string;
-}
 
 /**
  * Handle ADMIN_KICK command - immediately disconnect an agent

@@ -7,6 +7,7 @@
 
 import type { WebSocket } from 'ws';
 import type { AgentChatServer } from '../../server.js';
+import type { ExtendedWebSocket } from '../../server.js';
 import type { CaptchaResponseMessage } from '../../types.js';
 import {
   ServerMessageType,
@@ -18,12 +19,6 @@ import {
 } from '../../protocol.js';
 import { generateChallenge, validateAnswer } from '../../captcha.js';
 
-// Extended WebSocket with custom properties
-interface ExtendedWebSocket extends WebSocket {
-  _connectedAt?: number;
-  _realIp?: string;
-  _userAgent?: string;
-}
 
 /**
  * Send a captcha challenge to a client.
