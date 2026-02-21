@@ -117,19 +117,8 @@ export function handleMsg(server: AgentChatServer, ws: ExtendedWebSocket, msg: M
     // Broadcast to channel including sender
     server._broadcast(msg.to, outMsg);
 
-    // Buffer the message for replay to future joiners — store a redacted copy
-    try {
-      const storedMsg = {
-        ...outMsg,
-        // redact content in persisted buffer to avoid leaking DMs/secrets
-        content: outMsg.content ? '[redacted]' : outMsg.content,
-        _redacted: true,
-        _content_length: outMsg.content ? String(outMsg.content.length) : '0'
-      } as any;
-      server._bufferMessage(msg.to, storedMsg);
-    } catch (err) {
-      server._log('buffer_error', { channel: msg.to, error: err instanceof Error ? { message: err.message, stack: err.stack } : String(err) });
-    }
+    // Buffer the message for replay to future joiners
+    server._bufferMessage(msg.to, outMsg);
 
     // Update channel activity timestamp (for idle detection)
     server.channelLastActivity.set(msg.to, Date.now());
