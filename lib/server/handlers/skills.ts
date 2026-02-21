@@ -34,8 +34,11 @@ interface SkillRegistration {
 interface SkillSearchResult extends Skill {
   agent_id: string;
   registered_at: number;
-  rating?: number;
-  transactions?: number;
+  agent_rating?: number;
+  agent_transactions?: number;
+  skill_rating?: number;
+  skill_transactions?: number;
+  skill_updated?: string | null;
 }
 
 /**
@@ -161,26 +164,55 @@ export async function handleSearchSkills(server: AgentChatServer, ws: ExtendedWe
     }
   }
 
-  // Enrich results with reputation data
+  // Enrich results with agent + skill-specific reputation data
   const uniqueAgentIds = [...new Set(results.map(r => r.agent_id))];
-  const ratingCache = new Map<string, { rating: number; transactions: number }>();
+  const agentRatingCache = new Map<string, { rating: number; transactions: number }>();
+  const skillRatingCache = new Map<string, { capability: string; rating: number; transactions: number; updated: string | null }>();
+
   for (const agentId of uniqueAgentIds) {
-    const ratingInfo = await server.reputationStore.getRating(agentId);
-    ratingCache.set(agentId, ratingInfo);
+    // Get agent-level rating
+    const agentRatingInfo = await server.reputationStore.getRating(agentId);
+    agentRatingCache.set(agentId, agentRatingInfo);
+  }
+
+  // For each result, also get skill-specific rating
+  for (const result of results) {
+    const agentIdNormalized = result.agent_id.replace('@', '');
+    // Get skill-specific rating
+    const skillRatingInfo = await server.reputationStore.getRatingForSkill(agentIdNormalized, result.capability);
+    const cacheKey = `${agentIdNormalized}:${result.capability}`;
+    skillRatingCache.set(cacheKey, {
+      capability: result.capability,
+      ...skillRatingInfo
+    });
   }
 
   // Add rating info to each result
   for (const result of results) {
-    const ratingInfo = ratingCache.get(result.agent_id);
-    if (ratingInfo) {
-      result.rating = ratingInfo.rating;
-      result.transactions = ratingInfo.transactions;
+    const agentRatingInfo = agentRatingCache.get(result.agent_id);
+    if (agentRatingInfo) {
+      result.agent_rating = agentRatingInfo.rating;
+      result.agent_transactions = agentRatingInfo.transactions;
+    }
+
+    const agentIdNormalized = result.agent_id.replace('@', '');
+    const cacheKey = `${agentIdNormalized}:${result.capability}`;
+    const skillRatingInfo = skillRatingCache.get(cacheKey);
+    if (skillRatingInfo) {
+      result.skill_rating = skillRatingInfo.rating;
+      result.skill_transactions = skillRatingInfo.transactions;
+      result.skill_updated = skillRatingInfo.updated;
     }
   }
 
-  // Sort by rating (highest first), then by registration time
+  // Sort by skill rating (highest first), then agent rating, then by registration time
   results.sort((a, b) => {
-    if ((b.rating || 0) !== (a.rating || 0)) return (b.rating || 0) - (a.rating || 0);
+    if ((b.skill_rating || 0) !== (a.skill_rating || 0)) {
+      return (b.skill_rating || 0) - (a.skill_rating || 0);
+    }
+    if ((b.agent_rating || 0) !== (a.agent_rating || 0)) {
+      return (b.agent_rating || 0) - (a.agent_rating || 0);
+    }
     return b.registered_at - a.registered_at;
   });
 
