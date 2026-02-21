@@ -30,6 +30,7 @@ import { DisputeStore } from './disputes.js';
 import { ReputationStore } from './reputation.js';
 import { SkillsStore } from './skills-store.js';
 import { EscrowHooks } from './escrow-hooks.js';
+import geoip from 'geoip-lite';
 import { Allowlist } from './allowlist.js';
 import { Banlist } from './banlist.js';
 import { Redactor } from './redactor.js';
@@ -98,6 +99,10 @@ import {
 interface ExtendedWebSocket extends WebSocket {
   _connectedAt?: number;
   _realIp?: string;
+  _geoCountry?: string;
+  _geoCity?: string;
+  _geoLat?: number;
+  _geoLon?: number;
   _userAgent?: string;
   _connId?: string;
   _msgTimestamps?: number[];
@@ -635,6 +640,23 @@ export class AgentChatServer {
         const health = this.getHealth();
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(health));
+      } else if (req.method === 'GET' && req.url === '/api/connections') {
+        // Get current connections with geo data
+        const connections = Array.from(this.agentById.entries()).map(([agentId, ws]) => {
+          const ews = ws as ExtendedWebSocket;
+          return {
+            agent_id: agentId,
+            ip: ews._realIp,
+            country: ews._geoCountry,
+            city: ews._geoCity,
+            lat: ews._geoLat,
+            lon: ews._geoLon,
+            connected_at: ews._connectedAt,
+            user_agent: ews._userAgent
+          };
+        });
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+        res.end(JSON.stringify({ connections, count: connections.length }));
       } else {
         res.writeHead(404);
         res.end('Not Found');
@@ -706,10 +728,22 @@ export class AgentChatServer {
       ws._realIp = realIp;
       ws._userAgent = userAgent;
       ws._isAlive = true;
+      // GeoIP lookup
+      if (realIp) {
+        const geo = geoip.lookup(realIp);
+        if (geo) {
+          ws._geoCountry = geo.country;
+          ws._geoCity = geo.city;
+          ws._geoLat = geo.ll?.[0];
+          ws._geoLon = geo.ll?.[1];
+        }
+      }
+
 
       // WS-level pong handler for heartbeat
       ws.on('pong', () => {
         ws._isAlive = true;
+
         ws._lastPong = Date.now();
       });
 
@@ -717,7 +751,9 @@ export class AgentChatServer {
         ip: realIp,
         proxy_ip: req.socket.remoteAddress,
         user_agent: userAgent,
-        conn_id: ws._connId
+        conn_id: ws._connId,
+        country: ws._geoCountry,
+        city: ws._geoCity
       });
 
       ws.on('message', (data: Buffer) => {
