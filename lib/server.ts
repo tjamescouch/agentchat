@@ -743,16 +743,6 @@ export class AgentChatServer {
       // WS-level pong handler for heartbeat
       ws.on('pong', () => {
         ws._isAlive = true;
-      // GeoIP lookup
-      if (realIp) {
-        const geo = geoip.lookup(realIp);
-        if (geo) {
-          ws._geoCountry = geo.country;
-          ws._geoCity = geo.city;
-          ws._geoLat = geo.ll?.[0];
-          ws._geoLon = geo.ll?.[1];
-        }
-      }
 
         ws._lastPong = Date.now();
       });
