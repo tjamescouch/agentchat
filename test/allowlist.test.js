@@ -28,7 +28,7 @@ describe('Allowlist', () => {
   });
 
   test('enabled - rejects unknown pubkeys', () => {
-    const al = new Allowlist({ enabled: true, adminKey: TEST_ADMIN_KEY, filePath: tempFile() });
+    const al = new Allowlist({ enabled: true, strict: true, adminKey: TEST_ADMIN_KEY, filePath: tempFile() });
     const identity = Identity.generate('test');
     const result = al.check(identity.pubkey);
     assert.strictEqual(result.allowed, false);
@@ -69,7 +69,7 @@ describe('Allowlist', () => {
   });
 
   test('revoke removes entry', () => {
-    const al = new Allowlist({ enabled: true, adminKey: TEST_ADMIN_KEY, filePath: tempFile() });
+    const al = new Allowlist({ enabled: true, strict: true, adminKey: TEST_ADMIN_KEY, filePath: tempFile() });
     const identity = Identity.generate('test');
     al.approve(identity.pubkey, TEST_ADMIN_KEY);
     assert.strictEqual(al.check(identity.pubkey).allowed, true);
@@ -80,7 +80,7 @@ describe('Allowlist', () => {
   });
 
   test('revoke by agentId', () => {
-    const al = new Allowlist({ enabled: true, adminKey: TEST_ADMIN_KEY, filePath: tempFile() });
+    const al = new Allowlist({ enabled: true, strict: true, adminKey: TEST_ADMIN_KEY, filePath: tempFile() });
     const identity = Identity.generate('test');
     const { agentId } = al.approve(identity.pubkey, TEST_ADMIN_KEY);
 
@@ -152,7 +152,7 @@ describe('Allowlist Integration', () => {
     server = new AgentChatServer({
       port,
       allowlistEnabled: true,
-      allowlistStrict: false,
+      allowlistStrict: true,
       allowlistAdminKey: TEST_ADMIN_KEY,
       allowlistFilePath: path.join(tempDir, 'allowlist.json'),
     });
@@ -213,19 +213,30 @@ describe('Allowlist Integration', () => {
     client.disconnect();
   });
 
-  test('allows ephemeral in non-strict mode', async () => {
-    const client = new AgentChatClient({
-      server: `ws://localhost:${port}`,
-      name: 'ephemeral-agent',
+  test('rejects ephemeral in strict mode integration', async () => {
+    const ws = new WebSocket(`ws://localhost:${port}`);
+    const messages = [];
+
+    await new Promise((resolve, reject) => {
+      ws.on('open', () => {
+        ws.send(JSON.stringify({ type: 'IDENTIFY', name: 'ephemeral-agent' }));
+        resolve();
+      });
+      ws.on('error', reject);
+      setTimeout(() => reject(new Error('timeout')), 3000);
     });
-    let welcomed = false;
-    client.on('welcome', () => { welcomed = true; });
 
-    await client.connect();
-    await new Promise(r => setTimeout(r, 500));
+    await new Promise((resolve) => {
+      ws.on('message', (data) => {
+        messages.push(JSON.parse(data.toString()));
+        resolve();
+      });
+      setTimeout(resolve, 1000);
+    });
 
-    assert.strictEqual(welcomed, true, 'Ephemeral should be welcomed in non-strict');
-    client.disconnect();
+    ws.close();
+    const notAllowed = messages.find(m => m.code === 'NOT_ALLOWED');
+    assert.ok(notAllowed, `Should receive NOT_ALLOWED for ephemeral in strict mode, got: ${JSON.stringify(messages)}`);
   });
 });
 

@@ -30,6 +30,7 @@ import { sendCaptchaChallenge, completeRegistration } from './captcha.js';
 // Extended WebSocket with custom properties
 interface ExtendedWebSocket extends WebSocket {
   _connectedAt?: number;
+  _connId?: string;
   _realIp?: string;
   _userAgent?: string;
 }

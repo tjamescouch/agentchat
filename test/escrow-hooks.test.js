@@ -292,6 +292,8 @@ describe('Server escrow hook integration', () => {
   let bobIdentityPath;
 
   before(async () => {
+    process.env.LURK_DISABLED = 'true';
+
     // Create temp directory for test identities
     tmpDir = path.join(os.tmpdir(), `agentchat-escrow-test-${Date.now()}`);
     await fs.mkdir(tmpDir, { recursive: true });
@@ -308,6 +310,7 @@ describe('Server escrow hook integration', () => {
   });
 
   after(async () => {
+    delete process.env.LURK_DISABLED;
     // Clean up temp files
     try {
       await fs.unlink(aliceIdentityPath);

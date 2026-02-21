@@ -15,11 +15,13 @@ describe('AgentChat Client', () => {
   const SERVER_URL = `ws://localhost:${PORT}`;
 
   before(() => {
+    process.env.LURK_DISABLED = 'true';
     server = new AgentChatServer({ port: PORT });
     server.start();
   });
 
   after(() => {
+    delete process.env.LURK_DISABLED;
     server.stop();
   });
 

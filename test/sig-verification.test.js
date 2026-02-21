@@ -59,6 +59,8 @@ describe('Proposal Signature Verification', () => {
   let bobIdentity;
 
   before(async () => {
+    process.env.LURK_DISABLED = 'true';
+
     tmpDir = path.join(os.tmpdir(), `agentchat-sigtest-${Date.now()}`);
     await fs.mkdir(tmpDir, { recursive: true });
 
@@ -75,6 +77,7 @@ describe('Proposal Signature Verification', () => {
   });
 
   after(async () => {
+    delete process.env.LURK_DISABLED;
     server?.stop();
     try {
       await fs.rm(tmpDir, { recursive: true });

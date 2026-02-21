@@ -20,6 +20,8 @@ describe('Proposals', () => {
   let bobIdentityPath;
 
   before(async () => {
+    process.env.LURK_DISABLED = 'true';
+
     // Create temp directory for test identities
     const tmpDir = path.join(os.tmpdir(), `agentchat-test-${Date.now()}`);
     await fs.mkdir(tmpDir, { recursive: true });
@@ -40,6 +42,7 @@ describe('Proposals', () => {
   });
 
   after(async () => {
+    delete process.env.LURK_DISABLED;
     server.stop();
     // Clean up temp files
     try {

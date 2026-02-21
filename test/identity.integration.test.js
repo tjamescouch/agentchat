@@ -20,12 +20,14 @@ describe('AgentChat with Identity', () => {
   const testDir = path.join(os.tmpdir(), `agentchat-identity-test-${Date.now()}`);
 
   before(async () => {
+    process.env.LURK_DISABLED = 'true';
     await fs.mkdir(testDir, { recursive: true });
     server = new AgentChatServer({ port: PORT });
     server.start();
   });
 
   after(async () => {
+    delete process.env.LURK_DISABLED;
     server.stop();
     try {
       await fs.rm(testDir, { recursive: true });

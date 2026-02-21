@@ -25,6 +25,7 @@ describe('Challenge-Response Authentication', () => {
   let identity2;
 
   before(async () => {
+    process.env.LURK_DISABLED = 'true';
     testPort = 17200 + Math.floor(Math.random() * 100);
     testServer = `ws://localhost:${testPort}`;
     server = new AgentChatServer({ port: testPort, logMessages: false });
@@ -42,6 +43,7 @@ describe('Challenge-Response Authentication', () => {
   });
 
   after(() => {
+    delete process.env.LURK_DISABLED;
     server.stop();
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
@@ -75,13 +77,13 @@ describe('Challenge-Response Authentication', () => {
     const welcome = await client.connect();
     assert.ok(welcome.agent_id, 'Should receive agent_id');
     assert.ok(welcome.agent_id.startsWith('@'), 'Agent ID should start with @');
-    assert.strictEqual(welcome.verified, true, 'Welcome should indicate verified status');
+    assert.strictEqual(welcome.verified, false, 'should not be verified without allowlist');
 
     // Check server state
     const agentState = server.agents.get(Array.from(server.agents.keys()).find(
       ws => server.agents.get(ws)?.id === welcome.agent_id.slice(1)
     ));
-    assert.strictEqual(agentState?.verified, true, 'Agent should be verified on server');
+    assert.strictEqual(agentState?.verified, false, 'should not be verified without allowlist');
     assert.ok(agentState?.pubkey, 'Agent should have pubkey');
 
     client.disconnect();
@@ -157,7 +159,7 @@ describe('Challenge-Response Authentication', () => {
     const welcome = messages.find(m => m.type === 'WELCOME');
     assert.ok(welcome, 'Should receive WELCOME after verification');
     assert.ok(welcome.agent_id, 'Welcome should have agent_id');
-    assert.strictEqual(welcome.verified, true, 'Welcome should indicate verified');
+    assert.strictEqual(welcome.verified, false, 'should not be verified without allowlist');
 
     ws.close();
   });
@@ -314,7 +316,7 @@ describe('Challenge-Response Authentication', () => {
     });
 
     const welcome = await client.connect();
-    assert.strictEqual(welcome.verified, true);
+    assert.strictEqual(welcome.verified, false);
 
     // Join channel
     const joined = await client.join('#general');
@@ -388,7 +390,7 @@ describe('Challenge-Response Authentication', () => {
     });
 
     const welcome2 = await client2.connect();
-    assert.strictEqual(welcome2.verified, true);
+    assert.strictEqual(welcome2.verified, false);
 
     // First connection should be disconnected
     await disconnectPromise;

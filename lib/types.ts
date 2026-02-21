@@ -264,6 +264,7 @@ export interface ProposalMessage extends BaseMessage {
   expires?: number;
   terms?: string;
   sig: string;
+  capability?: string;
 }
 
 export interface AcceptMessage extends BaseMessage {
