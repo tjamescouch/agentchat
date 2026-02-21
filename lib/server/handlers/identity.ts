@@ -6,6 +6,7 @@
 import crypto from 'crypto';
 import type { WebSocket } from 'ws';
 import type { AgentChatServer } from '../../server.js';
+import type { ExtendedWebSocket } from '../../server.js';
 import type {
   IdentifyMessage,
   VerifyIdentityMessage,
@@ -27,13 +28,6 @@ import {
 import { Identity } from '../../identity.js';
 import { sendCaptchaChallenge, completeRegistration } from './captcha.js';
 
-// Extended WebSocket with custom properties
-interface ExtendedWebSocket extends WebSocket {
-  _connectedAt?: number;
-  _connId?: string;
-  _realIp?: string;
-  _userAgent?: string;
-}
 
 // Pending verification request
 interface PendingVerification {

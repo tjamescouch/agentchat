@@ -5,6 +5,7 @@
 
 import type { WebSocket } from 'ws';
 import type { AgentChatServer } from '../../server.js';
+import type { ExtendedWebSocket } from '../../server.js';
 import type {
   AdminApproveMessage,
   AdminRevokeMessage,
@@ -18,12 +19,6 @@ import {
   createError,
 } from '../../protocol.js';
 
-// Extended WebSocket with custom properties
-interface ExtendedWebSocket extends WebSocket {
-  _connectedAt?: number;
-  _realIp?: string;
-  _userAgent?: string;
-}
 
 /**
  * Handle ADMIN_APPROVE command - add a pubkey to the allowlist
