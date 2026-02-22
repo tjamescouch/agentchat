@@ -257,18 +257,38 @@ ensure_agentauth() {
         rm -f "$AGENTAUTH_PID_FILE"
     fi
 
-    # Check prerequisites
-    if [ ! -d "$AGENTAUTH_DIR" ] || [ ! -f "$AGENTAUTH_DIR/dist/index.js" ]; then
-        echo "ERROR: agentauth not found at $AGENTAUTH_DIR"
-        echo "       Clone it: git clone https://github.com/tjamescouch/agentauth.git ~/agentauth"
-        echo "       Build it: cd ~/agentauth && npm install && npm run build"
-        exit 1
+    # Resolve agentauth binary: prefer global npm install, then $AGENTAUTH_DIR
+    local agentauth_bin=""
+    if command -v agentauth > /dev/null 2>&1; then
+        agentauth_bin="agentauth"
+    elif [ -f "$AGENTAUTH_DIR/dist/index.js" ]; then
+        agentauth_bin="node $AGENTAUTH_DIR/dist/index.js"
+    else
+        echo "agentauth not found. Installing globally via npm..."
+        npm install -g @tjamescouch/agentauth
+        if command -v agentauth > /dev/null 2>&1; then
+            agentauth_bin="agentauth"
+        else
+            echo "ERROR: Failed to install agentauth. Install manually:"
+            echo "       npm install -g @tjamescouch/agentauth"
+            exit 1
+        fi
     fi
 
+    # Resolve config: check explicit path, then ~/.agentchat/, then $AGENTAUTH_DIR
     if [ ! -f "$AGENTAUTH_CONFIG" ]; then
-        echo "ERROR: agentauth config not found at $AGENTAUTH_CONFIG"
-        echo "       Copy the example: cp $AGENTAUTH_DIR/agentauth.example.json $AGENTAUTH_CONFIG"
-        exit 1
+        if [ -f "$HOME/.agentchat/agentauth.json" ]; then
+            AGENTAUTH_CONFIG="$HOME/.agentchat/agentauth.json"
+        elif [ -f "$AGENTAUTH_DIR/agentauth.json" ]; then
+            AGENTAUTH_CONFIG="$AGENTAUTH_DIR/agentauth.json"
+        else
+            echo "ERROR: agentauth config not found"
+            echo "       Create one at ~/.agentchat/agentauth.json"
+            if [ -f "$AGENTAUTH_DIR/agentauth.example.json" ]; then
+                echo "       Example: cp $AGENTAUTH_DIR/agentauth.example.json ~/.agentchat/agentauth.json"
+            fi
+            exit 1
+        fi
     fi
 
     # Decrypt token so agentauth can use it (host-side only)
@@ -280,7 +300,7 @@ ensure_agentauth() {
     echo "Starting agentauth proxy on port $AGENTAUTH_PORT..."
     ANTHROPIC_API_KEY="${CLAUDE_CODE_OAUTH_TOKEN}" \
     OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
-        node "$AGENTAUTH_DIR/dist/index.js" run --port "$AGENTAUTH_PORT" --bind 0.0.0.0 --config "$AGENTAUTH_CONFIG" &
+        $agentauth_bin run --port "$AGENTAUTH_PORT" --bind 0.0.0.0 --config "$AGENTAUTH_CONFIG" &
     local proxy_pid=$!
     echo "$proxy_pid" > "$AGENTAUTH_PID_FILE"
 
