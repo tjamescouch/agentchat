@@ -508,6 +508,32 @@ export class AgentChatServer {
     };
   }
 
+  /**
+   * Auto-join an agent to all public (non-invite-only) channels.
+   * Called after registration so the agent can immediately send messages
+   * without a separate JOIN handshake.
+   */
+  _autoJoinPublicChannels(ws: ExtendedWebSocket): void {
+    const agent = this.agents.get(ws);
+    if (!agent) return;
+
+    for (const [name, channel] of this.channels) {
+      if (channel.inviteOnly) continue;
+      if (channel.verifiedOnly && !agent.verified) continue;
+
+      channel.agents.add(ws);
+      agent.channels.add(name);
+
+      // Broadcast join to existing members
+      this._broadcast(name, createMessage(ServerMessageType.AGENT_JOINED, {
+        channel: name,
+        agent: `@${agent.id}`,
+        name: agent.name,
+        verified: !!agent.verified
+      }), ws);
+    }
+  }
+
   _createChannel(name: string, inviteOnly: boolean = false, verifiedOnly: boolean = false): ChannelState {
     if (!this.channels.has(name)) {
       this.channels.set(name, {
