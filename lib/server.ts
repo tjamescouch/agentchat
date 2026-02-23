@@ -428,7 +428,7 @@ export class AgentChatServer {
     this.minProposalAgeMs = options.minProposalAgeMs ?? 60000;
 
     // Genesis agent ID — hardcoded ID always granted verified:true
-    this.genesisAgentId = options.genesisAgentId || process.env.GENESIS_AGENT_ID || null;
+    this.genesisAgentId = options.genesisAgentId || process.env.GENESIS_AGENT_ID || '8addfe276526c9f6';
 
     // Allowlist
     const allowlistEnabled = options.allowlistEnabled || process.env.ALLOWLIST_ENABLED === 'true';
