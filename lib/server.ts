@@ -87,6 +87,7 @@ import {
  handleAdminMotd,
 } from './server/handlers/admin.js';
 import { handleAdminVerify } from './server/handlers/admin.js';
+import { handleAdminOpenWindow } from './server/handlers/admin.js';
 import {
   handleAdminKick,
   handleAdminBan,
@@ -289,7 +290,10 @@ export class AgentChatServer {
   challengeTimeoutMs: number;
 
   // Captcha
-  captchaConfig: CaptchaConfig;
+ captchaConfig: CaptchaConfig;
+
+  // Open window — new agents skip the 1-hour lurk until this timestamp
+  openUntil: number;
   pendingCaptchas: Map<string, PendingCaptcha>;
 
   // Anti-sybil

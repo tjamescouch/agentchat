@@ -190,3 +190,36 @@ export function handleAdminVerify(server: AgentChatServer, ws: ExtendedWebSocket
     verified: msg.verified,
   }));
 }
+
+/**
+ * Handle ADMIN_OPEN_WINDOW command - allow new agents to join without
+ * the 1-hour lurk requirement for the next N milliseconds (default 5 min).
+ */
+export function handleAdminOpenWindow(server: AgentChatServer, ws: ExtendedWebSocket, msg: import('../../types.js').AdminOpenWindowMessage): void {
+  const adminKey = process.env.AGENTCHAT_ADMIN_KEY;
+  if (!adminKey || msg.admin_key !== adminKey) {
+    server._send(ws, createError(ErrorCode.AUTH_REQUIRED, 'Invalid admin key'));
+    return;
+  }
+
+  const durationMs = msg.duration_ms ?? 5 * 60 * 1000; // default 5 minutes
+  server.openUntil = Date.now() + durationMs;
+  const expiresAt = new Date(server.openUntil).toISOString();
+
+  server._log('admin_open_window', { durationMs, expiresAt });
+
+  // Broadcast notice to all connected clients
+  const notice = createMessage(ServerMessageType.ADMIN_RESULT, {
+    action: 'open_window',
+    success: true,
+    expiresAt,
+    durationMs,
+  });
+  if (server.wss) {
+    server.wss.clients.forEach((client) => {
+      if (client.readyState === client.OPEN) {
+        server._send(client as ExtendedWebSocket, notice);
+      }
+    });
+  }
+}
