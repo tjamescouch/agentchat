@@ -12,9 +12,9 @@
 import { z } from 'zod';
 import fs from 'fs';
 import path from 'path';
-import { getDaemonPaths } from '@tjamescouch/agentchat/lib/daemon.js';
-import { addJitter } from '@tjamescouch/agentchat/lib/jitter.js';
-import { ClientMessageType } from '@tjamescouch/agentchat/lib/protocol.js';
+import { getDaemonPaths } from '../dist/lib/daemon.js';
+import { addJitter } from '../dist/lib/jitter.js';
+import { ClientMessageType } from '../dist/lib/protocol.js';
 import { client, getLastSeen, updateLastSeen, incrementIdleCount, resetIdleCount, trackChannel, joinedChannels } from '../state.js';
 
 // Timeout bounds
