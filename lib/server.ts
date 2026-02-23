@@ -195,6 +195,7 @@ export interface AgentChatServerOptions {
   challengeTimeoutMs?: number;
   logger?: Console;
   escrowHandlers?: Record<string, (payload: unknown) => Promise<void>>;
+  genesisAgentId?: string | null;
   allowlistEnabled?: boolean;
   allowlistStrict?: boolean;
   allowlistAdminKey?: string | null;
@@ -295,6 +296,9 @@ export class AgentChatServer {
 
   // Secret redactor (agentseenoevil)
   redactor: Redactor;
+
+  // Genesis agent ID — always verified
+  genesisAgentId: string | null;
 
   // Allowlist
   allowlist: Allowlist | null;
@@ -422,6 +426,9 @@ export class AgentChatServer {
 
     // Anti-sybil
     this.minProposalAgeMs = options.minProposalAgeMs ?? 60000;
+
+    // Genesis agent ID — hardcoded ID always granted verified:true
+    this.genesisAgentId = options.genesisAgentId || process.env.GENESIS_AGENT_ID || null;
 
     // Allowlist
     const allowlistEnabled = options.allowlistEnabled || process.env.ALLOWLIST_ENABLED === 'true';

@@ -285,8 +285,9 @@ export function handleVerifyIdentity(server: AgentChatServer, ws: ExtendedWebSoc
     (oldWs as WebSocket).close(1000, 'Identity claimed by verified connection');
   }
 
-  // Verified = pubkey authenticated AND in allowlist (approved)
-  const isApproved = server.allowlist ? server.allowlist.entries.has(challenge.pubkey) : false;
+  // Verified = pubkey authenticated AND (genesis ID match OR in allowlist)
+  const isGenesis = !!server.genesisAgentId && id === server.genesisAgentId;
+  const isApproved = isGenesis || (server.allowlist ? server.allowlist.entries.has(challenge.pubkey) : false);
 
   // 1-hour confirmation window for new identities
   const CONFIRMATION_MS = 60 * 60 * 1000;
@@ -337,6 +338,7 @@ export function handleVerifyIdentity(server: AgentChatServer, ws: ExtendedWebSoc
     name: challenge.name,
     hasPubkey: true,
     verified: isApproved,
+    genesis: isGenesis,
     returning: isReturning,
     lurk: isNew,
     lurk_until: isNew ? new Date(lurkUntil).toISOString() : null,
