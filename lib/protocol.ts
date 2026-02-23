@@ -65,7 +65,8 @@ export const ClientMessageType = {
   ADMIN_MOTD: 'ADMIN_MOTD' as const,
  // File transfer
   ADMIN_VERIFY: 'ADMIN_VERIFY' as const,
- FILE_CHUNK: 'FILE_CHUNK' as const,
+FILE_CHUNK: 'FILE_CHUNK' as const,
+  ADMIN_OPEN_WINDOW: 'ADMIN_OPEN_WINDOW' as const,
   // Floor control
   RESPONDING_TO: 'RESPONDING_TO' as const,
   // Captcha
