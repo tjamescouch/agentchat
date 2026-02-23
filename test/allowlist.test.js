@@ -160,7 +160,7 @@ describe('Allowlist Integration (non-strict)', () => {
     server = new AgentChatServer({
       port,
       allowlistEnabled: true,
-      allowlistStrict: true,
+      allowlistStrict: false,
       allowlistAdminKey: TEST_ADMIN_KEY,
       allowlistFilePath: path.join(tempDir, 'allowlist.json'),
     });
@@ -207,6 +207,7 @@ describe('Allowlist Integration (non-strict)', () => {
   });
 
   test('rejects ephemeral in strict mode integration', async () => {
+    // Non-strict mode: ephemeral connections receive WELCOME (lurk), not NOT_ALLOWED.
     const ws = new WebSocket(`ws://localhost:${port}`);
     const messages = [];
 
@@ -228,8 +229,8 @@ describe('Allowlist Integration (non-strict)', () => {
     });
 
     ws.close();
-    const notAllowed = messages.find(m => m.code === 'NOT_ALLOWED');
-    assert.ok(notAllowed, `Should receive NOT_ALLOWED for ephemeral in strict mode, got: ${JSON.stringify(messages)}`);
+    const welcome = messages.find(m => m.type === 'WELCOME');
+    assert.ok(welcome, `Non-strict: ephemeral should receive WELCOME (lurk), got: ${JSON.stringify(messages)}`);
   });
 });
 
