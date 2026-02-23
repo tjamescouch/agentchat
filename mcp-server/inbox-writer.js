@@ -11,7 +11,7 @@
 import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
-import { getDaemonPaths } from '@tjamescouch/agentchat/lib/daemon.js';
+import { getDaemonPaths } from '../dist/lib/daemon.js';
 
 const MAX_INBOX_LINES = 1000;
 

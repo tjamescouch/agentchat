@@ -4,7 +4,7 @@
  */
 
 import { z } from 'zod';
-import { AgentChatClient, checkDirectorySafety, printEnvDoctorReport } from '@tjamescouch/agentchat';
+import { AgentChatClient, checkDirectorySafety, printEnvDoctorReport } from '../dist/lib/client.js';
 import fs from 'fs';
 import path from 'path';
 import {

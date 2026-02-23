@@ -5,7 +5,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { getDaemonPaths } from '@tjamescouch/agentchat/lib/daemon.js';
+import { getDaemonPaths } from '../dist/lib/daemon.js';
 
 // Connection state
 export let client = null;
