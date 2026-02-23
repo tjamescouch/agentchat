@@ -140,3 +140,53 @@ export function handleAdminMotd(server: AgentChatServer, ws: ExtendedWebSocket, 
     kicked: msg.kick || false,
   }));
 }
+
+/**
+ * Handle ADMIN_VERIFY command - grant or revoke verified (blue checkmark) status
+ */
+export function handleAdminVerify(server: AgentChatServer, ws: ExtendedWebSocket, msg: import('../../types.js').AdminVerifyMessage): void {
+  const adminKey = process.env.AGENTCHAT_ADMIN_KEY;
+  if (!adminKey || msg.admin_key !== adminKey) {
+    server._send(ws, createError(ErrorCode.AUTH_REQUIRED, 'Invalid admin key'));
+    return;
+  }
+
+  const targetId = msg.agent_id.startsWith('@') ? msg.agent_id.slice(1) : msg.agent_id;
+  const targetWs = server.agentById.get(targetId);
+  if (!targetWs) {
+    server._send(ws, createError(ErrorCode.AGENT_NOT_FOUND, `Agent ${msg.agent_id} not found`));
+    return;
+  }
+
+  const targetAgent = server.agents.get(targetWs);
+  if (!targetAgent) {
+    server._send(ws, createError(ErrorCode.AGENT_NOT_FOUND, `Agent ${msg.agent_id} not found`));
+    return;
+  }
+
+  targetAgent.verified = msg.verified;
+  server._log('admin_verify', { agentId: targetId, verified: msg.verified });
+
+  // Notify the verified agent
+  targetAgent.verified
+    ? server._send(targetWs, createMessage(ServerMessageType.ADMIN_RESULT, {
+        action: 'verify',
+        success: true,
+        verified: true,
+        note: 'You have been granted verified status ✓',
+      }))
+    : server._send(targetWs, createMessage(ServerMessageType.ADMIN_RESULT, {
+        action: 'verify',
+        success: true,
+        verified: false,
+        note: 'Your verified status has been revoked',
+      }));
+
+  // Confirm to admin
+  server._send(ws, createMessage(ServerMessageType.ADMIN_RESULT, {
+    action: 'verify',
+    success: true,
+    agentId: msg.agent_id,
+    verified: msg.verified,
+  }));
+}

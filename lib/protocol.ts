@@ -63,8 +63,9 @@ export const ClientMessageType = {
   ADMIN_BAN: 'ADMIN_BAN' as const,
   ADMIN_UNBAN: 'ADMIN_UNBAN' as const,
   ADMIN_MOTD: 'ADMIN_MOTD' as const,
-  // File transfer
-  FILE_CHUNK: 'FILE_CHUNK' as const,
+ // File transfer
+  ADMIN_VERIFY: 'ADMIN_VERIFY' as const,
+ FILE_CHUNK: 'FILE_CHUNK' as const,
   // Floor control
   RESPONDING_TO: 'RESPONDING_TO' as const,
   // Captcha
@@ -318,8 +319,10 @@ interface RawClientMessage {
   verdict?: string;
   reasoning?: string;
   // Floor control fields
+  // Floor control fields
   msg_id?: string;
   started_at?: number;
+  verified?: boolean;
 }
 
 /**
@@ -729,11 +732,23 @@ export function validateClientMessage(raw: string | RawClientMessage): Validatio
       break;
 
     case ClientMessageType.ADMIN_MOTD:
+     if (!msg.admin_key || typeof msg.admin_key !== 'string') {
+       return { valid: false, error: 'Missing admin_key' };
+     }
+     if (msg.motd !== undefined && msg.motd !== null && typeof msg.motd !== 'string') {
+       return { valid: false, error: 'motd must be a string or null' };
+     }
+     break;
+
+    case ClientMessageType.ADMIN_VERIFY:
       if (!msg.admin_key || typeof msg.admin_key !== 'string') {
         return { valid: false, error: 'Missing admin_key' };
       }
-      if (msg.motd !== undefined && msg.motd !== null && typeof msg.motd !== 'string') {
-        return { valid: false, error: 'motd must be a string or null' };
+      if (!msg.agent_id || typeof msg.agent_id !== 'string') {
+        return { valid: false, error: 'Missing agent_id' };
+      }
+      if (typeof msg.verified !== 'boolean') {
+        return { valid: false, error: 'verified must be a boolean' };
       }
       break;
 
