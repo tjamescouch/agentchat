@@ -29,6 +29,7 @@ export interface DaemonOptions {
   server: string;
   identity?: string;
   channels?: string[];
+  model?: string;
   name?: string;
   maxReconnectTime?: number;
 }
@@ -130,6 +131,7 @@ export function getDaemonPaths(instanceName: string = DEFAULT_INSTANCE): DaemonP
 // ============ AgentChatDaemon Class ============
 
 export class AgentChatDaemon {
+  model: string | null;
   server: string;
   identityPath: string;
   channels: string[];
@@ -150,6 +152,7 @@ export class AgentChatDaemon {
     this.identityPath = options.identity || DEFAULT_IDENTITY_PATH;
     this.channels = options.channels || DEFAULT_CHANNELS;
     this.instanceName = options.name || DEFAULT_INSTANCE;
+    this.model = options.model || null;
     this.maxReconnectTime = options.maxReconnectTime || MAX_RECONNECT_TIME;
 
     // Get instance-specific paths
@@ -441,6 +444,11 @@ export class AgentChatDaemon {
   }
 
   async start(): Promise<void> {
+    // Set model in process.env if provided
+    if (this.model) {
+      process.env.AGENT_MODEL = this.model;
+    }
+
     // Security check: prevent running in root/system directories
     enforceDirectorySafety(process.cwd(), { allowWarnings: true, silent: false });
 

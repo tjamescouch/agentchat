@@ -148,6 +148,7 @@ interface DaemonOptions {
   name: string;
   identity: string;
   channels: string[];
+  model?: string;
   background?: boolean;
   status?: boolean;
   list?: boolean;
@@ -799,6 +800,7 @@ program
   .option('--stop', 'Stop the daemon')
   .option('--stop-all', 'Stop all running daemons')
   .option('--max-reconnect-time <minutes>', 'Max time to attempt reconnection (default: 10 minutes)', '10')
+  .option('-m, --model <model>', 'AI model to use (haiku, sonnet, opus, gpt4.1, gpt5, o3, grok, etc)')
   .action(async (server: string | undefined, options: DaemonOptions) => {
     try {
       const instanceName = options.name;
@@ -929,6 +931,7 @@ program
         name: instanceName,
         identity: options.identity,
         channels: normalizedChannels,
+        model: options.model,
         maxReconnectTime: parseInt(options.maxReconnectTime) * 60 * 1000 // Convert minutes to ms
       });
 
