@@ -518,8 +518,14 @@ run_cli() {
 
         local niki_startup_timeout="${NIKI_STARTUP_TIMEOUT:-600}"
         local niki_dead_air="${NIKI_DEAD_AIR_TIMEOUT:-1440}"
+        local niki_kill_orphaned_mcp="${NIKI_KILL_ORPHANED_MCP:-false}"
 
         log "Niki: budget=${niki_budget} timeout=${niki_timeout}s sends=${niki_max_sends}/min tools=${niki_max_tools}/min startup=${niki_startup_timeout}s stall=${niki_stall_timeout}s dead-air=${niki_dead_air}min abort-file=${niki_abort_file}"
+
+
+        # Build optional flags array
+        local niki_extra_flags=()
+        [ "$niki_kill_orphaned_mcp" = "true" ] && niki_extra_flags+=(--kill-orphaned-mcp)
 
         set +e
         "$niki_cmd" \
@@ -533,6 +539,7 @@ run_cli() {
             --max-nudges "$niki_max_nudges" \
             --abort-file "$niki_abort_file" \
             --state "$niki_state" \
+            "${niki_extra_flags[@]}" \
             -- "$cmd" -p "$agent_prompt" \
             "${session_args[@]}" \
             "${system_prompt_args[@]}" \
@@ -548,6 +555,7 @@ run_cli() {
         CHILD_PID=""
         set -e
     else
+
         set +e
         "$cmd" -p "$agent_prompt" \
             "${session_args[@]}" \
@@ -708,10 +716,15 @@ run_gro() {
         local niki_abort_file="$STATE_DIR/abort"
         local niki_startup_timeout="${NIKI_STARTUP_TIMEOUT:-600}"
         local niki_dead_air="${NIKI_DEAD_AIR_TIMEOUT:-1440}"
+        local niki_kill_orphaned_mcp="${NIKI_KILL_ORPHANED_MCP:-false}"
 
         rm -f "$niki_abort_file"
 
         log "Niki: budget=${niki_budget} timeout=${niki_timeout}s sends=${niki_max_sends}/min tools=${niki_max_tools}/min startup=${niki_startup_timeout}s stall=${niki_stall_timeout}s dead-air=${niki_dead_air}min"
+
+        # Build optional flags array
+        local niki_extra_flags=()
+        [ "$niki_kill_orphaned_mcp" = "true" ] && niki_extra_flags+=(--kill-orphaned-mcp)
 
         set +e
         "$niki_cmd" \
@@ -725,6 +738,7 @@ run_gro() {
             --max-nudges "$niki_max_nudges" \
             --abort-file "$niki_abort_file" \
             --state "$niki_state" \
+            "${niki_extra_flags[@]}" \
             -- "$cmd" -p "$agent_prompt" \
             "${session_args[@]}" \
             "${system_prompt_args[@]}" \
