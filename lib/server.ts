@@ -83,9 +83,10 @@ import {
 import {
   handleAdminApprove,
   handleAdminRevoke,
-  handleAdminList,
-  handleAdminMotd,
+ handleAdminList,
+ handleAdminMotd,
 } from './server/handlers/admin.js';
+import { handleAdminVerify } from './server/handlers/admin.js';
 import {
   handleAdminKick,
   handleAdminBan,
@@ -1141,7 +1142,10 @@ export class AgentChatServer {
         handleAdminUnban(this, ws, msg);
         break;
       case ClientMessageType.ADMIN_MOTD:
-        handleAdminMotd(this, ws, msg);
+       handleAdminMotd(this, ws, msg);
+       break;
+      case ClientMessageType.ADMIN_VERIFY:
+        handleAdminVerify(this, ws, msg);
         break;
       // Floor control — RESPONDING_TO
       case ClientMessageType.RESPONDING_TO: {

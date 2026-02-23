@@ -55,5 +55,10 @@ export {
 
 // MOTD handler
 export {
-  handleAdminMotd,
+ handleAdminMotd,
+} from './admin.js';
+
+// Verify handler
+export {
+  handleAdminVerify,
 } from './admin.js';
