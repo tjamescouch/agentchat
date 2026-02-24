@@ -324,6 +324,12 @@ export function handleCreateChannel(server: AgentChatServer, ws: ExtendedWebSock
     return;
   }
 
+  // Block private channel creation if disabled server-wide
+  if (msg.invite_only && !server.privateChannelsEnabled) {
+    server._send(ws, createError(ErrorCode.INVALID_MSG, 'Private channels are disabled on this server'));
+    return;
+  }
+
   const channel = server._createChannel(msg.channel, msg.invite_only || false, msg.verified_only || false);
 
   // Creator is automatically invited and joined
@@ -347,6 +353,12 @@ export function handleCreateChannel(server: AgentChatServer, ws: ExtendedWebSock
  * Handle INVITE command
  */
 export function handleInvite(server: AgentChatServer, ws: ExtendedWebSocket, msg: InviteMessage): void {
+  // Block invites if private channels are disabled server-wide
+  if (!server.privateChannelsEnabled) {
+    server._send(ws, createError(ErrorCode.INVALID_MSG, 'Private channels are disabled on this server'));
+    return;
+  }
+
   const agent = server.agents.get(ws);
   if (!agent) {
     server._send(ws, createError(ErrorCode.AUTH_REQUIRED, 'Must IDENTIFY first'));

@@ -208,6 +208,7 @@ export interface AgentChatServerOptions {
   heartbeatIntervalMs?: number;
   heartbeatTimeoutMs?: number;
   minProposalAgeMs?: number;
+  privateChannelsEnabled?: boolean;
 }
 
 // Health status response
@@ -310,6 +311,9 @@ export class AgentChatServer {
 
   // Banlist
   banlist: Banlist | null;
+
+  // Private channels toggle
+  privateChannelsEnabled: boolean;
 
   // Callback engine
   callbackQueue: CallbackQueue;
@@ -431,6 +435,9 @@ export class AgentChatServer {
 
     // Anti-sybil
     this.minProposalAgeMs = options.minProposalAgeMs ?? 60000;
+
+    // Private channels — disabled by default
+    this.privateChannelsEnabled = options.privateChannelsEnabled ?? (process.env.PRIVATE_CHANNELS_ENABLED === 'true');
 
     // Genesis agent ID — hardcoded ID always granted verified:true
     this.genesisAgentId = options.genesisAgentId || process.env.GENESIS_AGENT_ID || '8addfe276526c9f6';
