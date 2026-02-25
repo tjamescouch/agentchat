@@ -275,7 +275,9 @@ export class AgentChatClient extends EventEmitter {
 
       const onError = (msg: ErrorMessage): void => {
         this.removeListener('joined', onJoined);
-        reject(new Error(msg.message));
+        const err = new Error(msg.message) as Error & { code?: string };
+        err.code = msg.code;
+        reject(err);
       };
 
       this.once('joined', onJoined);
@@ -389,7 +391,9 @@ export class AgentChatClient extends EventEmitter {
 
       const onError = (msg: ErrorMessage): void => {
         this.removeListener('joined', onJoined);
-        reject(new Error(msg.message));
+        const err = new Error(msg.message) as Error & { code?: string };
+        err.code = msg.code;
+        reject(err);
       };
 
       this.once('joined', onJoined);

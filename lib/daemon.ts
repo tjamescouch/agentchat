@@ -392,14 +392,25 @@ export class AgentChatDaemon {
       this._log('info', `Connected as ${this.client.agentId}`);
 
       // Join channels
+      const permanentlyAbsent = new Set<string>();
       for (const channel of this.channels) {
         try {
           await this.client.join(channel);
           this._log('info', `Joined ${channel}`);
         } catch (err) {
-          const error = err as Error;
-          this._log('error', `Failed to join ${channel}: ${error.message}`);
+          const error = err as Error & { code?: string };
+          if (error.code === 'CHANNEL_NOT_FOUND' || error.code === 'NOT_INVITED') {
+            // Permanent failure — skip this channel on reconnects too
+            permanentlyAbsent.add(channel);
+            this._log('warn', `Skipping ${channel} permanently: ${error.message} (${error.code})`);
+          } else {
+            this._log('error', `Failed to join ${channel}: ${error.message}`);
+          }
         }
+      }
+      // Remove permanently absent channels so reconnects don't retry them
+      if (permanentlyAbsent.size > 0) {
+        this.channels = this.channels.filter(c => !permanentlyAbsent.has(c));
       }
 
       return true;
