@@ -209,6 +209,7 @@ export interface AgentChatServerOptions {
   heartbeatTimeoutMs?: number;
   minProposalAgeMs?: number;
   privateChannelsEnabled?: boolean;
+  ntfySecret?: string | null;
 }
 
 // Health status response
@@ -326,6 +327,10 @@ export class AgentChatServer {
 
   // Per-IP connection limiting
   maxConnectionsPerIp: number;
+  connectionsByIp: Map<string, number>;
+
+  // NTFY notification secret
+  ntfySecret: string | null;
   connectionsByIp: Map<string, number>;
 
   // WebSocket heartbeat (server-initiated ping/pong)
@@ -481,6 +486,8 @@ export class AgentChatServer {
 
     // Per-IP connection limiting
     this.maxConnectionsPerIp = options.maxConnectionsPerIp || parseInt(process.env.MAX_CONNECTIONS_PER_IP || '0');
+n    // NTFY notification support
+    this.ntfySecret = options.ntfySecret || process.env.NTFY_SECRET || null;
     this.connectionsByIp = new Map();
 
     // WebSocket heartbeat

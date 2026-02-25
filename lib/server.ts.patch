@@ -1,0 +1,30 @@
+--- a/lib/server.ts
++++ b/lib/server.ts
+@@ -213,6 +213,7 @@ export interface AgentChatServerOptions {
+   minProposalAgeMs?: number;
+   privateChannelsEnabled?: boolean;
++  ntfySecret?: string | null;
+ }
+ 
+ // Health status response
+@@ -330,6 +331,9 @@ export class AgentChatServer {
+ 
+   // Per-IP connection limiting
+   maxConnectionsPerIp: number;
+   connectionsByIp: Map<string, number>;
++
++  // NTFY notification secret
++  ntfySecret: string | null;
+ 
+   // WebSocket heartbeat (server-initiated ping/pong)
+   heartbeatIntervalMs: number;
+@@ -487,6 +491,9 @@ export class AgentChatServer {
+ 
+     this.maxConnectionsPerIp = options.maxConnectionsPerIp || parseInt(process.env.MAX_CONNECTIONS_PER_IP || '0');
+ 
++    // NTFY notification support
++    this.ntfySecret = options.ntfySecret || process.env.NTFY_SECRET || null;
++
+     // Log startup info
+     this._log('startup', {
+       version: process.env.npm_package_version || '0.0.0',

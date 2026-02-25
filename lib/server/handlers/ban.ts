@@ -17,6 +17,7 @@ import {
   createMessage,
   createError,
 } from '../../protocol.js';
+import { sendNtfyNotification } from '../../ntfy.js';
 
 
 /**
@@ -42,12 +43,19 @@ export function handleAdminKick(server: AgentChatServer, ws: ExtendedWebSocket, 
     return;
   }
 
+  // Get agent state for nick
+  const agent = server.agents.get(targetWs);
+  const agentName = agent?.name || `anon_${targetId}`;
+
   // Send KICKED to target before disconnecting
   server._send(targetWs, createMessage(ServerMessageType.KICKED, {
     reason: msg.reason || 'Kicked by admin',
   }));
 
   server._log('admin_kick', { targetId, reason: msg.reason });
+
+  // Send NTFY notification with agent nick
+  sendNtfyNotification(server.ntfySecret, 'kick', targetId, agentName, msg.reason);
 
   // Disconnect the target
   server._handleDisconnect(targetWs);
@@ -85,11 +93,21 @@ export function handleAdminBan(server: AgentChatServer, ws: ExtendedWebSocket, m
   // If the agent is currently online, kick them
   const targetWs = server.agentById.get(targetId);
   if (targetWs) {
+    const agent = server.agents.get(targetWs);
+    const agentName = agent?.name || `anon_${targetId}`;
+
     server._send(targetWs, createMessage(ServerMessageType.BANNED, {
       reason: msg.reason || 'Banned by admin',
     }));
+
+    // Send NTFY notification with agent nick
+    sendNtfyNotification(server.ntfySecret, 'ban', targetId, agentName, msg.reason);
+
     server._handleDisconnect(targetWs);
     (targetWs as WebSocket).close(1000, 'Banned by admin');
+  } else {
+    // Agent not online, but still send NTFY notification
+    sendNtfyNotification(server.ntfySecret, 'ban', targetId, `anon_${targetId}`, msg.reason);
   }
 
   // Confirm to admin
