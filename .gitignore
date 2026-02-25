@@ -47,6 +47,8 @@ deploy.yaml
 *.log
 logs/
 
+.gro
+
 # Misc
 bans.json
 first-seen.json
