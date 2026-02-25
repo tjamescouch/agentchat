@@ -526,7 +526,7 @@ run_cli() {
         # Build optional flags array
         local niki_extra_flags=()
         [ "$niki_kill_orphaned_mcp" = "true" ] && niki_extra_flags+=(--kill-orphaned-mcp)
-        [ -n "${NTFY:-}" ] && niki_extra_flags+=(--on-kill "curl -d \"[\$NIKI_NICK] killed\" https://ntfy.sh/$NTFY")
+        [ -n "${NTFY:-}" ] && niki_extra_flags+=(--on-kill "curl -s -H 'Title: niki' -d \"[\$NIKI_NICK] \$NIKI_KILL_REASON — \${NIKI_TOKENS}tok \${NIKI_DURATION}s\" https://ntfy.sh/$NTFY")
 
         set +e
         "$niki_cmd" \
@@ -727,7 +727,7 @@ run_gro() {
         # Build optional flags array
         local niki_extra_flags=()
         [ "$niki_kill_orphaned_mcp" = "true" ] && niki_extra_flags+=(--kill-orphaned-mcp)
-        [ -n "${NTFY:-}" ] && niki_extra_flags+=(--on-kill "curl -d \"[\$NIKI_NICK] killed\" https://ntfy.sh/$NTFY")
+        [ -n "${NTFY:-}" ] && niki_extra_flags+=(--on-kill "curl -s -H 'Title: niki' -d \"[\$NIKI_NICK] \$NIKI_KILL_REASON — \${NIKI_TOKENS}tok \${NIKI_DURATION}s\" https://ntfy.sh/$NTFY")
 
         set +e
         "$niki_cmd" \
