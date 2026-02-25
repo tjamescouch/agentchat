@@ -154,8 +154,6 @@ export class AgentChatClient extends EventEmitter {
       this.ws = new WebSocket(this.server);
 
       this.ws.on('open', () => {
-        // Flush any messages queued while reconnecting
-        this._flushQueue();
         // Send identify
         this._send({
           type: ClientMessageType.IDENTIFY,
@@ -237,6 +235,8 @@ export class AgentChatClient extends EventEmitter {
       this.once('welcome', (info: WelcomeMessage) => {
         this.connected = true;
         this.agentId = info.agent_id;
+        // Flush queued messages now that we are authenticated
+        this._flushQueue();
         resolve(info);
       });
 
