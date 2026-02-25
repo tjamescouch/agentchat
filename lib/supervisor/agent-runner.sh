@@ -517,12 +517,8 @@ run_cli() {
         rm -f "$niki_abort_file"
 
         local niki_startup_timeout="${NIKI_STARTUP_TIMEOUT:-600}"
-<<<<<<< HEAD
-        local niki_dead_air="${NIKI_DEAD_AIR_TIMEOUT:-144000}"
-=======
         local niki_dead_air="${NIKI_DEAD_AIR_TIMEOUT:-1440}"
         local niki_kill_orphaned_mcp="${NIKI_KILL_ORPHANED_MCP:-false}"
->>>>>>> 97eb6618175b354c86bb10c2e3f2f47574b12eda
 
         log "Niki: budget=${niki_budget} timeout=${niki_timeout}s sends=${niki_max_sends}/min tools=${niki_max_tools}/min startup=${niki_startup_timeout}s stall=${niki_stall_timeout}s dead-air=${niki_dead_air}min abort-file=${niki_abort_file}"
 
@@ -721,7 +717,7 @@ run_gro() {
         local niki_state="$STATE_DIR/niki-state.json"
         local niki_abort_file="$STATE_DIR/abort"
         local niki_startup_timeout="${NIKI_STARTUP_TIMEOUT:-600}"
-        local niki_dead_air="${NIKI_DEAD_AIR_TIMEOUT:-144000}"
+        local niki_dead_air="${NIKI_DEAD_AIR_TIMEOUT:-1440}"
         local niki_kill_orphaned_mcp="${NIKI_KILL_ORPHANED_MCP:-false}"
 
         rm -f "$niki_abort_file"
