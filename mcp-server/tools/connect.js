@@ -305,6 +305,26 @@ function startKeepalive() {
 /**
  * Register the connect tool with the MCP server
  */
+/**
+ * Ensure the client is connected, auto-reconnecting if possible.
+ * Returns true if connected (or reconnected), false if no connection options saved.
+ */
+export async function ensureConnected() {
+  if (client && client.connected) return true;
+  if (!connectionOptions) return false;
+  if (isReconnecting()) {
+    // Wait for in-progress reconnect (up to 15s)
+    for (let i = 0; i < 30; i++) {
+      await new Promise(r => setTimeout(r, 500));
+      if (client && client.connected) return true;
+      if (!isReconnecting()) break;
+    }
+    return !!(client && client.connected);
+  }
+  await attemptReconnect();
+  return !!(client && client.connected);
+}
+
 export function registerConnectTool(server) {
   server.tool(
     'agentchat_connect',

@@ -16,6 +16,7 @@ import { getDaemonPaths } from '../dist/lib/daemon.js';
 import { addJitter } from '../dist/lib/jitter.js';
 import { ClientMessageType } from '../dist/lib/protocol.js';
 import { client, getLastSeen, updateLastSeen, incrementIdleCount, resetIdleCount, trackChannel, joinedChannels } from '../state.js';
+import { ensureConnected } from './connect.js';
 
 // Timeout bounds
 const DEFAULT_TIMEOUT_S = 60;    // default listen timeout in seconds
@@ -168,10 +169,13 @@ export function registerListenTool(server) {
     async ({ channels, tail, timeout }) => {
       try {
         if (!client || !client.connected) {
-          return {
-            content: [{ type: 'text', text: 'Not connected. Use agentchat_connect first.' }],
-            isError: true,
-          };
+          const reconnected = await ensureConnected();
+          if (!reconnected) {
+            return {
+              content: [{ type: 'text', text: 'Not connected. Use agentchat_connect first.' }],
+              isError: true,
+            };
+          }
         }
 
         const startTime = Date.now();

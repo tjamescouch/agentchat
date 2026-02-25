@@ -7,6 +7,7 @@
 
 import { z } from 'zod';
 import { client } from '../state.js';
+import { ensureConnected } from './connect.js';
 
 /**
  * Register the claim tool with the MCP server
@@ -22,10 +23,13 @@ export function registerClaimTool(server) {
     async ({ msg_id, channel }) => {
       try {
         if (!client || !client.connected) {
-          return {
-            content: [{ type: 'text', text: 'Not connected. Use agentchat_connect first.' }],
-            isError: true,
-          };
+          const reconnected = await ensureConnected();
+          if (!reconnected) {
+            return {
+              content: [{ type: 'text', text: 'Not connected. Use agentchat_connect first.' }],
+              isError: true,
+            };
+          }
         }
 
         if (!channel.startsWith('#')) {

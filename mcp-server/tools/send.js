@@ -5,6 +5,7 @@
 
 import { z } from 'zod';
 import { client } from '../state.js';
+import { ensureConnected } from './connect.js';
 
 /**
  * Register the send tool with the MCP server
@@ -20,19 +21,14 @@ export function registerSendTool(server) {
     },
     async ({ target, message, in_reply_to }) => {
       try {
-        if (!client || !client.connected) {
-          return {
-            content: [{ type: 'text', text: 'Not connected. Use agentchat_connect first.' }],
-            isError: true,
-          };
-        }
-
-        // Check actual WebSocket state to catch the CLOSING race window
-        if (client.ws && client.ws.readyState !== 1 /* OPEN */) {
-          return {
-            content: [{ type: 'text', text: 'Connection is closing or closed. Waiting for reconnect — retry in a few seconds.' }],
-            isError: true,
-          };
+        if (!client || !client.connected || (client.ws && client.ws.readyState !== 1)) {
+          const reconnected = await ensureConnected();
+          if (!reconnected) {
+            return {
+              content: [{ type: 'text', text: 'Not connected. Use agentchat_connect first.' }],
+              isError: true,
+            };
+          }
         }
 
         // Join channel if needed
