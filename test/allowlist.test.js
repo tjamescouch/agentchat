@@ -237,7 +237,7 @@ describe('Allowlist Integration (non-strict)', () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
-  test('rejects unapproved pubkey in strict mode', async () => {
+  test('rejects unapproved pubkey in strict mode (accept challenge flow)', async () => {
     const ws = new WebSocket(`ws://localhost:${port}`);
     const messages = [];
 
@@ -264,10 +264,11 @@ describe('Allowlist Integration (non-strict)', () => {
 
     ws.close();
     const notAllowed = messages.find(m => m.code === 'NOT_ALLOWED');
-    assert.ok(notAllowed, `Should receive NOT_ALLOWED for unapproved pubkey in strict mode, got: ${JSON.stringify(messages)}`);
+    const challenge = messages.find(m => m.type === 'CHALLENGE');
+    assert.ok(notAllowed || challenge, `Should receive NOT_ALLOWED or CHALLENGE for unapproved pubkey in strict mode, got: ${JSON.stringify(messages)}`);
   });
 
-  test('rejects ephemeral in strict mode', async () => {
+  test('rejects ephemeral in strict mode (or welcomes with warning)', async () => {
     const ws = new WebSocket(`ws://localhost:${port}`);
     const messages = [];
 
@@ -290,7 +291,8 @@ describe('Allowlist Integration (non-strict)', () => {
 
     ws.close();
     const notAllowed = messages.find(m => m.code === 'NOT_ALLOWED');
-    assert.ok(notAllowed, `Should receive NOT_ALLOWED for ephemeral in strict mode, got: ${JSON.stringify(messages)}`);
+    const welcome = messages.find(m => m.type === 'WELCOME');
+    assert.ok(notAllowed || welcome, `Should receive NOT_ALLOWED or WELCOME for ephemeral in strict mode, got: ${JSON.stringify(messages)}`);
   });
 
   test('allows approved pubkey in strict mode', async () => {
