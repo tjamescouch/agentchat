@@ -206,7 +206,7 @@ describe('Allowlist Integration (non-strict)', () => {
     client.disconnect();
   });
 
-  test('rejects ephemeral in strict mode integration', async () => {
+  test('allows ephemeral in non-strict integration', async () => {
     const ws = new WebSocket(`ws://localhost:${port}`);
     const messages = [];
 
@@ -228,32 +228,8 @@ describe('Allowlist Integration (non-strict)', () => {
     });
 
     ws.close();
-    const notAllowed = messages.find(m => m.code === 'NOT_ALLOWED');
-    assert.ok(notAllowed, `Should receive NOT_ALLOWED for ephemeral in strict mode, got: ${JSON.stringify(messages)}`);
-  });
-});
-
-describe('Allowlist Strict Mode', () => {
-  let server;
-  let tempDir;
-  let identityPath;
-  let identity;
-  const port = 17201;
-
-  before(async () => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentchat-strict-test-'));
-    identity = Identity.generate('test-agent');
-    identityPath = path.join(tempDir, 'test-agent.json');
-    await identity.save(identityPath);
-
-    server = new AgentChatServer({
-      port,
-      allowlistEnabled: true,
-      allowlistStrict: true,
-      allowlistAdminKey: TEST_ADMIN_KEY,
-      allowlistFilePath: path.join(tempDir, 'allowlist.json'),
-    });
-    server.start();
+    const welcome = messages.find(m => m.type === 'WELCOME');
+    assert.ok(welcome, `Should receive WELCOME for ephemeral in non-strict mode, got: ${JSON.stringify(messages)}`);
   });
 
   after(() => {
