@@ -111,6 +111,7 @@ export interface ExtendedWebSocket extends WebSocket {
   _isAlive?: boolean;
   _lastPong?: number;
   _lastNickChange?: number;
+  _seenMsgIds?: Set<string>;
 }
 
 // Agent info stored per connection
@@ -590,6 +591,11 @@ export class AgentChatServer {
     if (!ch || ch.messageBuffer.length === 0) return;
 
     for (const msg of ch.messageBuffer) {
+      // Skip messages already delivered live to this connection (dedup)
+      const msgWithId = msg as AnyMessage & { msg_id?: string };
+      if (msgWithId.msg_id && ws._seenMsgIds?.has(msgWithId.msg_id)) {
+        continue;
+      }
       // Send with replay flag so client knows it's history
       this._send(ws, { ...msg, replay: true });
     }
@@ -653,6 +659,12 @@ export class AgentChatServer {
   _send(ws: ExtendedWebSocket, msg: AnyMessage): void {
     if (ws.readyState === 1) { // OPEN
       try {
+        // Track msg_id so we can skip duplicate replays
+        const msgWithId = msg as AnyMessage & { msg_id?: string };
+        if (msgWithId.msg_id && !msg.replay) {
+          if (!ws._seenMsgIds) ws._seenMsgIds = new Set();
+          ws._seenMsgIds.add(msgWithId.msg_id);
+        }
         ws.send(serialize(msg));
       } catch (err) {
         this._log('send_error', { error: err instanceof Error ? { message: err.message, stack: err.stack } : String(err), conn_id: ws._connId });
@@ -1309,6 +1321,7 @@ export class AgentChatServer {
     this.agents.delete(ws);
     this.lastMessageTime.delete(ws);
     this.lastFileChunkTime.delete(ws);
+    if (ws._seenMsgIds) ws._seenMsgIds.clear();
     if (agent.pubkey) {
       this.pubkeyToId.delete(agent.pubkey);
     }
