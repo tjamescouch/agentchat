@@ -687,6 +687,14 @@ export class AgentChatServer {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(health));
       } else if (req.method === 'GET' && req.url === '/api/connections') {
+        // Admin-only: requires X-Admin-Key header matching AGENTCHAT_ADMIN_KEY env var
+        const adminKey = process.env.AGENTCHAT_ADMIN_KEY;
+        const providedKey = req.headers['x-admin-key'];
+        if (!adminKey || !providedKey || providedKey !== adminKey) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Unauthorized' }));
+          return;
+        }
         // Get current connections with geo data
         const connections = Array.from(this.agentById.entries()).map(([agentId, ws]) => {
           const ews = ws as ExtendedWebSocket;
@@ -701,7 +709,7 @@ export class AgentChatServer {
             user_agent: ews._userAgent
           };
         });
-        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ connections, count: connections.length }));
       } else {
         res.writeHead(404);
@@ -1008,16 +1016,15 @@ export class AgentChatServer {
     const maxMessages = isIdentified ? 60 : 10;
 
     if (ws._msgTimestamps.length > maxMessages) {
-      if (!isIdentified) {
-        this._log('pre_auth_rate_limit', {
-          ip: ws._realIp,
-          count: ws._msgTimestamps.length,
-          window: '10s'
-        });
-        ws.close(1008, 'Rate limit exceeded');
-        return;
-      }
-      this._send(ws, createError(ErrorCode.RATE_LIMITED, 'Too many messages'));
+      const logEvent = isIdentified ? 'post_auth_rate_limit' : 'pre_auth_rate_limit';
+      this._log(logEvent, {
+        ip: ws._realIp,
+        agent: isIdentified ? this._getAgentId(ws) : undefined,
+        count: ws._msgTimestamps.length,
+        window: '10s'
+      });
+      // Disconnect in both cases — soft error is not a sufficient deterrent
+      ws.close(1008, 'Rate limit exceeded');
       return;
     }
 

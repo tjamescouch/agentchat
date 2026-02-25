@@ -93,7 +93,8 @@ const DEFAULT_INSTANCE = 'default';
 
 const DEFAULT_CHANNELS = ['#general', '#agents', '#code-review', '#servers'];
 const MAX_INBOX_LINES = 1000;
-const RECONNECT_DELAY = 5000; // 5 seconds
+const RECONNECT_BASE_DELAY = 2000; // 2 seconds initial delay
+const RECONNECT_MAX_DELAY = 60000; // 60 seconds cap
 const MAX_RECONNECT_TIME = 10 * 60 * 1000; // 10 minutes default
 const OUTBOX_POLL_INTERVAL = 500; // 500ms
 
@@ -143,6 +144,7 @@ export class AgentChatDaemon {
   private running: boolean;
   private reconnecting: boolean;
   private reconnectStartTime: number | null;
+  private reconnectAttempts: number;
   private outboxWatcher: fs.FSWatcher | null;
   private outboxPollInterval: NodeJS.Timeout | null;
   private lastOutboxSize: number;
@@ -162,6 +164,7 @@ export class AgentChatDaemon {
     this.running = false;
     this.reconnecting = false;
     this.reconnectStartTime = null;
+    this.reconnectAttempts = 0;
     this.outboxWatcher = null;
     this.outboxPollInterval = null;
     this.lastOutboxSize = 0;
@@ -425,22 +428,33 @@ export class AgentChatDaemon {
     }
 
     this.reconnecting = true;
+    this.reconnectAttempts++;
+
+    // Exponential backoff with jitter: base * 2^n + random [0,1000ms] jitter, capped at max
+    const exponential = Math.min(
+      RECONNECT_BASE_DELAY * Math.pow(2, this.reconnectAttempts - 1),
+      RECONNECT_MAX_DELAY
+    );
+    const jitter = Math.floor(Math.random() * 1000);
+    const delay = exponential + jitter;
+
     const remaining = Math.round((this.maxReconnectTime - elapsed) / 1000);
-    this._log('info', `Reconnecting in ${RECONNECT_DELAY / 1000} seconds... (${remaining}s until timeout)`);
+    this._log('info', `Reconnecting in ${(delay / 1000).toFixed(1)}s (attempt ${this.reconnectAttempts}, ${remaining}s until timeout)`);
 
     setTimeout(async () => {
       this.reconnecting = false;
       if (this.running) {
         const connected = await this._connect();
         if (connected) {
-          // Reset reconnect timer on successful connection
+          // Reset reconnect state on successful connection
           this.reconnectStartTime = null;
+          this.reconnectAttempts = 0;
           this._log('info', 'Reconnected successfully');
         } else {
           this._scheduleReconnect();
         }
       }
-    }, RECONNECT_DELAY);
+    }, delay);
   }
 
   async start(): Promise<void> {
