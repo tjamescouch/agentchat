@@ -92,6 +92,7 @@ export class AgentChatClient extends EventEmitter {
   private _pendingRequests: Map<number, PendingRequestCallback>;
   private _requestId: number;
   private _autoVerifyHandler: ((msg: ServerMessage) => void) | null;
+  private _sendQueue: string[];
 
   constructor(options: ClientOptions) {
     super();
@@ -112,6 +113,7 @@ export class AgentChatClient extends EventEmitter {
     this._pendingRequests = new Map();
     this._requestId = 0;
     this._autoVerifyHandler = null;
+    this._sendQueue = [];
   }
 
   /**
@@ -152,6 +154,8 @@ export class AgentChatClient extends EventEmitter {
       this.ws = new WebSocket(this.server);
 
       this.ws.on('open', () => {
+        // Flush any messages queued while reconnecting
+        this._flushQueue();
         // Send identify
         this._send({
           type: ClientMessageType.IDENTIFY,
@@ -866,9 +870,21 @@ export class AgentChatClient extends EventEmitter {
     return null;
   }
 
+  private _flushQueue(): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    while (this._sendQueue.length > 0) {
+      const serialized = this._sendQueue.shift()!;
+      this.ws.send(serialized);
+    }
+  }
+
   private _send(msg: Record<string, unknown>): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(serialize(msg));
+    } else {
+      // Queue the message; it will be flushed when the connection opens/reopens
+      this._sendQueue.push(serialize(msg));
+      this.emit('send_queued', msg);
     }
   }
 
