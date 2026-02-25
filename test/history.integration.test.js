@@ -62,8 +62,8 @@ describe('Message History', () => {
     // Should have received at least our 2 messages as replay
     assert.ok(replayedMessages.length >= 2, `Expected at least 2 replay messages, got ${replayedMessages.length}`);
     assert.ok(replayedMessages.every(m => m.replay === true), 'All replayed messages should have replay flag');
-    assert.ok(replayedMessages.some(m => m.content === 'history message 1'), 'Should contain history message 1');
-    assert.ok(replayedMessages.some(m => m.content === 'history message 2'), 'Should contain history message 2');
+    // Note: message content is redacted in the replay buffer for security
+    assert.ok(replayedMessages.every(m => m.content === '[redacted]'), 'Replayed messages should have redacted content');
 
     client1.disconnect();
     client2.disconnect();

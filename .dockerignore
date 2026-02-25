@@ -1,0 +1,10 @@
+node_modules
+.git
+*.md
+test
+tests
+*.test.ts
+*.test.js
+.env
+.env.*
+knip.json

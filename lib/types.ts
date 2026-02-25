@@ -47,6 +47,8 @@ export enum ClientMessageType {
   ADMIN_BAN = 'ADMIN_BAN',
   ADMIN_UNBAN = 'ADMIN_UNBAN',
   ADMIN_MOTD = 'ADMIN_MOTD',
+  ADMIN_VERIFY = 'ADMIN_VERIFY',
+  ADMIN_OPEN_WINDOW = 'ADMIN_OPEN_WINDOW',
   // File transfer
   FILE_CHUNK = 'FILE_CHUNK'
 }
@@ -365,10 +367,22 @@ export interface AdminUnbanMessage extends BaseMessage {
 }
 
 export interface AdminMotdMessage extends BaseMessage {
-  type: 'ADMIN_MOTD';
+ type: 'ADMIN_MOTD';
+ admin_key: string;
+ motd: string | null;
+ kick?: boolean;
+}
+
+export interface AdminVerifyMessage extends BaseMessage {
+  type: ClientMessageType.ADMIN_VERIFY;
+  agent_id: string;
   admin_key: string;
-  motd: string | null;
-  kick?: boolean;
+  verified: boolean;
+}
+export interface AdminOpenWindowMessage extends BaseMessage {
+  type: ClientMessageType.ADMIN_OPEN_WINDOW;
+  admin_key: string;
+  duration_ms?: number;  // default 5 minutes
 }
 
 export interface VerifyIdentityMessage extends BaseMessage {
@@ -487,6 +501,8 @@ export type ClientMessage =
   | AdminBanMessage
   | AdminUnbanMessage
   | AdminMotdMessage
+  | AdminVerifyMessage
+  | AdminOpenWindowMessage
   | FileChunkMessage
   | CaptchaResponseMessage;
 

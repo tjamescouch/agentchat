@@ -52,3 +52,4 @@ logs/
 # Misc
 bans.json
 first-seen.json
+*.bak*

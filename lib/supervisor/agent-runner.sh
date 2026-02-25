@@ -350,8 +350,37 @@ find_gro_cmd() {
         return
     fi
 
-    # 1. npm bin symlink (canonical — created by `npm install -g` from package.json bin field)
-    #    This points to dist/main.js (the compiled Node.js runtime), not the bash dispatcher.
+    # Prefer npm-installed gro package over global binary
+    local npm_gro
+    npm_gro="$(dirname "$(realpath "$0" 2>/dev/null || echo "$0")")/../node_modules/@tjamescouch/gro/gro"
+    if [ -x "$npm_gro" ]; then
+        echo "$npm_gro"
+        return
+    fi
+
+    # Check relative to working directory (e.g. when run from repo root)
+    if [ -x "./node_modules/@tjamescouch/gro/gro" ]; then
+        echo "./node_modules/@tjamescouch/gro/gro"
+        return
+    fi
+
+    # Fallback: global npm lib (where `npm install -g` puts packages)
+    local global_npm_gro
+    global_npm_gro="$(npm root -g 2>/dev/null)/@tjamescouch/gro/gro"
+    if [ -n "$global_npm_gro" ] && [ -x "$global_npm_gro" ]; then
+        echo "$global_npm_gro"
+        return
+    fi
+
+    # Fallback: npx resolution
+    local npx_gro
+    npx_gro="$(npx --no-install -c 'which gro' 2>/dev/null || true)"
+    if [ -n "$npx_gro" ] && [ -x "$npx_gro" ]; then
+        echo "$npx_gro"
+        return
+    fi
+
+    # Fallback: global binary
     if command -v gro > /dev/null 2>&1; then
         command -v gro
         return
@@ -488,9 +517,20 @@ run_cli() {
         rm -f "$niki_abort_file"
 
         local niki_startup_timeout="${NIKI_STARTUP_TIMEOUT:-600}"
+<<<<<<< HEAD
         local niki_dead_air="${NIKI_DEAD_AIR_TIMEOUT:-144000}"
+=======
+        local niki_dead_air="${NIKI_DEAD_AIR_TIMEOUT:-1440}"
+        local niki_kill_orphaned_mcp="${NIKI_KILL_ORPHANED_MCP:-false}"
+>>>>>>> 97eb6618175b354c86bb10c2e3f2f47574b12eda
 
         log "Niki: budget=${niki_budget} timeout=${niki_timeout}s sends=${niki_max_sends}/min tools=${niki_max_tools}/min startup=${niki_startup_timeout}s stall=${niki_stall_timeout}s dead-air=${niki_dead_air}min abort-file=${niki_abort_file}"
+
+
+        # Build optional flags array
+        local niki_extra_flags=()
+        [ "$niki_kill_orphaned_mcp" = "true" ] && niki_extra_flags+=(--kill-orphaned-mcp)
+        [ -n "${NTFY:-}" ] && niki_extra_flags+=(--on-kill "curl -s -d \"KILLED [\$NIKI_KILL_REASON] \$NIKI_CMD — \${NIKI_TOKENS} tokens, \${NIKI_DURATION}s\" ntfy.sh/$NTFY")
 
         set +e
         "$niki_cmd" \
@@ -504,6 +544,7 @@ run_cli() {
             --max-nudges "$niki_max_nudges" \
             --abort-file "$niki_abort_file" \
             --state "$niki_state" \
+            "${niki_extra_flags[@]}" \
             -- "$cmd" -p "$agent_prompt" \
             "${session_args[@]}" \
             "${system_prompt_args[@]}" \
@@ -519,6 +560,7 @@ run_cli() {
         CHILD_PID=""
         set -e
     else
+
         set +e
         "$cmd" -p "$agent_prompt" \
             "${session_args[@]}" \
@@ -679,10 +721,16 @@ run_gro() {
         local niki_abort_file="$STATE_DIR/abort"
         local niki_startup_timeout="${NIKI_STARTUP_TIMEOUT:-600}"
         local niki_dead_air="${NIKI_DEAD_AIR_TIMEOUT:-144000}"
+        local niki_kill_orphaned_mcp="${NIKI_KILL_ORPHANED_MCP:-false}"
 
         rm -f "$niki_abort_file"
 
         log "Niki: budget=${niki_budget} timeout=${niki_timeout}s sends=${niki_max_sends}/min tools=${niki_max_tools}/min startup=${niki_startup_timeout}s stall=${niki_stall_timeout}s dead-air=${niki_dead_air}min"
+
+        # Build optional flags array
+        local niki_extra_flags=()
+        [ "$niki_kill_orphaned_mcp" = "true" ] && niki_extra_flags+=(--kill-orphaned-mcp)
+        [ -n "${NTFY:-}" ] && niki_extra_flags+=(--on-kill "curl -s -d \"KILLED [\$NIKI_KILL_REASON] \$NIKI_CMD — \${NIKI_TOKENS} tokens, \${NIKI_DURATION}s\" ntfy.sh/$NTFY")
 
         set +e
         "$niki_cmd" \
@@ -696,6 +744,7 @@ run_gro() {
             --max-nudges "$niki_max_nudges" \
             --abort-file "$niki_abort_file" \
             --state "$niki_state" \
+            "${niki_extra_flags[@]}" \
             -- "$cmd" -p "$agent_prompt" \
             "${session_args[@]}" \
             "${system_prompt_args[@]}" \

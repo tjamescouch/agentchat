@@ -5,6 +5,7 @@
 
 import type { WebSocket } from 'ws';
 import type { AgentChatServer } from '../../server.js';
+import type { ExtendedWebSocket } from '../../server.js';
 import type {
   AdminApproveMessage,
   AdminRevokeMessage,
@@ -18,12 +19,6 @@ import {
   createError,
 } from '../../protocol.js';
 
-// Extended WebSocket with custom properties
-interface ExtendedWebSocket extends WebSocket {
-  _connectedAt?: number;
-  _realIp?: string;
-  _userAgent?: string;
-}
 
 /**
  * Handle ADMIN_APPROVE command - add a pubkey to the allowlist
@@ -144,4 +139,87 @@ export function handleAdminMotd(server: AgentChatServer, ws: ExtendedWebSocket, 
     motd: server.motd,
     kicked: msg.kick || false,
   }));
+}
+
+/**
+ * Handle ADMIN_VERIFY command - grant or revoke verified (blue checkmark) status
+ */
+export function handleAdminVerify(server: AgentChatServer, ws: ExtendedWebSocket, msg: import('../../types.js').AdminVerifyMessage): void {
+  const adminKey = process.env.AGENTCHAT_ADMIN_KEY;
+  if (!adminKey || msg.admin_key !== adminKey) {
+    server._send(ws, createError(ErrorCode.AUTH_REQUIRED, 'Invalid admin key'));
+    return;
+  }
+
+  const targetId = msg.agent_id.startsWith('@') ? msg.agent_id.slice(1) : msg.agent_id;
+  const targetWs = server.agentById.get(targetId);
+  if (!targetWs) {
+    server._send(ws, createError(ErrorCode.AGENT_NOT_FOUND, `Agent ${msg.agent_id} not found`));
+    return;
+  }
+
+  const targetAgent = server.agents.get(targetWs);
+  if (!targetAgent) {
+    server._send(ws, createError(ErrorCode.AGENT_NOT_FOUND, `Agent ${msg.agent_id} not found`));
+    return;
+  }
+
+  targetAgent.verified = msg.verified;
+  server._log('admin_verify', { agentId: targetId, verified: msg.verified });
+
+  // Notify the verified agent
+  targetAgent.verified
+    ? server._send(targetWs, createMessage(ServerMessageType.ADMIN_RESULT, {
+        action: 'verify',
+        success: true,
+        verified: true,
+        note: 'You have been granted verified status ✓',
+      }))
+    : server._send(targetWs, createMessage(ServerMessageType.ADMIN_RESULT, {
+        action: 'verify',
+        success: true,
+        verified: false,
+        note: 'Your verified status has been revoked',
+      }));
+
+  // Confirm to admin
+  server._send(ws, createMessage(ServerMessageType.ADMIN_RESULT, {
+    action: 'verify',
+    success: true,
+    agentId: msg.agent_id,
+    verified: msg.verified,
+  }));
+}
+
+/**
+ * Handle ADMIN_OPEN_WINDOW command - allow new agents to join without
+ * the 1-hour lurk requirement for the next N milliseconds (default 5 min).
+ */
+export function handleAdminOpenWindow(server: AgentChatServer, ws: ExtendedWebSocket, msg: import('../../types.js').AdminOpenWindowMessage): void {
+  const adminKey = process.env.AGENTCHAT_ADMIN_KEY;
+  if (!adminKey || msg.admin_key !== adminKey) {
+    server._send(ws, createError(ErrorCode.AUTH_REQUIRED, 'Invalid admin key'));
+    return;
+  }
+
+  const durationMs = msg.duration_ms ?? 5 * 60 * 1000; // default 5 minutes
+  server.openUntil = Date.now() + durationMs;
+  const expiresAt = new Date(server.openUntil).toISOString();
+
+  server._log('admin_open_window', { durationMs, expiresAt });
+
+  // Broadcast notice to all connected clients
+  const notice = createMessage(ServerMessageType.ADMIN_RESULT, {
+    action: 'open_window',
+    success: true,
+    expiresAt,
+    durationMs,
+  });
+  if (server.wss) {
+    server.wss.clients.forEach((client) => {
+      if (client.readyState === client.OPEN) {
+        server._send(client as ExtendedWebSocket, notice);
+      }
+    });
+  }
 }

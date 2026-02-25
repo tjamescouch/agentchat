@@ -30,6 +30,7 @@ import { DisputeStore } from './disputes.js';
 import { ReputationStore } from './reputation.js';
 import { SkillsStore } from './skills-store.js';
 import { EscrowHooks } from './escrow-hooks.js';
+import geoip from 'geoip-lite';
 import { Allowlist } from './allowlist.js';
 import { Banlist } from './banlist.js';
 import { Redactor } from './redactor.js';
@@ -82,9 +83,11 @@ import {
 import {
   handleAdminApprove,
   handleAdminRevoke,
-  handleAdminList,
-  handleAdminMotd,
+ handleAdminList,
+ handleAdminMotd,
 } from './server/handlers/admin.js';
+import { handleAdminVerify } from './server/handlers/admin.js';
+import { handleAdminOpenWindow } from './server/handlers/admin.js';
 import {
   handleAdminKick,
   handleAdminBan,
@@ -95,14 +98,19 @@ import {
 } from './server/handlers/captcha.js';
 
 // Extended WebSocket with custom properties
-interface ExtendedWebSocket extends WebSocket {
+export interface ExtendedWebSocket extends WebSocket {
   _connectedAt?: number;
   _realIp?: string;
+  _geoCountry?: string;
+  _geoCity?: string;
+  _geoLat?: number;
+  _geoLon?: number;
   _userAgent?: string;
   _connId?: string;
   _msgTimestamps?: number[];
   _isAlive?: boolean;
   _lastPong?: number;
+  _lastNickChange?: number;
 }
 
 // Agent info stored per connection
@@ -189,6 +197,7 @@ export interface AgentChatServerOptions {
   challengeTimeoutMs?: number;
   logger?: Console;
   escrowHandlers?: Record<string, (payload: unknown) => Promise<void>>;
+  genesisAgentId?: string | null;
   allowlistEnabled?: boolean;
   allowlistStrict?: boolean;
   allowlistAdminKey?: string | null;
@@ -199,6 +208,7 @@ export interface AgentChatServerOptions {
   heartbeatIntervalMs?: number;
   heartbeatTimeoutMs?: number;
   minProposalAgeMs?: number;
+  privateChannelsEnabled?: boolean;
 }
 
 // Health status response
@@ -281,7 +291,10 @@ export class AgentChatServer {
   challengeTimeoutMs: number;
 
   // Captcha
-  captchaConfig: CaptchaConfig;
+ captchaConfig: CaptchaConfig;
+
+  // Open window — new agents skip the 1-hour lurk until this timestamp
+  openUntil: number;
   pendingCaptchas: Map<string, PendingCaptcha>;
 
   // Anti-sybil
@@ -290,11 +303,17 @@ export class AgentChatServer {
   // Secret redactor (agentseenoevil)
   redactor: Redactor;
 
+  // Genesis agent ID — always verified
+  genesisAgentId: string | null;
+
   // Allowlist
   allowlist: Allowlist | null;
 
   // Banlist
   banlist: Banlist | null;
+
+  // Private channels toggle
+  privateChannelsEnabled: boolean;
 
   // Callback engine
   callbackQueue: CallbackQueue;
@@ -417,6 +436,12 @@ export class AgentChatServer {
     // Anti-sybil
     this.minProposalAgeMs = options.minProposalAgeMs ?? 60000;
 
+    // Private channels — disabled by default
+    this.privateChannelsEnabled = options.privateChannelsEnabled ?? (process.env.PRIVATE_CHANNELS_ENABLED === 'true');
+
+    // Genesis agent ID — hardcoded ID always granted verified:true
+    this.genesisAgentId = options.genesisAgentId || process.env.GENESIS_AGENT_ID || '8addfe276526c9f6';
+
     // Allowlist
     const allowlistEnabled = options.allowlistEnabled || process.env.ALLOWLIST_ENABLED === 'true';
     if (allowlistEnabled) {
@@ -500,6 +525,32 @@ export class AgentChatServer {
       proposals: this.proposals.stats(),
       timestamp: new Date(now).toISOString()
     };
+  }
+
+  /**
+   * Auto-join an agent to all public (non-invite-only) channels.
+   * Called after registration so the agent can immediately send messages
+   * without a separate JOIN handshake.
+   */
+  _autoJoinPublicChannels(ws: ExtendedWebSocket): void {
+    const agent = this.agents.get(ws);
+    if (!agent) return;
+
+    for (const [name, channel] of this.channels) {
+      if (channel.inviteOnly) continue;
+      if (channel.verifiedOnly && !agent.verified) continue;
+
+      channel.agents.add(ws);
+      agent.channels.add(name);
+
+      // Broadcast join to existing members
+      this._broadcast(name, createMessage(ServerMessageType.AGENT_JOINED, {
+        channel: name,
+        agent: `@${agent.id}`,
+        name: agent.name,
+        verified: !!agent.verified
+      }), ws);
+    }
   }
 
   _createChannel(name: string, inviteOnly: boolean = false, verifiedOnly: boolean = false): ChannelState {
@@ -635,6 +686,23 @@ export class AgentChatServer {
         const health = this.getHealth();
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(health));
+      } else if (req.method === 'GET' && req.url === '/api/connections') {
+        // Get current connections with geo data
+        const connections = Array.from(this.agentById.entries()).map(([agentId, ws]) => {
+          const ews = ws as ExtendedWebSocket;
+          return {
+            agent_id: agentId,
+            ip: ews._realIp,
+            country: ews._geoCountry,
+            city: ews._geoCity,
+            lat: ews._geoLat,
+            lon: ews._geoLon,
+            connected_at: ews._connectedAt,
+            user_agent: ews._userAgent
+          };
+        });
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+        res.end(JSON.stringify({ connections, count: connections.length }));
       } else {
         res.writeHead(404);
         res.end('Not Found');
@@ -706,10 +774,22 @@ export class AgentChatServer {
       ws._realIp = realIp;
       ws._userAgent = userAgent;
       ws._isAlive = true;
+      // GeoIP lookup
+      if (realIp) {
+        const geo = geoip.lookup(realIp);
+        if (geo) {
+          ws._geoCountry = geo.country;
+          ws._geoCity = geo.city;
+          ws._geoLat = geo.ll?.[0];
+          ws._geoLon = geo.ll?.[1];
+        }
+      }
+
 
       // WS-level pong handler for heartbeat
       ws.on('pong', () => {
         ws._isAlive = true;
+
         ws._lastPong = Date.now();
       });
 
@@ -717,7 +797,9 @@ export class AgentChatServer {
         ip: realIp,
         proxy_ip: req.socket.remoteAddress,
         user_agent: userAgent,
-        conn_id: ws._connId
+        conn_id: ws._connId,
+        country: ws._geoCountry,
+        city: ws._geoCity
       });
 
       ws.on('message', (data: Buffer) => {
@@ -1071,7 +1153,10 @@ export class AgentChatServer {
         handleAdminUnban(this, ws, msg);
         break;
       case ClientMessageType.ADMIN_MOTD:
-        handleAdminMotd(this, ws, msg);
+       handleAdminMotd(this, ws, msg);
+       break;
+      case ClientMessageType.ADMIN_VERIFY:
+        handleAdminVerify(this, ws, msg);
         break;
       // Floor control — RESPONDING_TO
       case ClientMessageType.RESPONDING_TO: {

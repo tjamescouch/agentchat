@@ -5,6 +5,7 @@
 
 import type { WebSocket } from 'ws';
 import type { AgentChatServer } from '../../server.js';
+import type { ExtendedWebSocket } from '../../server.js';
 import type {
   MsgMessage,
   JoinMessage,
@@ -24,12 +25,6 @@ import {
 } from '../../protocol.js';
 import { parseCallbacks } from '../../callback-engine.js';
 
-// Extended WebSocket with custom properties
-interface ExtendedWebSocket extends WebSocket {
-  _connectedAt?: number;
-  _realIp?: string;
-  _userAgent?: string;
-}
 
 /**
  * Handle MSG command - route messages to channels or agents
@@ -117,19 +112,8 @@ export function handleMsg(server: AgentChatServer, ws: ExtendedWebSocket, msg: M
     // Broadcast to channel including sender
     server._broadcast(msg.to, outMsg);
 
-    // Buffer the message for replay to future joiners — store a redacted copy
-    try {
-      const storedMsg = {
-        ...outMsg,
-        // redact content in persisted buffer to avoid leaking DMs/secrets
-        content: outMsg.content ? '[redacted]' : outMsg.content,
-        _redacted: true,
-        _content_length: outMsg.content ? String(outMsg.content.length) : '0'
-      } as any;
-      server._bufferMessage(msg.to, storedMsg);
-    } catch (err) {
-      server._log('buffer_error', { channel: msg.to, error: err instanceof Error ? { message: err.message, stack: err.stack } : String(err) });
-    }
+    // Buffer the message for replay to future joiners
+    server._bufferMessage(msg.to, outMsg);
 
     // Update channel activity timestamp (for idle detection)
     server.channelLastActivity.set(msg.to, Date.now());
@@ -152,13 +136,10 @@ export function handleMsg(server: AgentChatServer, ws: ExtendedWebSocket, msg: M
       redacted: true
     });
 
-    // Create a redacted copy for logging/storage where needed
-    const redactedOut = { ...outMsg, content: '[redacted]', _redacted: true } as any;
-
     // Send to target (full message)
     server._send(targetWs, outMsg);
-    // Echo back to sender (redacted echo to avoid logging content on client side)
-    server._send(ws, redactedOut);
+    // Echo back to sender (full content — sender already knows what they sent)
+    server._send(ws, outMsg);
   }
 }
 
@@ -343,6 +324,12 @@ export function handleCreateChannel(server: AgentChatServer, ws: ExtendedWebSock
     return;
   }
 
+  // Block private channel creation if disabled server-wide
+  if (msg.invite_only && !server.privateChannelsEnabled) {
+    server._send(ws, createError(ErrorCode.INVALID_MSG, 'Private channels are disabled on this server'));
+    return;
+  }
+
   const channel = server._createChannel(msg.channel, msg.invite_only || false, msg.verified_only || false);
 
   // Creator is automatically invited and joined
@@ -366,6 +353,12 @@ export function handleCreateChannel(server: AgentChatServer, ws: ExtendedWebSock
  * Handle INVITE command
  */
 export function handleInvite(server: AgentChatServer, ws: ExtendedWebSocket, msg: InviteMessage): void {
+  // Block invites if private channels are disabled server-wide
+  if (!server.privateChannelsEnabled) {
+    server._send(ws, createError(ErrorCode.INVALID_MSG, 'Private channels are disabled on this server'));
+    return;
+  }
+
   const agent = server.agents.get(ws);
   if (!agent) {
     server._send(ws, createError(ErrorCode.AUTH_REQUIRED, 'Must IDENTIFY first'));

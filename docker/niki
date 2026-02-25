@@ -64,7 +64,7 @@ const { values: opts } = parseArgs({
     timeout:         { type: 'string', default: '3600' },
     'max-sends':     { type: 'string', default: '10' },
     'max-tool-calls': { type: 'string', default: '30' },
-    'stall-timeout': { type: 'string', default: '60' },
+    'stall-timeout': { type: 'string', default: '3600' },
     'startup-timeout': { type: 'string', default: '180' },
     'dead-air-timeout': { type: 'string', default: '5' },
     'max-nudges':    { type: 'string', default: '3' },

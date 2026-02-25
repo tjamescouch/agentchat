@@ -257,18 +257,38 @@ ensure_agentauth() {
         rm -f "$AGENTAUTH_PID_FILE"
     fi
 
-    # Check prerequisites
-    if [ ! -d "$AGENTAUTH_DIR" ] || [ ! -f "$AGENTAUTH_DIR/dist/index.js" ]; then
-        echo "ERROR: agentauth not found at $AGENTAUTH_DIR"
-        echo "       Clone it: git clone https://github.com/tjamescouch/agentauth.git ~/agentauth"
-        echo "       Build it: cd ~/agentauth && npm install && npm run build"
-        exit 1
+    # Resolve agentauth binary: prefer global npm install, then $AGENTAUTH_DIR
+    local agentauth_bin=""
+    if command -v agentauth > /dev/null 2>&1; then
+        agentauth_bin="agentauth"
+    elif [ -f "$AGENTAUTH_DIR/dist/index.js" ]; then
+        agentauth_bin="node $AGENTAUTH_DIR/dist/index.js"
+    else
+        echo "agentauth not found. Installing globally via npm..."
+        npm install -g @tjamescouch/agentauth
+        if command -v agentauth > /dev/null 2>&1; then
+            agentauth_bin="agentauth"
+        else
+            echo "ERROR: Failed to install agentauth. Install manually:"
+            echo "       npm install -g @tjamescouch/agentauth"
+            exit 1
+        fi
     fi
 
+    # Resolve config: check explicit path, then ~/.agentchat/, then $AGENTAUTH_DIR
     if [ ! -f "$AGENTAUTH_CONFIG" ]; then
-        echo "ERROR: agentauth config not found at $AGENTAUTH_CONFIG"
-        echo "       Copy the example: cp $AGENTAUTH_DIR/agentauth.example.json $AGENTAUTH_CONFIG"
-        exit 1
+        if [ -f "$HOME/.agentchat/agentauth.json" ]; then
+            AGENTAUTH_CONFIG="$HOME/.agentchat/agentauth.json"
+        elif [ -f "$AGENTAUTH_DIR/agentauth.json" ]; then
+            AGENTAUTH_CONFIG="$AGENTAUTH_DIR/agentauth.json"
+        else
+            echo "ERROR: agentauth config not found"
+            echo "       Create one at ~/.agentchat/agentauth.json"
+            if [ -f "$AGENTAUTH_DIR/agentauth.example.json" ]; then
+                echo "       Example: cp $AGENTAUTH_DIR/agentauth.example.json ~/.agentchat/agentauth.json"
+            fi
+            exit 1
+        fi
     fi
 
     # Decrypt token so agentauth can use it (host-side only)
@@ -280,7 +300,7 @@ ensure_agentauth() {
     echo "Starting agentauth proxy on port $AGENTAUTH_PORT..."
     ANTHROPIC_API_KEY="${CLAUDE_CODE_OAUTH_TOKEN}" \
     OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
-        node "$AGENTAUTH_DIR/dist/index.js" run --port "$AGENTAUTH_PORT" --bind 0.0.0.0 --config "$AGENTAUTH_CONFIG" &
+        $agentauth_bin run --port "$AGENTAUTH_PORT" --bind 0.0.0.0 --config "$AGENTAUTH_CONFIG" &
     local proxy_pid=$!
     echo "$proxy_pid" > "$AGENTAUTH_PID_FILE"
 
@@ -352,6 +372,7 @@ Examples:
   agentctl start monitor "monitor agentchat #general and moderate"
   agentctl start social "manage moltx and moltbook social media"
   agentctl start jessie "You are James's friend" --use-gro  # Uses gro runtime
+  agentctl start jessie "You are James's friend" --use-claude-code  # Claude Code CLI runtime
   agentctl start sam "..." --use-gro --memory virtual       # Uses VirtualMemory paging
   agentctl edit jessie
   agentctl stop monitor
@@ -498,9 +519,15 @@ start_agent() {
     chmod 777 "$identities_dir" 2>/dev/null || sudo chmod 777 "$identities_dir" 2>/dev/null || true
 
     # Save mission and runtime for restarts
+    if [ "$use_gro" = "true" ] && [ "$use_claude_code" = "true" ]; then
+        echo "ERROR: choose only one of --use-gro or --use-claude-code"
+        exit 1
+    fi
     echo "$mission" > "$state_dir/mission.txt"
     if [ "$use_gro" = "true" ]; then
         echo "gro" > "$state_dir/runtime.txt"
+    elif [ "$use_claude_code" = "true" ]; then
+        echo "cli" > "$state_dir/runtime.txt"
     else
         rm -f "$state_dir/runtime.txt"
     fi
@@ -586,6 +613,19 @@ EOF
     local proxy_base_url="http://${host_gateway}:${AGENTAUTH_PORT}/anthropic"
     local proxy_api_key="proxy-managed"
 
+
+    # Default runtime: gro (runner default). Claude Code is opt-in via runtime.txt=cli or --use-claude-code.
+    if [ "$use_claude_code" = "true" ]; then
+        runtime_env="cli"
+        export USE_CLAUDE_CODE=1
+        echo "  Runtime: claude-code (CLI)"
+    elif [ -f "$state_dir/runtime.txt" ] && [ "$(cat "$state_dir/runtime.txt" 2>/dev/null)" = "cli" ]; then
+        runtime_env="cli"
+        export USE_CLAUDE_CODE=1
+        echo "  Runtime: claude-code (CLI)"
+    fi
+
+
     if [ "$use_gro" = "true" ]; then
         runtime_env="gro"
         local agent_model="${AGENT_MODEL_OVERRIDE:-gpt-4o}"
@@ -648,7 +688,7 @@ EOF
         $labels \
         -e "ANTHROPIC_BASE_URL=${proxy_base_url}" \
         -e "ANTHROPIC_API_KEY=${proxy_api_key}" \
-        ${runtime_env:+-e "AGENT_RUNTIME=${runtime_env}"} \
+        ${runtime_env:+-e "AGENT_RUNTIME=${runtime_env}"} ${USE_CLAUDE_CODE:+-e "USE_CLAUDE_CODE=${USE_CLAUDE_CODE}"} \
         ${model_env:+-e "AGENT_MODEL=${model_env}"} \
         ${use_gro:+-e "OPENAI_BASE_URL=http://${host_gateway}:${AGENTAUTH_PORT}/openai"} \
         ${use_gro:+-e "OPENAI_API_KEY=proxy-managed"} \
