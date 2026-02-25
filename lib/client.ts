@@ -92,6 +92,11 @@ export class AgentChatClient extends EventEmitter {
   private _pendingRequests: Map<number, PendingRequestCallback>;
   private _requestId: number;
   private _autoVerifyHandler: ((msg: ServerMessage) => void) | null;
+  // Outgoing message queue for when the WS is not OPEN. Messages are
+  // queued and flushed when the socket becomes writable to avoid silent
+  // drops when the user hits Enter during reconnects.
+  private _outQueue: Record<string, unknown>[];
+  private _maxQueueSize = 200;
 
   constructor(options: ClientOptions) {
     super();
@@ -112,6 +117,7 @@ export class AgentChatClient extends EventEmitter {
     this._pendingRequests = new Map();
     this._requestId = 0;
     this._autoVerifyHandler = null;
+    this._outQueue = [];
   }
 
   /**
@@ -158,6 +164,9 @@ export class AgentChatClient extends EventEmitter {
           name: this.name,
           pubkey: this.pubkey
         });
+        // Flush any queued outgoing messages the client attempted to send
+        // while the socket was not open.
+        try { this._flushQueue(); } catch (e) { /* best-effort */ }
       });
 
       this.ws.on('message', (data: WebSocket.Data) => {
@@ -867,8 +876,38 @@ export class AgentChatClient extends EventEmitter {
   }
 
   private _send(msg: Record<string, unknown>): void {
+    // If the socket is writable, send immediately. Otherwise queue the
+    // message so the UI doesn't lose the user's typed text when the WS is
+    // CONNECTING/CLOSING/CLOSED.
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(serialize(msg));
+      return;
+    }
+
+    // Queue the message (drop oldest when queue grows too large)
+    if (this._outQueue.length >= this._maxQueueSize) {
+      this._outQueue.shift();
+    }
+    this._outQueue.push(msg);
+    // Notify listeners so a UI can show an inline hint or trigger a resend
+    // attempt. This preserves behavior without throwing.
+    this.emit('queued', { queued: true, size: this._outQueue.length });
+  }
+
+  private _flushQueue(): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    while (this._outQueue.length > 0) {
+      const m = this._outQueue.shift()!;
+      try {
+        this.ws.send(serialize(m));
+      } catch (err) {
+        // If send fails, re-queue and stop flushing to avoid spin
+        this._outQueue.unshift(m);
+        break;
+      }
+    }
+    if (this._outQueue.length === 0) {
+      this.emit('queue_drained');
     }
   }
 

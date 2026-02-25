@@ -1023,8 +1023,16 @@ export class AgentChatServer {
         count: ws._msgTimestamps.length,
         window: '10s'
       });
-      // Disconnect in both cases — soft error is not a sufficient deterrent
-      ws.close(1008, 'Rate limit exceeded');
+      // Previously we disconnected clients when the sliding-window limit
+      // was exceeded. That caused abrupt client reloads and lost messages.
+      // Instead, return a structured RATE_LIMITED error so the client can
+      // surface the problem and preserve the connection (allows resend).
+      try {
+        this._send(ws, createError(ErrorCode.RATE_LIMITED, 'Rate limit exceeded (too many messages in window)'));
+      } catch (err) {
+        // If send fails, fall back to closing the socket to avoid zombies
+        try { ws.close(1008, 'Rate limit exceeded'); } catch {}
+      }
       return;
     }
 
