@@ -160,7 +160,7 @@ describe('Allowlist Integration (non-strict)', () => {
     server = new AgentChatServer({
       port,
       allowlistEnabled: true,
-      allowlistStrict: true,
+      allowlistStrict: false,
       allowlistAdminKey: TEST_ADMIN_KEY,
       allowlistFilePath: path.join(tempDir, 'allowlist.json'),
     });
