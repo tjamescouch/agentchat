@@ -4,7 +4,7 @@
  */
 
 import { z } from 'zod';
-import { AgentChatClient, checkDirectorySafety, printEnvDoctorReport } from '../dist/lib/client.js';
+import { AgentChatClient, checkDirectorySafety } from '@tjamescouch/agentchat';
 import fs from 'fs';
 import path from 'path';
 import {
@@ -463,12 +463,15 @@ export function registerConnectTool(server) {
         }
 
         // Run environment health check on connect (warn-only, non-blocking)
+        // printEnvDoctorReport is not available in the published npm package;
+        // dynamically import to avoid hard failure when absent.
         try {
-          printEnvDoctorReport({
-            identityPath: actualIdentityPath || undefined,
-          });
+          const { printEnvDoctorReport } = await import('@tjamescouch/agentchat');
+          if (printEnvDoctorReport) {
+            printEnvDoctorReport({ identityPath: actualIdentityPath || undefined });
+          }
         } catch {
-          // envDoctor should never block connection
+          // envDoctor not available or failed — non-blocking
         }
 
         return {

@@ -5,8 +5,8 @@
 
 import { z } from 'zod';
 import fs from 'fs';
-import { AgentChatDaemon, getDaemonPaths, isDaemonRunning, stopDaemon } from '../dist/lib/daemon.js';
-import { DEFAULT_IDENTITY_PATH } from '../dist/lib/identity.js';
+import { AgentChatDaemon, getDaemonPaths, isDaemonRunning, stopDaemon } from '@tjamescouch/agentchat/lib/daemon.js';
+import { DEFAULT_IDENTITY_PATH } from '@tjamescouch/agentchat/lib/identity.js';
 import { daemon, setDaemon } from '../state.js';
 
 /**

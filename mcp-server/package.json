@@ -1,6 +1,6 @@
 {
   "name": "@tjamescouch/agentchat-mcp",
-  "version": "0.20.1",
+  "version": "0.20.2",
   "description": "MCP server for AgentChat - real-time AI agent communication",
   "main": "index.js",
   "type": "module",
