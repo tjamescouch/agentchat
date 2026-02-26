@@ -110,6 +110,7 @@ export interface ExtendedWebSocket extends WebSocket {
   _msgTimestamps?: number[];
   _isAlive?: boolean;
   _lastPong?: number;
+  _lastActivity?: number;
   _lastNickChange?: number;
 }
 
@@ -782,6 +783,7 @@ export class AgentChatServer {
       ws._realIp = realIp;
       ws._userAgent = userAgent;
       ws._isAlive = true;
+      ws._lastActivity = Date.now();
       // GeoIP lookup
       if (realIp) {
         const geo = geoip.lookup(realIp);
@@ -797,8 +799,8 @@ export class AgentChatServer {
       // WS-level pong handler for heartbeat
       ws.on('pong', () => {
         ws._isAlive = true;
-
         ws._lastPong = Date.now();
+        ws._lastActivity = Date.now();
       });
 
       this._log('connection', {
@@ -811,6 +813,7 @@ export class AgentChatServer {
       });
 
       ws.on('message', (data: Buffer) => {
+        ws._lastActivity = Date.now();
         // Log raw receive (size only) for correlation — avoid logging payloads
         try {
           this._log('ws_message_recv', { conn_id: ws._connId, size: data.length, ip: ws._realIp });
@@ -888,12 +891,17 @@ export class AgentChatServer {
     }, 60 * 1000); // Check every minute
 
     // Start WebSocket heartbeat — detect and clean up zombie connections
+    // Two checks: (1) TCP-level pong timeout, (2) application-level idle timeout.
+    // TCP pongs can be answered by the OS even when the client process is dead,
+    // so we also require application-level activity within a reasonable window.
+    const APP_IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes with no app-level messages
     this.heartbeatTimer = setInterval(() => {
       if (!this.wss) return;
       const now = Date.now();
       this.wss.clients.forEach((ws: WebSocket) => {
         const ews = ws as ExtendedWebSocket;
-        // If we haven't seen a pong in 2x heartbeat interval, consider connection stale
+
+        // Check 1: TCP-level — no pong response
         const lastPong = ews._lastPong || ews._connectedAt || 0;
         if (now - lastPong > (this.heartbeatIntervalMs * 2 + this.heartbeatTimeoutMs)) {
           this._log('heartbeat_timeout', {
@@ -901,6 +909,22 @@ export class AgentChatServer {
             agent: this.agents.get(ews)?.id,
             conn_id: ews._connId,
             last_pong_ms: lastPong ? now - lastPong : null
+          });
+          this._handleDisconnect(ews);
+          try { return ews.terminate(); } catch {}
+        }
+
+        // Check 2: Application-level — connected but no messages for too long.
+        // Only applies to identified agents (give unidentified connections 2 min to IDENTIFY).
+        const agent = this.agents.get(ews);
+        const lastActivity = ews._lastActivity || ews._connectedAt || 0;
+        const idleLimit = agent ? APP_IDLE_TIMEOUT_MS : 2 * 60 * 1000;
+        if (now - lastActivity > idleLimit) {
+          this._log('idle_timeout', {
+            ip: ews._realIp,
+            agent: agent?.id,
+            conn_id: ews._connId,
+            idle_ms: now - lastActivity
           });
           this._handleDisconnect(ews);
           try { return ews.terminate(); } catch {}
