@@ -121,7 +121,20 @@ export function handleMsg(server: AgentChatServer, ws: ExtendedWebSocket, msg: M
   } else if (isAgent(msg.to)) {
     // Direct message
     const targetId = msg.to.slice(1);
-    const targetWs = server.agentById.get(targetId);
+    let targetWs = server.agentById.get(targetId);
+
+    // Nick resolution fallback: if targetId isn't a known agent ID, try matching by nick
+    if (!targetWs) {
+      for (const [memberWs, memberAgent] of server.agents) {
+        if (memberAgent.name === targetId) {
+          targetWs = memberWs;
+          // Rewrite outMsg.to to use the actual agent ID so the recipient
+          // sees a consistent @id format (not a nick)
+          outMsg.to = `@${memberAgent.id}`;
+          break;
+        }
+      }
+    }
 
     if (!targetWs) {
       server._send(ws, createError(ErrorCode.AGENT_NOT_FOUND, `Agent ${msg.to} not found`));
