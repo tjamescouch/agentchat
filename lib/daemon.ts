@@ -84,8 +84,9 @@ export interface DaemonCompleteMessage {
 
 // ============ Constants ============
 
-// Base directory (cwd-relative for project-local storage)
-const AGENTCHAT_DIR = path.join(process.cwd(), '.agentchat');
+// Base directory — stored in home dir, never in project CWD.
+// This prevents private keys and state from being accidentally committed to git.
+const AGENTCHAT_DIR = path.join(os.homedir(), '.agentchat');
 const DAEMONS_DIR = path.join(AGENTCHAT_DIR, 'daemons');
 
 // Default instance name

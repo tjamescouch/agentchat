@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { AgentChatClient, checkDirectorySafety } from '@tjamescouch/agentchat';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import {
   client, keepaliveInterval,
   setClient, setServerUrl, setKeepaliveInterval,
@@ -22,9 +23,10 @@ import { appendToInbox } from '../inbox-writer.js';
 import { handleIncomingOffer, handleFileChunk, handleTransferComplete } from './file-transfer.js';
 
 /**
- * Base directory for identities
+ * Base directory for identities — stored in home dir, never in project CWD.
+ * This prevents private keys from being accidentally committed to git.
  */
-const IDENTITIES_DIR = path.join(process.cwd(), '.agentchat', 'identities');
+const IDENTITIES_DIR = path.join(os.homedir(), '.agentchat', 'identities');
 
 /**
  * Validate that a path stays within the allowed directory
@@ -363,8 +365,8 @@ export function registerConnectTool(server) {
         const actualServerUrl = server_url || DEFAULT_SERVER_URL;
 
         // Determine identity path: explicit path > named > ephemeral (none)
-        // All paths must stay within .agentchat/ for security
-        const AGENTCHAT_DIR = path.join(process.cwd(), '.agentchat');
+        // All paths must stay within ~/.agentchat/ for security
+        const AGENTCHAT_DIR = path.join(os.homedir(), '.agentchat');
         let actualIdentityPath = null;
 
         if (identity_path) {

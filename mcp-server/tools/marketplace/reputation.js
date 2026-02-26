@@ -6,9 +6,10 @@
 import { z } from 'zod';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 
-// Local ratings file path
-const RATINGS_PATH = path.join(process.cwd(), '.agentchat', 'ratings.json');
+// Local ratings file path — stored in home dir, not project CWD
+const RATINGS_PATH = path.join(os.homedir(), '.agentchat', 'ratings.json');
 
 /**
  * Load local ratings data

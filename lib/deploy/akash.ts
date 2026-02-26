@@ -10,6 +10,7 @@
 
 import fs from 'fs/promises';
 import path from 'path';
+import os from 'os';
 import yaml from 'js-yaml';
 
 // ============ Types ============
@@ -181,7 +182,7 @@ export interface CertificateData {
 // ============ Constants ============
 
 // Default paths
-const AKASH_DIR = path.join(process.cwd(), '.agentchat');
+const AKASH_DIR = path.join(os.homedir(), '.agentchat');
 export const WALLET_PATH = path.join(AKASH_DIR, 'akash-wallet.json');
 export const DEPLOYMENTS_PATH = path.join(AKASH_DIR, 'akash-deployments.json');
 export const CERTIFICATE_PATH = path.join(AKASH_DIR, 'akash-cert.json');

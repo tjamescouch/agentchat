@@ -5,14 +5,16 @@
 
 import crypto, { KeyObject } from 'crypto';
 import fs from 'fs/promises';
+import { writeFileSync, mkdirSync, existsSync } from 'fs';
 import path from 'path';
+import os from 'os';
 import {
   Identity as IdentityType,
   IdentityFile,
 } from './types.js';
 
-// Default identity file location
-export const DEFAULT_IDENTITY_PATH: string = path.join(process.cwd(), '.agentchat', 'identity.json');
+// Default identity file location — always in home directory, never in project CWD
+export const DEFAULT_IDENTITY_PATH: string = path.join(os.homedir(), '.agentchat', 'identity.json');
 
 // Rotation record type
 export interface RotationRecord {
@@ -135,6 +137,21 @@ export class Identity {
     // Ensure directory exists
     const dir = path.dirname(filePath);
     await fs.mkdir(dir, { recursive: true });
+
+    // Defense in depth: drop a .gitignore in the .agentchat root to prevent
+    // accidental commits of private keys, even if the parent repo lacks one.
+    const agentchatRoot = dir.includes('.agentchat')
+      ? dir.slice(0, dir.indexOf('.agentchat') + '.agentchat'.length)
+      : dir;
+    const gitignorePath = path.join(agentchatRoot, '.gitignore');
+    try {
+      if (!existsSync(gitignorePath)) {
+        mkdirSync(agentchatRoot, { recursive: true });
+        writeFileSync(gitignorePath, '# This directory contains private keys. Never commit.\n*\n');
+      }
+    } catch {
+      // Best-effort — don't fail the save if this fails
+    }
 
     const data: IdentityFile = {
       publicKey: this.pubkey,
