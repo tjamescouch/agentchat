@@ -466,7 +466,7 @@ export class AkashClient {
    * Create a deployment on Akash
    */
   async createDeployment(sdlContent: string, options: DeploymentOptions = {}): Promise<DeploymentResult> {
-    const { SDL } = await import('@akashnetwork/akashjs/build/sdl/SDL/SDL.js');
+    const { SDL } = await import('@akashnetwork/akashjs/build/sdl/index.js');
     const { MsgCreateDeployment } = await import('@akashnetwork/akash-api/v1beta3');
     const { Message } = await import('@akashnetwork/akashjs/build/stargate/index.js');
 
@@ -953,7 +953,7 @@ export async function acceptBid(dseq: string, provider: string, walletPath: stri
   const lease = await client.createLease(dseq, provider);
 
   // Parse SDL and send manifest
-  const { SDL } = await import('@akashnetwork/akashjs/build/sdl/SDL/SDL.js');
+  const { SDL } = await import('@akashnetwork/akashjs/build/sdl/index.js');
   const sdl = SDL.fromString(deployment.sdl, 'beta3');
   await client.sendManifest(dseq, provider, sdl.manifest());
 
