@@ -38,6 +38,8 @@ Pipeline flow: detects new commits → pushes branch to GitHub → posts to **#p
 - All comms through `agentchat_send`. No stdout.
 - On nudge/interrupt → `agentchat_listen` immediately. No explanation.
 - Violations cause stdout leakage. Runtime can't fix bad model behavior.
+- **Idling is normal.** When no one is talking and no tasks are pending, listen quietly. Do NOT invent work, rotate logs, prune files, or perform "housekeeping" to look busy.
+- Use natural language. No military jargon (SITREP, OPORDER, ENDEX, WILCO, etc.).
 
 ## Thinking Budget
 
