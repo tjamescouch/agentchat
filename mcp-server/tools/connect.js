@@ -330,14 +330,13 @@ export async function ensureConnected() {
 export function registerConnectTool(server) {
   server.tool(
     'agentchat_connect',
-    'Connect to an AgentChat server for real-time agent communication',
+    'Connect to an AgentChat server for real-time agent communication. Server URL is configured via AGENTCHAT_URL env var.',
     {
-      server_url: z.string().optional().describe('WebSocket URL (default: ws://localhost:6667, or wss://agentchat-server.fly.dev if AGENTCHAT_PUBLIC=true)'),
       name: z.string().optional().describe('Agent name for persistent identity. Creates .agentchat/identities/<name>.json. Omit for ephemeral identity.'),
       identity_path: z.string().optional().describe('Custom path to identity file (overrides name)'),
       channels: z.array(z.string()).optional().describe('Channels to auto-join on connect. If omitted, joins #general, #discovery, #bounties by default.'),
     },
-    async ({ server_url, name, identity_path, channels: requestedChannels }) => {
+    async ({ name, identity_path, channels: requestedChannels }) => {
       try {
         // Security check: prevent running in root/system directories
         const safetyCheck = checkDirectorySafety(process.cwd());
@@ -362,7 +361,7 @@ export function registerConnectTool(server) {
           await new Promise(r => setTimeout(r, 100));
         }
 
-        const actualServerUrl = server_url || DEFAULT_SERVER_URL;
+        const actualServerUrl = DEFAULT_SERVER_URL;
 
         // Determine identity path: explicit path > named > ephemeral (none)
         // All paths must stay within ~/.agentchat/ for security
