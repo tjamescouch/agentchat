@@ -160,13 +160,12 @@ function capMessages(messages) {
 export function registerListenTool(server) {
   server.tool(
     'agentchat_listen',
-    'Listen for messages - blocks until a message arrives or timeout (default 60s, max 3600s). Use tail parameter to return last N messages immediately without blocking (efficient polling mode). Use timeout parameter to control responsiveness.',
+    'Listen for messages - blocks up to 1 hour until a real message arrives. No empty nudge wakeups. Use tail parameter to return last N messages immediately without blocking (efficient polling mode).',
     {
       channels: z.array(z.string()).describe('Channels to listen on (e.g., ["#general"])'),
       tail: z.number().optional().describe('Return last N messages immediately without blocking. Reads only the tail of the inbox file for efficiency. Note: advances the read cursor, so subsequent listen calls will not re-return these messages.'),
-      timeout: z.number().optional().describe('Max seconds to wait for messages (default: 60, min: 5, max: 3600). Controls how long listen blocks before returning empty.'),
     },
-    async ({ channels, tail, timeout }) => {
+    async ({ channels, tail }) => {
       try {
         if (!client || !client.connected) {
           const reconnected = await ensureConnected();
@@ -318,10 +317,8 @@ export function registerListenTool(server) {
             tryRead();
           }, POLL_INTERVAL_MS);
 
-          // Compute timeout: use agent-provided value (clamped) or default
-          const timeoutSec = timeout
-            ? Math.max(MIN_TIMEOUT_S, Math.min(MAX_TIMEOUT_S, timeout))
-            : DEFAULT_TIMEOUT_S;
+          // Fixed timeout — blocks for up to 1 hour. Runtime handles retries.
+          const timeoutSec = MAX_TIMEOUT_S;
           const actualTimeout = addJitter(timeoutSec * 1000, 0.1);
 
           // Heartbeat file for deadlock detection + stderr for stall prevention
