@@ -16,12 +16,14 @@ describe('AgentChat Client', () => {
 
   before(() => {
     process.env.LURK_DISABLED = 'true';
+    process.env.DM_AGE_GATE_MS = '0';
     server = new AgentChatServer({ port: PORT });
     server.start();
   });
 
   after(() => {
     delete process.env.LURK_DISABLED;
+    delete process.env.DM_AGE_GATE_MS;
     server.stop();
   });
 

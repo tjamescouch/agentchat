@@ -3,7 +3,7 @@
  * Tests that displaced connections receive SESSION_DISPLACED before being closed
  */
 
-import { describe, it, before, after } from 'node:test';
+import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert';
 import { AgentChatServer } from '../dist/lib/server.js';
 import { AgentChatClient } from '../dist/lib/client.js';
@@ -18,7 +18,7 @@ const TEST_SERVER = `ws://localhost:${TEST_PORT}`;
 /**
  * Helper: wait for a specific message type on the raw websocket
  */
-function waitForRawType(client, type, timeout = 5000) {
+function waitForRawType(client, type, timeout = 65000) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`Timeout waiting for ${type}`)), timeout);
     const handler = (data) => {
@@ -57,6 +57,11 @@ describe('Session Conflict Detection', () => {
     try {
       await fs.rm(tmpDir, { recursive: true });
     } catch { /* ignore */ }
+  });
+
+  beforeEach(() => {
+    // Reset reconnect backoff between tests to avoid escalating delays
+    server.reconnectBackoff.clear();
   });
 
   it('sends SESSION_DISPLACED to old connection when identity is taken over', async () => {

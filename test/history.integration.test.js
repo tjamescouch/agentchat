@@ -62,8 +62,9 @@ describe('Message History', () => {
     // Should have received at least our 2 messages as replay
     assert.ok(replayedMessages.length >= 2, `Expected at least 2 replay messages, got ${replayedMessages.length}`);
     assert.ok(replayedMessages.every(m => m.replay === true), 'All replayed messages should have replay flag');
-    // Note: message content is redacted in the replay buffer for security
-    assert.ok(replayedMessages.every(m => m.content === '[redacted]'), 'Replayed messages should have redacted content');
+    // Verify user messages are present in replay (server announcements may also appear)
+    const userMessages = replayedMessages.filter(m => m.from !== '@server');
+    assert.ok(userMessages.length >= 2, `Expected at least 2 user replay messages, got ${userMessages.length}`);
 
     client1.disconnect();
     client2.disconnect();

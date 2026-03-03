@@ -5,7 +5,7 @@
  * for pubkey agents, and the IDENTIFY → WELCOME flow for ephemeral agents.
  */
 
-import { describe, it, before, after } from 'node:test';
+import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert';
 import { AgentChatServer } from '../dist/lib/server.js';
 import { AgentChatClient } from '../dist/lib/client.js';
@@ -46,6 +46,10 @@ describe('Challenge-Response Authentication', () => {
     delete process.env.LURK_DISABLED;
     server.stop();
     fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  beforeEach(() => {
+    server.reconnectBackoff.clear();
   });
 
   it('ephemeral agent gets WELCOME immediately (no challenge)', async () => {

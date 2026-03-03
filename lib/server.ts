@@ -329,6 +329,9 @@ export class AgentChatServer {
   maxConnectionsPerIp: number;
   connectionsByIp: Map<string, number>;
 
+  // Reconnect throttle — exponential backoff for identity takeovers
+  reconnectBackoff: Map<string, { lastTakeover: number; delay: number }>;
+
   // WebSocket heartbeat (server-initiated ping/pong)
   heartbeatIntervalMs: number;
   heartbeatTimeoutMs: number;
@@ -483,6 +486,9 @@ export class AgentChatServer {
     // Per-IP connection limiting
     this.maxConnectionsPerIp = options.maxConnectionsPerIp || parseInt(process.env.MAX_CONNECTIONS_PER_IP || '0');
     this.connectionsByIp = new Map();
+
+    // Reconnect throttle
+    this.reconnectBackoff = new Map();
 
     // WebSocket heartbeat
     // Default heartbeat interval

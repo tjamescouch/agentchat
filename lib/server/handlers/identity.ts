@@ -275,6 +275,48 @@ export function handleVerifyIdentity(server: AgentChatServer, ws: ExtendedWebSoc
   }
 
   // Check if this ID is currently in use by another connection
+  const isTakeover = server.agentById.has(id);
+
+  // Reconnect throttle: exponential backoff for rapid takeovers
+  if (isTakeover) {
+    const BACKOFF_RESET_MS = 5 * 60 * 1000; // Reset after 5 min of quiet
+    const INITIAL_DELAY_MS = 5000;
+    const MAX_DELAY_MS = 60000;
+    const now = Date.now();
+    const entry = server.reconnectBackoff.get(id);
+
+    let delay = INITIAL_DELAY_MS;
+    if (entry && (now - entry.lastTakeover) < BACKOFF_RESET_MS) {
+      delay = Math.min(entry.delay * 2, MAX_DELAY_MS);
+    }
+    server.reconnectBackoff.set(id, { lastTakeover: now, delay });
+
+    server._log('reconnect_throttle', { id, delay_ms: delay, name: challenge.name, ip: ws._realIp });
+
+    // Hold the new connection for the backoff period, then complete takeover
+    setTimeout(() => {
+      // Check the ws is still open before proceeding
+      if ((ws as WebSocket).readyState !== 1) return;
+      _completeTakeover(server, ws, id, challenge, existingId);
+    }, delay);
+    return;
+  }
+
+  _completeTakeover(server, ws, id, challenge, existingId);
+}
+
+/**
+ * Complete identity registration after optional reconnect throttle.
+ * Handles takeover displacement, agent state creation, WELCOME, and auto-join.
+ */
+function _completeTakeover(
+  server: AgentChatServer,
+  ws: ExtendedWebSocket,
+  id: string,
+  challenge: { name: string; pubkey: string },
+  existingId: string | undefined,
+): void {
+  // Displace old connection if still present
   if (server.agentById.has(id)) {
     const oldWs = server.agentById.get(id)!;
     server._log('identity_takeover', { id, reason: 'Verified connection replacing existing', new_conn: ws._connId, old_conn: oldWs._connId });
@@ -300,7 +342,7 @@ export function handleVerifyIdentity(server: AgentChatServer, ws: ExtendedWebSoc
     server._saveFirstSeen();
   }
   const isNew = (now - firstSeen) < CONFIRMATION_MS;
- const lurkUntil = isNew ? (firstSeen + CONFIRMATION_MS) : 0;
+  const lurkUntil = isNew ? (firstSeen + CONFIRMATION_MS) : 0;
   // If admin opened a verification window, skip lurk for newly connecting agents
   const windowOpen = server.openUntil > now;
   const effectivelyNew = isNew && !windowOpen;
