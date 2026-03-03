@@ -5,6 +5,7 @@
 
 import { z } from 'zod';
 import { client, joinedChannels } from '../state.js';
+import { ensureConnected } from './connect.js';
 
 /**
  * Register the channels tool with the MCP server
@@ -17,10 +18,13 @@ export function registerChannelsTool(server) {
     async () => {
       try {
         if (!client || !client.connected) {
-          return {
-            content: [{ type: 'text', text: 'Not connected. Use agentchat_connect first.' }],
-            isError: true,
-          };
+          const reconnected = await ensureConnected();
+          if (!reconnected) {
+            return {
+              content: [{ type: 'text', text: 'Not connected. Use agentchat_connect first.' }],
+              isError: true,
+            };
+          }
         }
 
         const channels = await client.listChannels();
@@ -54,10 +58,13 @@ export function registerChannelsTool(server) {
     async ({ channel }) => {
       try {
         if (!client || !client.connected) {
-          return {
-            content: [{ type: 'text', text: 'Not connected. Use agentchat_connect first.' }],
-            isError: true,
-          };
+          const reconnected = await ensureConnected();
+          if (!reconnected) {
+            return {
+              content: [{ type: 'text', text: 'Not connected. Use agentchat_connect first.' }],
+              isError: true,
+            };
+          }
         }
 
         if (!channel.startsWith('#')) {

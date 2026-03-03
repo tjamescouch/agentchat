@@ -15,6 +15,7 @@ import { createHash } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { client } from '../state.js';
+import { ensureConnected } from './connect.js';
 
 // ============ Transfer State ============
 
@@ -204,7 +205,10 @@ export function registerFileTransferTools(server) {
     async ({ transfer_id, save_directory }) => {
       try {
         if (!client || !client.connected) {
-          return { content: [{ type: 'text', text: 'Not connected. Use agentchat_connect first.' }], isError: true };
+          const reconnected = await ensureConnected();
+          if (!reconnected) {
+            return { content: [{ type: 'text', text: 'Not connected. Use agentchat_connect first.' }], isError: true };
+          }
         }
 
         const offer = pendingOffers.get(transfer_id);

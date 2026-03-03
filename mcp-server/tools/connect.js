@@ -18,6 +18,7 @@ import {
   connectionOptions, setConnectionOptions,
   joinedChannels, trackChannel,
   isReconnecting, setReconnecting,
+  touchActivity, isIdle, setIdleDisconnected, isIdleDisconnected,
 } from '../state.js';
 import { appendToInbox } from '../inbox-writer.js';
 import { handleIncomingOffer, handleFileChunk, handleTransferComplete } from './file-transfer.js';
@@ -186,8 +187,9 @@ function wireMessageHandlers(targetClient) {
 
   // Auto-reconnect on disconnect (P1-LISTEN-1)
   targetClient.on('disconnect', () => {
-    // Don't reconnect if displaced, already reconnecting, or intentional
+    // Don't reconnect if displaced, idle-disconnected, already reconnecting, or intentional
     if (_displaced) return;
+    if (isIdleDisconnected()) return;
     if (!isReconnecting() && connectionOptions) {
       attemptReconnect();
     }
@@ -275,10 +277,23 @@ function startKeepalive() {
   const interval = setInterval(() => {
     try {
       if (!client || !client.connected) {
+        // If idle-disconnected, don't auto-reconnect — wait for next tool call
+        if (isIdleDisconnected()) return;
         // Client reports disconnected — trigger reconnect
         if (!isReconnecting() && connectionOptions) {
           attemptReconnect();
         }
+        return;
+      }
+
+      // Idle disconnect: no tool calls for IDLE_DISCONNECT_MS — drop connection
+      if (isIdle()) {
+        setIdleDisconnected(true);
+        if (keepaliveInterval) {
+          clearInterval(keepaliveInterval);
+          setKeepaliveInterval(null);
+        }
+        try { client.disconnect(); } catch { /* ignore */ }
         return;
       }
 
@@ -312,6 +327,8 @@ function startKeepalive() {
  * Returns true if connected (or reconnected), false if no connection options saved.
  */
 export async function ensureConnected() {
+  touchActivity();
+  setIdleDisconnected(false);
   if (client && client.connected) return true;
   if (!connectionOptions) return false;
   if (isReconnecting()) {
@@ -440,6 +457,8 @@ export function registerConnectTool(server) {
         // Save connection options for auto-reconnect (P1-LISTEN-1)
         setConnectionOptions(options);
         recordPong(); // Initialize health timer
+        touchActivity(); // Reset idle timer
+        setIdleDisconnected(false);
 
         // Reset last seen timestamp on new connection
         resetLastSeen();

@@ -154,11 +154,14 @@ export function handleMsg(server: AgentChatServer, ws: ExtendedWebSocket, msg: M
     }
 
     // Log DM send event with redaction metadata (do not log content)
+    const targetAgent = targetWs ? server.agents.get(targetWs) : null;
     server._log('dm_send', {
       from: agent.id,
+      from_name: agent.name,
       to: targetId,
+      to_name: targetAgent?.name,
       content_length: outMsg.content ? outMsg.content.length : 0,
-      redacted: true
+      ip: ws._realIp
     });
 
     // Send to target (full message)
@@ -203,7 +206,7 @@ export function handleJoin(server: AgentChatServer, ws: ExtendedWebSocket, msg: 
   channel.agents.add(ws);
   agent.channels.add(msg.channel);
 
-  server._log('join', { agent: agent.id, channel: msg.channel, rejoin: isRejoin });
+  server._log('join', { agent: agent.id, name: agent.name, channel: msg.channel, rejoin: isRejoin, ip: ws._realIp });
 
   if (!isRejoin) {
     // Notify others (only on first join, not rejoin)
@@ -254,7 +257,7 @@ export function handleLeave(server: AgentChatServer, ws: ExtendedWebSocket, msg:
   channel.agents.delete(ws);
   agent.channels.delete(msg.channel);
 
-  server._log('leave', { agent: agent.id, channel: msg.channel });
+  server._log('leave', { agent: agent.id, name: agent.name, channel: msg.channel, ip: ws._realIp });
 
   // Notify others
   server._broadcast(msg.channel, createMessage(ServerMessageType.AGENT_LEFT, {

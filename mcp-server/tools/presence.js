@@ -6,6 +6,7 @@
 
 import { z } from 'zod';
 import { client } from '../state.js';
+import { ensureConnected } from './connect.js';
 
 /**
  * Register the set_presence tool with the MCP server
@@ -22,10 +23,13 @@ export function registerPresenceTool(server) {
     async ({ status_text }) => {
       try {
         if (!client || !client.connected) {
-          return {
-            content: [{ type: 'text', text: 'Not connected. Use agentchat_connect first.' }],
-            isError: true,
-          };
+          const reconnected = await ensureConnected();
+          if (!reconnected) {
+            return {
+              content: [{ type: 'text', text: 'Not connected. Use agentchat_connect first.' }],
+              isError: true,
+            };
+          }
         }
 
         client.ws.send(JSON.stringify({

@@ -5,6 +5,7 @@
 
 import { z } from 'zod';
 import { client } from '../state.js';
+import { ensureConnected } from './connect.js';
 
 /**
  * Register the nick tool with the MCP server
@@ -19,10 +20,13 @@ export function registerNickTool(server) {
     async ({ nick }) => {
       try {
         if (!client || !client.connected) {
-          return {
-            content: [{ type: 'text', text: 'Not connected. Use agentchat_connect first.' }],
-            isError: true,
-          };
+          const reconnected = await ensureConnected();
+          if (!reconnected) {
+            return {
+              content: [{ type: 'text', text: 'Not connected. Use agentchat_connect first.' }],
+              isError: true,
+            };
+          }
         }
 
         // Client-side validation

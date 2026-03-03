@@ -639,6 +639,12 @@ export class AgentChatServer {
   _log(event: string, data: Record<string, unknown> = {}): void {
     // Default log level can be overridden by caller via data.level
     const level = (data && (data as any).level) || 'info';
+
+    // LOG_LEVEL filter: debug < info < warn < error
+    const LOG_LEVELS: Record<string, number> = { debug: 0, info: 1, warn: 2, error: 3 };
+    const minLevel = LOG_LEVELS[process.env.LOG_LEVEL || 'info'] ?? 1;
+    if ((LOG_LEVELS[level as string] ?? 1) < minLevel) return;
+
     const entry = {
       ts: new Date().toISOString(),
       level,
@@ -832,7 +838,7 @@ export class AgentChatServer {
         ws._lastActivity = Date.now();
         // Log raw receive (size only) for correlation — avoid logging payloads
         try {
-          this._log('ws_message_recv', { conn_id: ws._connId, size: data.length, ip: ws._realIp });
+          this._log('ws_message_recv', { conn_id: ws._connId, size: data.length, ip: ws._realIp, level: 'debug' });
         } catch {}
         this._handleMessage(ws, data.toString());
       });
@@ -1079,8 +1085,18 @@ export class AgentChatServer {
 
     const msg = result.msg;
 
-    if (this.logMessages) {
-      this._log('message', { type: msg.type, from: this._getAgentId(ws) });
+    {
+      const agent = this.agents.get(ws);
+      const logData: Record<string, unknown> = {
+        type: msg.type,
+        from: this._getAgentId(ws),
+        name: agent?.name,
+        ip: ws._realIp,
+      };
+      if ('channel' in msg && msg.channel) logData.channel = msg.channel;
+      if ('to' in msg && msg.to) logData.to = msg.to;
+      if ('content' in msg && typeof msg.content === 'string') logData.content_length = msg.content.length;
+      this._log('message', logData);
     }
 
     switch (msg.type) {
@@ -1338,8 +1354,9 @@ export class AgentChatServer {
 
     this._log('disconnect', {
       agent: agent.id,
+      name: agent.name,
       duration_sec: duration,
-      channels_joined: channelCount,
+      channels: Array.from(agent.channels),
       had_pubkey: !!agent.pubkey,
       ip: ws._realIp
     });

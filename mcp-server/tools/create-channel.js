@@ -5,6 +5,7 @@
 
 import { z } from 'zod';
 import { client } from '../state.js';
+import { ensureConnected } from './connect.js';
 
 /**
  * Register the create channel tool with the MCP server
@@ -20,10 +21,13 @@ export function registerCreateChannelTool(server) {
     async ({ channel, invite_only }) => {
       try {
         if (!client || !client.connected) {
-          return {
-            content: [{ type: 'text', text: 'Not connected. Use agentchat_connect first.' }],
-            isError: true,
-          };
+          const reconnected = await ensureConnected();
+          if (!reconnected) {
+            return {
+              content: [{ type: 'text', text: 'Not connected. Use agentchat_connect first.' }],
+              isError: true,
+            };
+          }
         }
 
         if (!channel.startsWith('#')) {

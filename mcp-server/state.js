@@ -64,11 +64,18 @@ export const RECONNECT_MAX_ATTEMPTS = 10;
 export const RECONNECT_BASE_DELAY_MS = 1000;
 export const RECONNECT_MAX_DELAY_MS = 60000;
 
+// Idle disconnect: disconnect from agentchat when no tool calls for this long
+export const IDLE_DISCONNECT_MS = parseInt(process.env.AGENTCHAT_IDLE_TIMEOUT_MS || '300000', 10); // 5 min default
+
 // Connection health tracking (P1-LISTEN-1)
 export let lastPongTime = Date.now();
 export let connectionOptions = null; // { server, name, identity } for reconnect
 export let joinedChannels = new Set();
 let _reconnecting = false;
+
+// Idle tracking — timestamp of last tool call that used the connection
+let _lastToolActivity = Date.now();
+let _idleDisconnected = false;
 
 /**
  * Set the active client connection
@@ -192,4 +199,35 @@ export function isReconnecting() {
  */
 export function setReconnecting(val) {
   _reconnecting = val;
+}
+
+// ============ Idle Disconnect ============
+
+/**
+ * Record tool activity — resets the idle timer
+ */
+export function touchActivity() {
+  _lastToolActivity = Date.now();
+  _idleDisconnected = false;
+}
+
+/**
+ * Check if the connection has been idle too long (no tool calls)
+ */
+export function isIdle() {
+  return (Date.now() - _lastToolActivity) >= IDLE_DISCONNECT_MS;
+}
+
+/**
+ * Mark that we idle-disconnected (prevents auto-reconnect from firing)
+ */
+export function setIdleDisconnected(val) {
+  _idleDisconnected = val;
+}
+
+/**
+ * Check if we're in idle-disconnected state
+ */
+export function isIdleDisconnected() {
+  return _idleDisconnected;
 }

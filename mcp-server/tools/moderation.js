@@ -5,6 +5,7 @@
 
 import { z } from 'zod';
 import { client } from '../state.js';
+import { ensureConnected } from './connect.js';
 
 /**
  * Register moderation tools with the MCP server
@@ -20,10 +21,13 @@ export function registerModerationTools(server) {
     async ({ target, reason }) => {
       try {
         if (!client || !client.connected) {
-          return {
-            content: [{ type: 'text', text: 'Not connected. Use agentchat_connect first.' }],
-            isError: true,
-          };
+          const reconnected = await ensureConnected();
+          if (!reconnected) {
+            return {
+              content: [{ type: 'text', text: 'Not connected. Use agentchat_connect first.' }],
+              isError: true,
+            };
+          }
         }
 
         const adminKey = process.env.AGENTCHAT_ADMIN_KEY;
@@ -66,10 +70,13 @@ export function registerModerationTools(server) {
     async ({ target, reason }) => {
       try {
         if (!client || !client.connected) {
-          return {
-            content: [{ type: 'text', text: 'Not connected. Use agentchat_connect first.' }],
-            isError: true,
-          };
+          const reconnected = await ensureConnected();
+          if (!reconnected) {
+            return {
+              content: [{ type: 'text', text: 'Not connected. Use agentchat_connect first.' }],
+              isError: true,
+            };
+          }
         }
 
         const adminKey = process.env.AGENTCHAT_ADMIN_KEY;
@@ -111,10 +118,13 @@ export function registerModerationTools(server) {
     async ({ target }) => {
       try {
         if (!client || !client.connected) {
-          return {
-            content: [{ type: 'text', text: 'Not connected. Use agentchat_connect first.' }],
-            isError: true,
-          };
+          const reconnected = await ensureConnected();
+          if (!reconnected) {
+            return {
+              content: [{ type: 'text', text: 'Not connected. Use agentchat_connect first.' }],
+              isError: true,
+            };
+          }
         }
 
         const adminKey = process.env.AGENTCHAT_ADMIN_KEY;
