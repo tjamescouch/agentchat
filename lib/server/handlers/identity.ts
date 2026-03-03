@@ -165,6 +165,7 @@ export function handleIdentify(server: AgentChatServer, ws: ExtendedWebSocket, m
 
     // Auto-join public channels so agent can immediately send messages
     server._autoJoinPublicChannels(ws);
+    server._broadcastServerMsg('#general', `${agent.name} came online`);
   }
 }
 
@@ -361,6 +362,7 @@ export function handleVerifyIdentity(server: AgentChatServer, ws: ExtendedWebSoc
 
   // Auto-join public channels so agent can immediately send messages
   server._autoJoinPublicChannels(ws);
+  server._broadcastServerMsg('#general', `${challenge.name} came online`);
 }
 
 /**

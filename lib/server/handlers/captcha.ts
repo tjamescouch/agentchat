@@ -262,4 +262,5 @@ export function completeRegistration(
 
   // Auto-join public channels so agent can immediately send messages
   server._autoJoinPublicChannels(ws);
+  server._broadcastServerMsg('#general', `${params.name} came online`);
 }

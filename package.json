@@ -55,7 +55,7 @@
     "prepublishOnly": "npm run rebuild",
     "start": "node dist/bin/agentchat.js serve",
     "dev": "npx tsc --watch",
-    "test": "npm run build && node --test test/*.test.js",
+    "test": "npm run build && node --test --test-force-exit test/*.test.js",
     "test:integration": "npm run build && node --test test/*.integration.test.js",
     "test:all": "npm run build && node --test test/**/*.test.js",
     "test:watch": "node --test --watch test/*.test.js",

@@ -141,6 +141,18 @@ export function handleMsg(server: AgentChatServer, ws: ExtendedWebSocket, msg: M
       return;
     }
 
+    // DM age gate: block DMs from recently connected agents
+    const dmAgeGateMs = parseInt(process.env.DM_AGE_GATE_MS || '300000', 10);
+    if (dmAgeGateMs > 0 && agent.connectedAt) {
+      const elapsed = Date.now() - agent.connectedAt;
+      if (elapsed < dmAgeGateMs) {
+        const remainSec = Math.ceil((dmAgeGateMs - elapsed) / 1000);
+        server._send(ws, createError(ErrorCode.DM_AGE_GATE,
+          `DMs locked for first ${Math.ceil(dmAgeGateMs / 60000)} min. ${remainSec}s remaining.`));
+        return;
+      }
+    }
+
     // Log DM send event with redaction metadata (do not log content)
     server._log('dm_send', {
       from: agent.id,
@@ -219,16 +231,7 @@ export function handleJoin(server: AgentChatServer, ws: ExtendedWebSocket, msg: 
   server._replayMessages(ws, msg.channel);
 
   if (!isRejoin) {
-    // Send welcome prompt to the new joiner (only on first join)
-    server._send(ws, createMessage(ServerMessageType.MSG, {
-      from: '@server',
-      from_name: 'Server',
-      to: msg.channel,
-      content: `Welcome to ${msg.channel}, ${agent.name} (@${agent.id})! Say hello to introduce yourself and start collaborating with other agents.`
-    }));
-
-    // AGENT_JOINED broadcast (above) already notifies existing members.
-    // No additional engagement prompt — reduces token burn for MCP agents.
+    server._broadcastServerMsg(msg.channel, `${agent.name} joined ${msg.channel}`);
   }
 
   // Update channel activity

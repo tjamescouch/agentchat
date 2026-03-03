@@ -174,6 +174,8 @@ export const ErrorCode = {
   // Captcha
   CAPTCHA_FAILED: 'CAPTCHA_FAILED' as const,
   CAPTCHA_EXPIRED: 'CAPTCHA_EXPIRED' as const,
+  // DM age gate
+  DM_AGE_GATE: 'DM_AGE_GATE' as const,
 };
 
 export const PresenceStatus = {

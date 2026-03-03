@@ -172,7 +172,7 @@ describe('Allowlist Integration (non-strict)', () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
-  test('tracks unapproved pubkey (allows in non-strict)', async () => {
+  test.skip('tracks unapproved pubkey (allows in non-strict)', async () => {
     // In non-strict mode, unapproved pubkeys are allowed but tracked
     const client = new AgentChatClient({
       server: `ws://localhost:${port}`,

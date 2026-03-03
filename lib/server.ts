@@ -672,6 +672,16 @@ export class AgentChatServer {
     }
   }
 
+  _broadcastServerMsg(channel: string, content: string): void {
+    const ch = this.channels.get(channel);
+    if (!ch) return;
+    const msg = createMessage(ServerMessageType.MSG, {
+      from: '@server', from_name: 'Server', to: channel, content,
+    });
+    this._broadcast(channel, msg);
+    this._bufferMessage(channel, msg);
+  }
+
   _getAgentId(ws: ExtendedWebSocket): string | null {
     const agent = this.agents.get(ws);
     return agent ? `@${agent.id}` : null;
@@ -1327,6 +1337,8 @@ export class AgentChatServer {
       had_pubkey: !!agent.pubkey,
       ip: ws._realIp
     });
+
+    this._broadcastServerMsg('#general', `${agent.name || agent.id} went offline`);
 
     // Remove from state
     this.agentById.delete(agent.id);
