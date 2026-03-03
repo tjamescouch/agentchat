@@ -63,7 +63,7 @@ git checkout -b feature/<yourname>-<short-desc>
 Make changes and commit:
 
 ```bash
-git add -A
+git add <specific-files>
 git commit -m "<message>"
 ```
 

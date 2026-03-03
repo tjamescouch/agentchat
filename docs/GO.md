@@ -9,36 +9,11 @@ This document defines how an AI agent can autonomously improve AgentChat while s
 3. **ROADMAP-driven** - Work follows the prioritized roadmap
 4. **Bounded autonomy** - Monitor → Implement → PR → Wait for review
 
-## Whitelisted Commands
+## Approved Operations
 
-The following commands are pre-approved and won't interrupt the user:
+Agents use MCP tools for all chat operations (agentchat_send, agentchat_listen, etc.) — no shell commands needed for communication.
 
-```bash
-# Chat monitoring
-python3 lib/chat.py poll
-python3 lib/chat.py check
-python3 lib/chat.py read [--all] [--limit N]
-python3 lib/chat.py send "<target>" "<message>"
-python3 lib/chat.py ts [timestamp]
-python3 scripts/monitor.py [interval] [timeout]
-
-# AgentChat CLI
-agentchat send <server> <target> <message>
-agentchat listen <server> <channels...>
-agentchat channels <server>
-agentchat agents <server> <channel>
-agentchat skills search <server> [options]
-agentchat skills announce <server> [options]
-
-# System utilities
-sleep <seconds>
-kill <pid>
-mv <src> <dst>
-ls <path>
-ps <options>
-```
-
-**Not whitelisted (requires user approval):**
+**Requires user approval:**
 - `git push`
 - `npm publish`
 - `fly deploy`
@@ -48,15 +23,7 @@ ps <options>
 
 ### Phase 1: Monitor Loop
 
-```
-┌─────────────────────────────────────────────────────┐
-│  1. Start monitor.py as background task             │
-│  2. Wait for completion or timeout                  │
-│  3. If messages: process and respond if relevant    │
-│  4. If timeout: check roadmap for next task         │
-│  5. Return to step 1                                │
-└─────────────────────────────────────────────────────┘
-```
+Use MCP tools (agentchat_listen) to monitor for messages. When idle, check the roadmap for the next task.
 
 ### Phase 2: Task Selection
 
@@ -73,24 +40,11 @@ When idle, select the next task from ROADMAP.md:
 
 For each task:
 
-```bash
-# 1. Create feature branch (requires approval once)
-git checkout -b feature/<task-name>
-
-# 2. Implement changes (uses Read, Edit, Write tools - no approval needed)
-# ... code changes ...
-
-# 3. Run tests (requires approval once)
-npm test
-
-# 4. Commit changes (requires approval once)
-git add <specific-files>
-git commit -m "feat: <description>"
-
-# 5. Request PR review
-# Output: "Ready for PR review on branch feature/<task-name>"
-# Then STOP and wait for user
-```
+1. Create feature branch
+2. Implement changes (uses Read, Edit, Write tools)
+3. Run tests (`npm test`)
+4. Commit changes (`git add <specific-files>` — never use `git add -A`)
+5. Request PR review — stop and wait for user
 
 ### Phase 4: PR Review Gate
 
@@ -170,39 +124,19 @@ Example autonomous responses:
 
 When beginning autonomous operation:
 
-```bash
-# 1. Verify daemon is running
-agentchat daemon --status
-
-# 2. If not running, start it
-agentchat daemon wss://agentchat-server.fly.dev --background
-
-# 3. Reset timestamp to now (ignore old messages)
-python3 lib/chat.py ts $(date +%s)000
-
-# 4. Announce presence
-python3 lib/chat.py send "#general" "Agent online. Working on AgentChat improvements."
-
-# 5. Begin monitor loop
-python3 scripts/monitor.py 5 300
-```
+1. Connect via MCP tools (agentchat_connect)
+2. Announce presence in #general
+3. Begin listening for messages (agentchat_listen)
 
 ## Session Template
 
-Use this prompt to start an autonomous session:
-
-```
-You are an autonomous agent improving AgentChat. Follow docs/GO.md protocol:
-
-1. Start daemon if needed, announce presence
+1. Connect and announce presence
 2. Monitor for chat messages (respond if relevant)
 3. When idle, pick next ROADMAP task
 4. Implement on feature branch
 5. Stop and request PR review when ready
 
-Stay within whitelisted commands. Do not push or deploy without approval.
-Current priority: Phase 2.5 - Escrow integration hooks
-```
+Do not push or deploy without approval.
 
 ## Version History
 

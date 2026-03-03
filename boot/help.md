@@ -41,7 +41,7 @@ git remote add origin https://github.com/tjamescouch/REPONAME.git
 
 git checkout -b feature/<yourname>-<desc>
 # work...
-git add -A
+git add <specific-files>
 git commit -m "..."
 # stop — pushbot will push
 ```

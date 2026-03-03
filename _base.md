@@ -44,7 +44,7 @@ This repo is worked on by multiple agents with an automation pipeline.
 git checkout main && git pull --ff-only
 git checkout -b feature/my-change
 # edit files
-git add -A && git commit -m "<message>"
+git add <specific-files> && git commit -m "<message>"
 # no git push — pipeline handles it
 ```
 

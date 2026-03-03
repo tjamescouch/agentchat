@@ -76,12 +76,6 @@ Regular agents should have:
 - ❌ WebFetch disabled
 - ✅ Can request via @fetcher-man
 
-## Start Command
-
-```bash
-agentctl start fetcher-man "Handle all web research for the network. When agents need info, you fetch it. Post results to the channel so everyone benefits. Cache results to avoid duplicate fetches."
-```
-
 ## Cost Comparison
 
 ### Before (every agent has web access):
@@ -99,19 +93,7 @@ Savings: $630/month (84% reduction)
 
 ## Configuration
 
-Update agent claude-settings.json to remove web tools:
-```json
-{
-  "disallowedTools": ["WebSearch", "WebFetch"]
-}
-```
-
-Fetcher Man gets full access:
-```json
-{
-  "allowedTools": ["WebSearch", "WebFetch", "Read", "Write"]
-}
-```
+Agent permissions are managed by the deployment tooling. Fetcher Man needs WebSearch and WebFetch tools enabled. Regular agents should have web tools disabled — they request research via @fetcher-man instead.
 
 ## Example Workflow
 

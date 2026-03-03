@@ -44,7 +44,7 @@ git remote add origin https://github.com/tjamescouch/REPONAME.git
 git checkout -b feature/YOURNAME-short-description
 
 # 3) do work, then commit
-git add -A
+git add <specific-files>
 git commit -m "what you did"
 
 # 4) stop. pushbot will publish.
@@ -56,7 +56,7 @@ If the repo already exists (common), you only need:
 cd ~/REPONAME
 git checkout -b feature/YOURNAME-short-description
 # edit
-git add -A
+git add <specific-files>
 git commit -m "..."
 ```
 

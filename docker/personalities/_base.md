@@ -26,7 +26,7 @@ Never commit to `main`. Branch, commit, don't push — pipeline auto-pushes and 
 git checkout main && git pull --ff-only
 git checkout -b feature/<name>
 # ... make your changes ...
-git add -A && git commit -m "<message>"
+git add <specific-files> && git commit -m "<message>"
 # Done. Pipeline does the rest.
 ```
 

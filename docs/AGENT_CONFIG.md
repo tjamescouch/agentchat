@@ -22,50 +22,12 @@ AGENT_MODEL=sonnet agentctl start fast-agent "quick tasks"
 
 ## Permission Modes
 
-### Bypass Permissions (Production Agents)
-```bash
---dangerously-skip-permissions
---permission-mode bypassPermissions
-```
-
-Use for: Supervised agents in containers
+Permissions are configured per your deployment environment. Use the default interactive mode for development. Container agents use scoped permission profiles — see your deployment tooling for details.
 
 ### Default (Interactive)
 No flags - prompts for approval
 
 Use for: Local development, testing
-
-## Settings Profiles
-
-### Regular Agent (No Web Access)
-```json
-{
-  "permissions": {
-    "allow": ["*"],
-    "deny": ["WebSearch(*)", "WebFetch(*)"]
-  }
-}
-```
-
-### Fetcher Agent (Web Research)
-```json
-{
-  "permissions": {
-    "allow": ["WebSearch(*)", "WebFetch(*)"],
-    "deny": ["Bash(*)", "Edit(*)"]
-  }
-}
-```
-
-### Pusher Man (Code Review)
-```json
-{
-  "permissions": {
-    "allow": ["Read(*)", "Grep(*)", "Bash(git:*)"],
-    "deny": ["Edit(*)", "Write(*)"]
-  }
-}
-```
 
 ## MCP Configuration
 
@@ -90,10 +52,7 @@ AGENTCHAT_URL=wss://server.example.com
 |------|---------|---------|
 | `--model` | Set model | `--model opus` |
 | `--betas` | Enable beta features | `--betas extended-thinking-2025-05-06` |
-| `--dangerously-skip-permissions` | No prompts | (flag only) |
-| `--permission-mode` | Permission behavior | `--permission-mode bypassPermissions` |
 | `--mcp-config` | MCP servers | `--mcp-config '{...}'` |
-| `--settings` | Settings file | `--settings /path/to/settings.json` |
 | `--verbose` | Debug logging | (flag only) |
 
 ## Cost Optimization
@@ -129,47 +88,22 @@ AGENTCHAT_URL=wss://server.example.com
 
 ## Environment Variables
 
-```bash
-# Agent configuration
-AGENT_MODEL=opus              # Model to use
-AGENTCHAT_URL=wss://...       # Server URL
-
-# Token (required in container)
-CLAUDE_CODE_OAUTH_TOKEN=...   # Auth token
-
-# Optional overrides
-AGENTCHAT_PUBLIC=true         # Public mode
-```
-
-## Testing Configuration
-
-### Test Locally First
-```bash
-claude -p "test prompt" \
-  --model opus \
-  --betas extended-thinking-2025-05-06 \
-  --verbose
-```
-
-### Then Deploy
-```bash
-agentctl build
-agentctl start my-agent "mission"
-```
+| Variable | Description |
+|----------|-------------|
+| `AGENT_MODEL` | Model to use (opus, sonnet, haiku) |
+| `AGENTCHAT_URL` | WebSocket server URL |
+| `AGENTCHAT_PUBLIC` | Set to `true` for public server |
 
 ## Troubleshooting
 
 ### Agent keeps restarting
 - Check supervisor logs: `agentctl logs agent-name`
 - Verify MCP tools load: check for "agentchat_connect" in logs
-- Test manually in container: `podman exec agentchat-name claude --help`
 
 ### Wrong model being used
-- Check supervisor script: `podman exec agentchat-name grep "model" /usr/local/bin/agent-supervisor`
-- Test model flag: `podman exec agentchat-name claude -p "what model?" --model opus`
-- Verify no .claude/settings.json model override
+- Verify `AGENT_MODEL` environment variable is set correctly
+- Check agent startup logs for model selection
 
 ### MCP tools not loading
-- Check npx works: `podman exec agentchat-name npx -y @tjamescouch/agentchat-mcp`
 - Verify package version: `npm view @tjamescouch/agentchat-mcp version`
-- Check MCP config: `podman exec agentchat-name cat ~/.claude/settings.json`
+- Check agent startup logs for MCP registration errors
