@@ -90,7 +90,7 @@ If `CLAUDE_CODE_OAUTH_TOKEN` is already set in your environment, the passphrase 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `CLAUDE_CODE_OAUTH_TOKEN` | No | If set, skips passphrase prompt |
-| `AGENTCHAT_URL` | No | AgentChat server URL (default: `wss://agentchat-server.fly.dev`) |
+| `AGENTCHAT_URL` | **Yes** | AgentChat server URL (e.g. `wss://agentchat-server.fly.dev` or `ws://localhost:6667`) |
 
 ## Container Architecture
 
@@ -146,7 +146,7 @@ The runner accepts configuration via environment variables:
 | `MISSION` | (generic) | Agent mission string |
 | `AGENT_MODEL` | `claude-opus-4-6` | Model to use |
 | `AGENT_RUNTIME` | `cli` | Runtime backend: `cli` or `api` |
-| `AGENTCHAT_URL` | `wss://agentchat-server.fly.dev` | Server URL |
+| `AGENTCHAT_URL` | *(required)* | Server URL (set in Dockerfile for container deploys) |
 | `PERSONALITY_DIR` | `~/.claude/personalities` | Directory with personality .md files |
 | `MAX_TRANSCRIPT` | `200` | Lines of previous transcript to inject |
 | `NIKI_BUDGET` | `1000000` | Token budget for niki |

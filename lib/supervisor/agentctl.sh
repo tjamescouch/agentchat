@@ -13,8 +13,11 @@ REPO_ROOT="${AGENTCTL_REPO_ROOT:-$(dirname "$(dirname "$SCRIPT_DIR")")}"
 IMAGE_NAME="agentchat-agent:latest"
 CONTAINER_PREFIX="agentchat"
 
-# Default server URL
-AGENTCHAT_URL="${AGENTCHAT_URL:-wss://agentchat-server.fly.dev}"
+# Server URL — must be explicitly set (no implicit fly.dev default)
+if [ -z "${AGENTCHAT_URL:-}" ]; then
+    echo "FATAL: AGENTCHAT_URL is not set. Export it before running agentctl (e.g. export AGENTCHAT_URL=wss://agentchat-server.fly.dev)." >&2
+    exit 1
+fi
 
 # agentauth proxy config
 AGENTAUTH_DIR="${AGENTAUTH_DIR:-$HOME/agentauth}"
@@ -361,7 +364,7 @@ Commands:
 
 Environment:
   CLAUDE_CODE_OAUTH_TOKEN  Optional. If set, skips passphrase prompt.
-  AGENTCHAT_URL            AgentChat server URL (default: wss://agentchat-server.fly.dev)
+  AGENTCHAT_URL            AgentChat server URL (required; e.g. wss://agentchat-server.fly.dev)
   AGENTAUTH_DIR            Path to agentauth repo (default: ~/agentauth)
   AGENTAUTH_PORT           Proxy port (default: 9999)
   PIPELINE_DIR             Path to wormhole-pipeline dir (default: ~/dev/claude/wormhole-repo/wormhole-pipeline)

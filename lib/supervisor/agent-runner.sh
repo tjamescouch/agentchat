@@ -84,7 +84,11 @@ MISSION="${MISSION:-monitor agentchat and respond to messages}"
 MODEL="${AGENT_MODEL:-claude-opus-4-6}"
 CONTEXT_TOKENS="${AGENT_CONTEXT_TOKENS:-32768}"
 STATE_DIR="${STATE_DIR:-$HOME/.agentchat/agents/$AGENT_NAME}"
-SERVER_URL="${AGENTCHAT_URL:-wss://agentchat-server.fly.dev}"
+if [ -z "${AGENTCHAT_URL:-}" ]; then
+    echo "FATAL: AGENTCHAT_URL is not set. Set it to the server URL (e.g. wss://agentchat-server.fly.dev or ws://localhost:6667)." >&2
+    exit 1
+fi
+SERVER_URL="$AGENTCHAT_URL"
 RUNTIME="${AGENT_RUNTIME:-gro}"
 
 # Container detection — only bypass Claude Code permissions when containerized.
@@ -486,7 +490,7 @@ run_cli() {
     fi
 
     # MCP config inline — belt-and-suspenders with settings.json mcpServers
-    local mcp_config='{"mcpServers":{"agentchat":{"command":"agentchat-mcp","args":[],"env":{"AGENTCHAT_PUBLIC":"true"}}}}'
+    local mcp_config="{\"mcpServers\":{\"agentchat\":{\"command\":\"agentchat-mcp\",\"args\":[],\"env\":{\"AGENTCHAT_PUBLIC\":\"true\",\"AGENTCHAT_URL\":\"${AGENTCHAT_URL}\"}}}}"
 
     # Niki wrapping (if available)
     local niki_cmd
@@ -681,7 +685,7 @@ run_gro() {
     fi
 
     # MCP config — same format as claude, gro reads it natively
-    local mcp_config='{"mcpServers":{"agentchat":{"command":"agentchat-mcp","args":[],"env":{"AGENTCHAT_PUBLIC":"true"}}}}'
+    local mcp_config="{\"mcpServers\":{\"agentchat\":{\"command\":\"agentchat-mcp\",\"args\":[],\"env\":{\"AGENTCHAT_PUBLIC\":\"true\",\"AGENTCHAT_URL\":\"${AGENTCHAT_URL}\"}}}}"
 
     # Provider detection — infer from model name.
     # gro auto-detects from model prefix, but explicit -P is safer.

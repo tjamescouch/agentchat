@@ -9,7 +9,10 @@ ENCRYPTED_TOKEN_FILE="$SECRETS_DIR/oauth-token.enc"
 WATCHDOG_PID="$GOD_DIR/watchdog.pid"
 CONTAINER_NAME="agentchat-God"
 IMAGE_NAME="agentchat-agent:latest"
-AGENTCHAT_URL="${AGENTCHAT_URL:-wss://agentchat-server.fly.dev}"
+if [ -z "${AGENTCHAT_URL:-}" ]; then
+    echo "FATAL: AGENTCHAT_URL is not set. Export it before running god-watchdog." >&2
+    exit 1
+fi
 
 # agentauth proxy config
 AGENTAUTH_DIR="${AGENTAUTH_DIR:-$HOME/agentauth}"

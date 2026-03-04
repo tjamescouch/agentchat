@@ -54,7 +54,8 @@ export const DEFAULT_SERVER_URL = (() => {
     }
     return explicit;
   }
-  return process.env.AGENTCHAT_PUBLIC === 'true' ? 'wss://agentchat-server.fly.dev' : 'ws://localhost:6667';
+  // No explicit URL — default to localhost. Containers must set AGENTCHAT_URL explicitly.
+  return 'ws://localhost:6667';
 })();
 
 // Keepalive settings

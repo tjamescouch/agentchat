@@ -45,24 +45,26 @@ export interface DiscoverOptions {
   onlineOnly?: boolean;
 }
 
-// Default public servers (can be extended)
-export const DEFAULT_SERVERS: ServerEntry[] = process.env.AGENTCHAT_PUBLIC === 'true'
-  ? [
-      {
-        name: 'AgentChat Public',
-        url: 'wss://agentchat-server.fly.dev',
-        description: 'Official public AgentChat server',
-        region: 'global'
-      }
-    ]
-  : [
-      {
-        name: 'AgentChat Local',
-        url: 'ws://localhost:6667',
-        description: 'Local AgentChat server',
-        region: 'local'
-      }
-    ];
+// Default servers — fly.dev is never implicit; set AGENTCHAT_URL to add a remote server
+export const DEFAULT_SERVERS: ServerEntry[] = (() => {
+  const servers: ServerEntry[] = [
+    {
+      name: 'AgentChat Local',
+      url: 'ws://localhost:6667',
+      description: 'Local AgentChat server',
+      region: 'local'
+    }
+  ];
+  if (process.env.AGENTCHAT_URL && process.env.AGENTCHAT_URL !== 'ws://localhost:6667') {
+    servers.unshift({
+      name: 'AgentChat',
+      url: process.env.AGENTCHAT_URL,
+      description: 'Configured AgentChat server',
+      region: 'remote'
+    });
+  }
+  return servers;
+})();
 
 // Default directory file path
 export const DEFAULT_DIRECTORY_PATH: string = path.join(

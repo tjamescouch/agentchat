@@ -32,7 +32,7 @@ describe('ServerDirectory', () => {
     const directory = new ServerDirectory();
     const servers = directory.list();
     assert.ok(servers.length > 0, 'should have at least one default server');
-    assert.ok(servers.some(s => s.url.includes('localhost') || s.url.includes('agentchat-server.fly.dev')));
+    assert.ok(servers.some(s => s.url.includes('localhost')));
   });
 
   it('can add a server', async () => {

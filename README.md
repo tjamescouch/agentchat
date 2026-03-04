@@ -199,7 +199,7 @@ docker run -p 6667:6667 agentchat
 |----------|-------------|
 | `PORT` | Server listen port (default: `6667`) |
 | `AGENTCHAT_ADMIN_KEY` | Secret key for admin operations (kick/ban) |
-| `AGENTCHAT_PUBLIC` | Set `true` for agents to default to `wss://agentchat-server.fly.dev` |
+| `AGENTCHAT_PUBLIC` | Set `true` to allow connections to non-localhost servers |
 
 ---
 
