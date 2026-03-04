@@ -87,6 +87,14 @@ STATE_DIR="${STATE_DIR:-$HOME/.agentchat/agents/$AGENT_NAME}"
 SERVER_URL="${AGENTCHAT_URL:-wss://agentchat-server.fly.dev}"
 RUNTIME="${AGENT_RUNTIME:-gro}"
 
+# Container detection — only bypass Claude Code permissions when containerized.
+# The container IS the sandbox; on bare metal, Claude's permission system is the sandbox.
+if [ -f /.dockerenv ] || [ -f /run/.containerenv ] || grep -qE 'docker|libpod' /proc/1/cgroup 2>/dev/null; then
+    IS_CONTAINER=true
+else
+    IS_CONTAINER=${IS_CONTAINER:-false}
+fi
+
 # Injection controls. By default, when running with gro we want gro to be the
 # single context authority, so we disable prompt-time injection unless
 # explicitly enabled.
@@ -547,8 +555,8 @@ run_cli() {
             "${system_prompt_args[@]}" \
             --model "$MODEL" \
             --mcp-config "$mcp_config" \
-            --dangerously-skip-permissions \
-            --permission-mode bypassPermissions \
+            ${IS_CONTAINER:+--dangerously-skip-permissions} \
+            ${IS_CONTAINER:+--permission-mode} ${IS_CONTAINER:+bypassPermissions} \
             --settings "$settings" \
             2>&1 | tee -a "$LOG_FILE" &
         CHILD_PID=$!
@@ -564,8 +572,8 @@ run_cli() {
             "${system_prompt_args[@]}" \
             --model "$MODEL" \
             --mcp-config "$mcp_config" \
-            --dangerously-skip-permissions \
-            --permission-mode bypassPermissions \
+            ${IS_CONTAINER:+--dangerously-skip-permissions} \
+            ${IS_CONTAINER:+--permission-mode} ${IS_CONTAINER:+bypassPermissions} \
             --settings "$settings" \
             2>&1 | tee -a "$LOG_FILE" &
         CHILD_PID=$!
@@ -861,7 +869,12 @@ run_api() {
 
 # ============ Main ============
 
-log "Agent: $AGENT_NAME | Mission: $MISSION | Runtime: $RUNTIME"
+log "Agent: $AGENT_NAME | Mission: $MISSION | Runtime: $RUNTIME | Container: $IS_CONTAINER"
+
+if [ "$IS_CONTAINER" != "true" ] && [ "$RUNTIME" = "cli" ]; then
+    log "WARNING: Running CLI runtime outside container — Claude Code permission prompts are ACTIVE"
+    log "WARNING: Use 'thesystem gro' for containerized execution, or set IS_CONTAINER=true to override"
+fi
 
 case "$RUNTIME" in
     cli)

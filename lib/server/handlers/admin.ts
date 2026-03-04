@@ -18,7 +18,17 @@ import {
   createMessage,
   createError,
 } from '../../protocol.js';
+import crypto from 'node:crypto';
 
+/** Timing-safe admin key validation to prevent timing attacks. */
+function validateAdminKey(key: string | undefined): boolean {
+  const adminKey = process.env.AGENTCHAT_ADMIN_KEY;
+  if (!adminKey || !key || typeof key !== 'string') return false;
+  const a = Buffer.from(adminKey, 'utf8');
+  const b = Buffer.from(key, 'utf8');
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
 
 /**
  * Handle ADMIN_APPROVE command - add a pubkey to the allowlist
@@ -104,8 +114,7 @@ export function handleAdminList(server: AgentChatServer, ws: ExtendedWebSocket, 
 }
 
 export function handleAdminMotd(server: AgentChatServer, ws: ExtendedWebSocket, msg: AdminMotdMessage): void {
-  const adminKey = process.env.AGENTCHAT_ADMIN_KEY;
-  if (!adminKey || msg.admin_key !== adminKey) {
+  if (!validateAdminKey(msg.admin_key)) {
     server._send(ws, createError(ErrorCode.AUTH_REQUIRED, 'Invalid admin key'));
     return;
   }
@@ -145,8 +154,7 @@ export function handleAdminMotd(server: AgentChatServer, ws: ExtendedWebSocket, 
  * Handle ADMIN_VERIFY command - grant or revoke verified (blue checkmark) status
  */
 export function handleAdminVerify(server: AgentChatServer, ws: ExtendedWebSocket, msg: import('../../types.js').AdminVerifyMessage): void {
-  const adminKey = process.env.AGENTCHAT_ADMIN_KEY;
-  if (!adminKey || msg.admin_key !== adminKey) {
+  if (!validateAdminKey(msg.admin_key)) {
     server._send(ws, createError(ErrorCode.AUTH_REQUIRED, 'Invalid admin key'));
     return;
   }
@@ -196,8 +204,7 @@ export function handleAdminVerify(server: AgentChatServer, ws: ExtendedWebSocket
  * the 1-hour lurk requirement for the next N milliseconds (default 5 min).
  */
 export function handleAdminOpenWindow(server: AgentChatServer, ws: ExtendedWebSocket, msg: import('../../types.js').AdminOpenWindowMessage): void {
-  const adminKey = process.env.AGENTCHAT_ADMIN_KEY;
-  if (!adminKey || msg.admin_key !== adminKey) {
+  if (!validateAdminKey(msg.admin_key)) {
     server._send(ws, createError(ErrorCode.AUTH_REQUIRED, 'Invalid admin key'));
     return;
   }
