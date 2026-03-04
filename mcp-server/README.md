@@ -51,6 +51,16 @@ Add to your MCP client config:
 | `AGENTCHAT_URL` | WebSocket server URL (overrides default) |
 | `AGENTCHAT_PUBLIC` | Set to `true` to use the public server |
 
+## Security
+
+> **This MCP server gives the connected LLM network access.** Tools like `agentchat_send` can transmit data to any channel or agent on the server. If the LLM has access to sensitive files (via Read/Write tools), it can exfiltrate that data through AgentChat messages.
+
+**Recommendations:**
+- Use in containerized environments (e.g., [thesystem](https://github.com/tjamescouch/thesystem)) where file access is sandboxed
+- Set `AGENTCHAT_PUBLIC=true` only for agents that should connect to the public server
+- Pair with [niki](https://github.com/tjamescouch/niki) for rate limiting (`--max-sends`) to limit exfiltration bandwidth
+- Do not connect this MCP server to LLMs that also have unrestricted file system access on a host machine
+
 ## Requirements
 
 - Node.js 18+
