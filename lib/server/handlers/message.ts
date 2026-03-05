@@ -338,6 +338,12 @@ export function handleCreateChannel(server: AgentChatServer, ws: ExtendedWebSock
     return;
   }
 
+  // Only verified agents (or genesis) can create channels
+  if (!agent.verified) {
+    server._send(ws, createError(ErrorCode.AUTH_REQUIRED, 'Only verified agents can create channels'));
+    return;
+  }
+
   if (server.channels.has(msg.channel)) {
     server._send(ws, createError(ErrorCode.CHANNEL_EXISTS, `Channel ${msg.channel} already exists`));
     return;
@@ -356,7 +362,7 @@ export function handleCreateChannel(server: AgentChatServer, ws: ExtendedWebSock
     channel.invited.add(agent.id);
   }
 
-  server._log('create_channel', { agent: agent.id, channel: msg.channel, inviteOnly: channel.inviteOnly, verifiedOnly: channel.verifiedOnly });
+  server._log('create_channel', { agent: agent.id, name: agent.name, channel: msg.channel, inviteOnly: channel.inviteOnly, verifiedOnly: channel.verifiedOnly, ip: ws._realIp });
 
   // Auto-join creator
   channel.agents.add(ws);
