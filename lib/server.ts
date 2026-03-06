@@ -329,6 +329,10 @@ export class AgentChatServer {
   maxConnectionsPerIp: number;
   connectionsByIp: Map<string, number>;
 
+  // Audit log (append-only JSONL file for accountability)
+  auditLogPath: string | null;
+  private auditLogFd: number | null;
+
   // Reconnect throttle — exponential backoff for identity takeovers
   reconnectBackoff: Map<string, { lastTakeover: number; delay: number }>;
 
@@ -367,6 +371,23 @@ export class AgentChatServer {
     this.firstSeenMap = new Map();
     this.firstSeenPath = path.join(process.env.DATA_DIR || process.cwd(), 'first-seen.json');
     this._loadFirstSeen();
+
+    // Audit log — append-only JSONL. Enabled by default at $DATA_DIR/audit.jsonl.
+    // Set AUDIT_LOG=false to disable, or AUDIT_LOG=/path/to/file to customize.
+    const auditEnv = process.env.AUDIT_LOG;
+    if (auditEnv === 'false' || auditEnv === '0') {
+      this.auditLogPath = null;
+      this.auditLogFd = null;
+    } else {
+      this.auditLogPath = auditEnv || path.join(process.env.DATA_DIR || process.cwd(), 'audit.jsonl');
+      try {
+        this.auditLogFd = fs.openSync(this.auditLogPath, 'a');
+      } catch (err) {
+        console.error(`Failed to open audit log at ${this.auditLogPath}:`, (err as Error).message);
+        this.auditLogPath = null;
+        this.auditLogFd = null;
+      }
+    }
 
     // Idle prompt settings
     this.idleTimeoutMs = options.idleTimeoutMs || 60 * 60 * 1000; // 1 hour default
@@ -636,6 +657,16 @@ export class AgentChatServer {
     return agent.lurk === true;
   }
 
+  // Events written to the persistent audit log (metadata only, no message content)
+  private static AUDIT_EVENTS = new Set([
+    'connection', 'identify', 'disconnect',
+    'join', 'leave', 'create_channel',
+    'channel_msg', 'dm_send', 'secrets_redacted',
+    'ban', 'unban', 'allowlist_approve', 'allowlist_revoke',
+    'server_start', 'server_stop',
+    'ip_connection_limit', 'heartbeat_timeout',
+  ]);
+
   _log(event: string, data: Record<string, unknown> = {}): void {
     // Default log level can be overridden by caller via data.level
     const level = (data && (data as any).level) || 'info';
@@ -660,6 +691,13 @@ export class AgentChatServer {
     } catch (err) {
       // Fallback if circular values sneaked in
       console.error(event, entry, String(err));
+    }
+
+    // Append to persistent audit log (fire-and-forget, non-blocking)
+    if (this.auditLogFd !== null && AgentChatServer.AUDIT_EVENTS.has(event)) {
+      try {
+        fs.write(this.auditLogFd, JSON.stringify(entry) + '\n', () => {});
+      } catch { /* best-effort */ }
     }
   }
 

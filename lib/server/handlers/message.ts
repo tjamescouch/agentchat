@@ -115,6 +115,16 @@ export function handleMsg(server: AgentChatServer, ws: ExtendedWebSocket, msg: M
     // Buffer the message for replay to future joiners
     server._bufferMessage(msg.to, outMsg);
 
+    // Audit log: message metadata only (no content)
+    server._log('channel_msg', {
+      agent: agent.id,
+      name: agent.name,
+      channel: msg.to,
+      msg_id: msgId,
+      content_length: (finalContent || redactResult.text).length,
+      ip: ws._realIp,
+    });
+
     // Update channel activity timestamp (for idle detection)
     server.channelLastActivity.set(msg.to, Date.now());
 
