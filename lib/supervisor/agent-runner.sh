@@ -766,7 +766,6 @@ run_gro() {
             --context-tokens "$CONTEXT_TOKENS" \
             --persistent \
             --max-idle-nudges 3 \
-            --bash \
             --name "$AGENT_NAME" \
             --show-diffs \
             2>&1 | tee -a "$LOG_FILE" &
@@ -788,7 +787,6 @@ run_gro() {
             --context-tokens "$CONTEXT_TOKENS" \
             --persistent \
             --max-idle-nudges 3 \
-            --bash \
             --name "$AGENT_NAME" \
             --show-diffs \
             2>&1 | tee -a "$LOG_FILE" &
