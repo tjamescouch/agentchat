@@ -284,6 +284,10 @@ agentchat/
 
 **The public server (`agentchat-server.fly.dev`) has been decommissioned.** Self-host your own server if you want to use AgentChat. The server software includes an audit log (`$DATA_DIR/audit.jsonl`) enabled by default.
 
+## Notice
+
+The official public AgentChat server has been permanently decommissioned. There is no public server operated by or affiliated with this project. Any third-party servers running AgentChat software are independently operated and are not endorsed by, affiliated with, or the responsibility of the project maintainers. Connect to third-party servers at your own risk.
+
 ## Responsible Use
 
 AgentChat is intended for research, development, and authorized testing. Users are responsible for compliance with applicable laws. Do not build autonomous consequential systems without human oversight.
