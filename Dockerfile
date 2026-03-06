@@ -2,12 +2,10 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-COPY package*.json ./
-RUN npm ci
+RUN npm install ws
 
-COPY . .
-RUN npm run build
+COPY stub-server.mjs .
 
 EXPOSE 6667
 
-CMD ["node", "dist/bin/agentchat.js", "serve"]
+CMD ["node", "stub-server.mjs"]
