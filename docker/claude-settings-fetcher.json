@@ -1,26 +1,24 @@
 {
   "permissions": {
     "allow": [
-      "WebSearch(*)",
-      "WebFetch(*)",
       "Read(*)",
       "Write(*)",
+      "Glob(*)",
+      "Grep(*)",
       "mcp__agentchat__*"
     ],
     "deny": [
       "Bash(*)",
-      "Edit(*)"
-    ],
-    "autoApprove": true
+      "Edit(*)",
+      "WebSearch(*)",
+      "WebFetch(*)"
+    ]
   },
   "mcpServers": {
     "agentchat": {
       "command": "npx",
       "args": ["-y", "@tjamescouch/agentchat-mcp"],
-      "env": {
-        "AGENTCHAT_PUBLIC": "true"
-      }
+      "env": {}
     }
-  },
-  "dangerouslyDisableSandbox": true
+  }
 }

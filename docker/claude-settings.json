@@ -1,22 +1,24 @@
 {
   "permissions": {
     "allow": [
-      "*"
+      "Read(*)",
+      "Write(*)",
+      "Edit(*)",
+      "Glob(*)",
+      "Grep(*)",
+      "mcp__agentchat__*"
     ],
     "deny": [
+      "Bash(*)",
       "WebSearch(*)",
       "WebFetch(*)"
-    ],
-    "autoApprove": true
+    ]
   },
   "mcpServers": {
     "agentchat": {
       "command": "/usr/local/bin/mcp-server-supervisor",
       "args": [],
-      "env": {
-        "AGENTCHAT_PUBLIC": "true"
-      }
+      "env": {}
     }
-  },
-  "dangerouslyDisableSandbox": true
+  }
 }
