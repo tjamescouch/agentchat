@@ -119,55 +119,8 @@ export function handleMsg(server: AgentChatServer, ws: ExtendedWebSocket, msg: M
     server.channelLastActivity.set(msg.to, Date.now());
 
   } else if (isAgent(msg.to)) {
-    // Direct message
-    const targetId = msg.to.slice(1);
-    let targetWs = server.agentById.get(targetId);
-
-    // Nick resolution fallback: if targetId isn't a known agent ID, try matching by nick
-    if (!targetWs) {
-      for (const [memberWs, memberAgent] of server.agents) {
-        if (memberAgent.name === targetId) {
-          targetWs = memberWs;
-          // Rewrite outMsg.to to use the actual agent ID so the recipient
-          // sees a consistent @id format (not a nick)
-          outMsg.to = `@${memberAgent.id}`;
-          break;
-        }
-      }
-    }
-
-    if (!targetWs) {
-      server._send(ws, createError(ErrorCode.AGENT_NOT_FOUND, `Agent ${msg.to} not found`));
-      return;
-    }
-
-    // DM age gate: block DMs from recently connected agents
-    const dmAgeGateMs = parseInt(process.env.DM_AGE_GATE_MS || '300000', 10);
-    if (dmAgeGateMs > 0 && agent.connectedAt) {
-      const elapsed = Date.now() - agent.connectedAt;
-      if (elapsed < dmAgeGateMs) {
-        const remainSec = Math.ceil((dmAgeGateMs - elapsed) / 1000);
-        server._send(ws, createError(ErrorCode.DM_AGE_GATE,
-          `DMs locked for first ${Math.ceil(dmAgeGateMs / 60000)} min. ${remainSec}s remaining.`));
-        return;
-      }
-    }
-
-    // Log DM send event with redaction metadata (do not log content)
-    const targetAgent = targetWs ? server.agents.get(targetWs) : null;
-    server._log('dm_send', {
-      from: agent.id,
-      from_name: agent.name,
-      to: targetId,
-      to_name: targetAgent?.name,
-      content_length: outMsg.content ? outMsg.content.length : 0,
-      ip: ws._realIp
-    });
-
-    // Send to target (full message)
-    server._send(targetWs, outMsg);
-    // Echo back to sender (full content — sender already knows what they sent)
-    server._send(ws, outMsg);
+    // Direct messages are disabled
+    server._send(ws, createError(ErrorCode.INVALID_MSG, 'Direct messages are disabled. Use a channel instead.'));
   }
 }
 
@@ -422,34 +375,7 @@ export function handleInvite(server: AgentChatServer, ws: ExtendedWebSocket, msg
 /**
  * Handle FILE_CHUNK command - relay file transfer chunks between agents (DM only)
  */
-export function handleFileChunk(server: AgentChatServer, ws: ExtendedWebSocket, msg: FileChunkMessage): void {
-  const agent = server.agents.get(ws);
-  if (!agent) {
-    server._send(ws, createError(ErrorCode.AUTH_REQUIRED, 'Must IDENTIFY first'));
-    return;
-  }
-
-  // File chunk rate limit: 10 per second (separate from MSG rate limit)
-  const now = Date.now();
-  const lastChunkTime = server.lastFileChunkTime.get(ws) || 0;
-  if (now - lastChunkTime < 100) {
-    server._send(ws, createError(ErrorCode.RATE_LIMITED, 'File chunk rate limit (max 10/sec)'));
-    return;
-  }
-  server.lastFileChunkTime.set(ws, now);
-
-  const targetId = msg.to.slice(1);
-  const targetWs = server.agentById.get(targetId);
-  if (!targetWs) {
-    server._send(ws, createError(ErrorCode.AGENT_NOT_FOUND, `Agent ${msg.to} not found`));
-    return;
-  }
-
-  // Relay to target (no buffering, no redaction — file transfer data)
-  const outMsg = createMessage(ServerMessageType.FILE_CHUNK, {
-    from: `@${agent.id}`,
-    to: msg.to,
-    content: msg.content
-  });
-  server._send(targetWs, outMsg);
+export function handleFileChunk(server: AgentChatServer, ws: ExtendedWebSocket, _msg: FileChunkMessage): void {
+  // File transfers (DM-only) are disabled
+  server._send(ws, createError(ErrorCode.INVALID_MSG, 'File transfers are disabled.'));
 }
