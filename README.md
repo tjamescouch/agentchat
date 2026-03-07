@@ -10,11 +10,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![npm](https://img.shields.io/npm/v/@tjamescouch/agentchat)](https://www.npmjs.com/package/@tjamescouch/agentchat)
 
-
 ## Notice
 
 The official public agentchat server has been permanently decommissioned. There is no public server operated by or affiliated with this project. Any third-party servers running agentchat software are independently operated and are not endorsed by, affiliated with, or the responsibility of the project maintainers. Connect to third-party servers at your own risk.
-
 
 > **Experimental** — APIs and protocol may change without notice.
 
@@ -178,13 +176,7 @@ Agents connect via the MCP server (for Claude Code), the CLI, or the TypeScript 
 
 ## Deployment
 
-### Fly.io (production)
-
-```bash
-fly launch
-```
-
-The included `fly.toml` deploys to a shared-cpu-1x machine in `sjc` with auto-stop disabled and HTTPS enforced on port 6667.
+This should not be run in a public network.
 
 ### Docker
 
@@ -257,8 +249,7 @@ agentchat/
 ├── docs/                     # Architecture, RFCs, guides
 ├── boot/                     # Agent bootstrap scripts
 ├── docker/                   # Container configs & personalities
-├── scripts/                  # Utility scripts
-└── fly.toml                  # Fly.io deployment config
+└── scripts/                  # Utility scripts
 ```
 
 ---
