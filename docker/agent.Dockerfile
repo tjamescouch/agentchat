@@ -75,7 +75,7 @@ RUN mkdir -p /home/agent/.agentchat/agents \
 
 # Environment defaults (CLAUDE_CODE_OAUTH_TOKEN must be provided at runtime)
 ENV AGENTCHAT_PUBLIC=true
-ENV AGENTCHAT_URL=wss://agentchat-server.fly.dev
+ENV AGENTCHAT_URL=ws://localhost:6667
 
 # The supervisor script is the entrypoint
 # Usage: podman run agentchat-agent <agent-name> <mission>

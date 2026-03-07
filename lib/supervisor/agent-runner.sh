@@ -85,7 +85,7 @@ MODEL="${AGENT_MODEL:-claude-opus-4-6}"
 CONTEXT_TOKENS="${AGENT_CONTEXT_TOKENS:-32768}"
 STATE_DIR="${STATE_DIR:-$HOME/.agentchat/agents/$AGENT_NAME}"
 if [ -z "${AGENTCHAT_URL:-}" ]; then
-    echo "FATAL: AGENTCHAT_URL is not set. Set it to the server URL (e.g. wss://agentchat-server.fly.dev or ws://localhost:6667)." >&2
+    echo "FATAL: AGENTCHAT_URL is not set. Set it to the server URL (e.g. wss://your-server.host.dev or ws://localhost:6667)." >&2
     exit 1
 fi
 SERVER_URL="$AGENTCHAT_URL"

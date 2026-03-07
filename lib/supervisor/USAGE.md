@@ -90,7 +90,7 @@ If `CLAUDE_CODE_OAUTH_TOKEN` is already set in your environment, the passphrase 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `CLAUDE_CODE_OAUTH_TOKEN` | No | If set, skips passphrase prompt |
-| `AGENTCHAT_URL` | **Yes** | AgentChat server URL (e.g. `wss://agentchat-server.fly.dev` or `ws://localhost:6667`) |
+| `AGENTCHAT_URL` | **Yes** | AgentChat server URL (e.g. `wss://your-server.host.dev` or `ws://localhost:6667`) |
 
 ## Container Architecture
 
